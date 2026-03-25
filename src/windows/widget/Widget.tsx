@@ -1,9 +1,10 @@
 import type { ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { AlertCircle, Bell } from "lucide-react";
 
 import { Waveform } from "../../components/Waveform";
 import { useWidgetController } from "./hooks/useWidgetController";
-import { IDLE_WIDGET_HEIGHT, IDLE_WIDGET_WIDTH, WidgetNoticeState } from "./widgetConstants";
+import { IDLE_WIDGET_HEIGHT, IDLE_WIDGET_WIDTH, NOTICE_WIDGET_GAP, WidgetNoticeState } from "./widgetConstants";
 
 export function Widget() {
   const { state, stream, notice, lockedRecording } = useWidgetController();
@@ -16,43 +17,66 @@ export function Widget() {
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        justifyContent: "center",
+        justifyContent: "flex-end",
         background: "transparent",
         overflow: "visible",
         pointerEvents: "none",
         position: "relative",
+        paddingBottom: 2,
       }}
     >
+      {notice && <WidgetNotice message={notice.message} tone={notice.tone} />}
       {state === "idle" && <IdlePill />}
       {state === "recording" && <RecordingPill stream={stream} locked={lockedRecording} />}
       {state === "processing" && <ProcessingPill />}
-      {notice && <WidgetNotice message={notice.message} tone={notice.tone} />}
     </div>
   );
 }
 
 function WidgetNotice({ message, tone }: WidgetNoticeState) {
+  const Icon = tone === "error" ? AlertCircle : Bell;
+
   return (
     <div
       style={{
         position: "absolute",
-        bottom: 10,
+        bottom: `calc(100% - ${NOTICE_WIDGET_GAP + 2}px)`,
         left: "50%",
         transform: "translateX(-50%)",
-        width: 220,
-        padding: "8px 10px",
-        borderRadius: 12,
+        width: 212,
+        minHeight: 52,
+        padding: "10px 34px 10px 14px",
+        borderRadius: 16,
         fontSize: 11,
-        lineHeight: 1.35,
-        textAlign: "center",
-        color: tone === "error" ? "#8f2d20" : "#243b53",
-        background: tone === "error" ? "rgba(143,45,32,0.12)" : "rgba(36,59,83,0.12)",
-        border: tone === "error" ? "1px solid rgba(143,45,32,0.22)" : "1px solid rgba(36,59,83,0.2)",
-        backdropFilter: "blur(12px)",
-        WebkitBackdropFilter: "blur(12px)",
+        lineHeight: 1.4,
+        letterSpacing: "0.01em",
+        color: "rgba(0,0,0,0.82)",
+        background: "linear-gradient(180deg, rgba(252,251,248,0.98) 0%, rgba(244,239,231,0.96) 100%)",
+        border: "1px solid rgba(0,0,0,0.08)",
+        boxShadow: "0 14px 28px rgba(0,0,0,0.12)",
+        backdropFilter: "blur(18px)",
+        WebkitBackdropFilter: "blur(18px)",
         pointerEvents: "none",
+        animation: "widget-notice-in 0.22s cubic-bezier(0.22, 1, 0.36, 1)",
       }}
     >
+      <div
+        style={{
+          position: "absolute",
+          top: 8,
+          right: 8,
+          width: 18,
+          height: 18,
+          borderRadius: 999,
+          background: tone === "error" ? "rgba(0,0,0,0.88)" : "rgba(0,0,0,0.72)",
+          color: "#fff",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <Icon size={11} strokeWidth={2.2} />
+      </div>
       {message}
     </div>
   );

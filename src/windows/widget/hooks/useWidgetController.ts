@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 import { AppSettings, DEFAULT_HOTKEY, getSettings } from "../../../lib/store";
 import { logError, logInfo } from "../../../lib/logger";
-import { IDLE_WIDGET_HEIGHT, IDLE_WIDGET_WIDTH, WidgetNoticeState, WidgetState } from "../widgetConstants";
+import { WidgetNoticeState, WidgetState } from "../widgetConstants";
 import { useWidgetHotkey } from "./useWidgetHotkey";
 import { useWidgetNotice } from "./useWidgetNotice";
 import { useWidgetRecording } from "./useWidgetRecording";
@@ -110,7 +110,6 @@ export function useWidgetController(): WidgetControllerState {
       setLockedRecordingMode(false);
       setState("idle");
       setStream(null);
-      void resizeWidget(IDLE_WIDGET_WIDTH, IDLE_WIDGET_HEIGHT);
       showNotice(message, "error");
     },
     [clearReleaseStopTimer, resizeWidget, setLockedRecordingMode, showNotice],
