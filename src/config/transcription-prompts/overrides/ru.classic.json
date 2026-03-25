@@ -1,0 +1,12 @@
+{
+  "rules": [
+    "In Russian classic mode, preserve expressive leading stutter or hesitation forms such as 'П-практичность' when they look intentional or characteristic of the speaker's delivery.",
+    "Do not smooth hyphenated leading-sound repetitions in Russian unless they are clearly accidental recognition noise."
+  ],
+  "examples": [
+    {
+      "raw": "П-практичность",
+      "cleaned": "П-практичность"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "rules": [
+    "In Russian business mode, smooth obvious leading hesitation artifacts when they reduce readability in a professional message.",
+    "If a form such as 'П-практичность' is clearly just a speech hesitation and not meaningful emphasis, normalize it to 'Практичность'.",
+    "Keep the word itself and its meaning; only smooth the hesitation artifact."
+  ],
+  "examples": [
+    {
+      "raw": "П-практичность очень важна",
+      "cleaned": "Практичность очень важна"
+    }
+  ]
+}

@@ -1,0 +1,209 @@
+import { useState, useEffect, useMemo } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { getHistory, deleteHistoryEntry, clearHistory, HistoryEntry, DEFAULT_HOTKEY, formatHotkeyLabel } from "../../../lib/store";
+import { Copy, Trash2, Check } from "lucide-react";
+import { HISTORY_UPDATED_EVENT } from "../../../lib/hotkeyEvents";
+
+interface MainTabProps {
+  initialHistory?: HistoryEntry[];
+}
+
+interface HistoryGroup {
+  id: string;
+  label: string;
+  items: HistoryEntry[];
+}
+
+function formatDayLabel(timestamp: string): string {
+  const entryDate = new Date(timestamp);
+  const today = new Date();
+  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const startOfEntryDay = new Date(entryDate.getFullYear(), entryDate.getMonth(), entryDate.getDate());
+  const diffDays = Math.round((startOfToday.getTime() - startOfEntryDay.getTime()) / 86400000);
+
+  if (diffDays === 0) return "Сегодня";
+  if (diffDays === 1) return "Вчера";
+
+  return entryDate.toLocaleDateString("ru-RU", {
+    day: "numeric",
+    month: "long",
+    weekday: "long",
+  });
+}
+
+const HOTKEY_LABEL = formatHotkeyLabel(DEFAULT_HOTKEY);
+
+export function MainTab({ initialHistory = [] }: MainTabProps) {
+  const [history, setHistory] = useState<HistoryEntry[]>(initialHistory);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  useEffect(() => {
+    getHistory().then(setHistory);
+
+    const unlistenHistory = listen<HistoryEntry>(HISTORY_UPDATED_EVENT, (event) => {
+      setHistory((current) => {
+        const next = [event.payload, ...current.filter((item) => item.id !== event.payload.id)];
+        return next.slice(0, 500);
+      });
+    });
+
+    return () => {
+      unlistenHistory.then((unlisten) => unlisten());
+    };
+  }, []);
+
+  const deleteEntry = async (id: string) => {
+    await deleteHistoryEntry(id);
+    setHistory((h) => h.filter((x) => x.id !== id));
+  };
+
+  const copyText = async (id: string, text: string) => {
+    await navigator.clipboard.writeText(text);
+    setCopied(id);
+    setTimeout(() => setCopied((current) => (current === id ? null : current)), 1500);
+  };
+
+  const groupedHistory = useMemo<HistoryGroup[]>(() => {
+    const groups: HistoryGroup[] = [];
+
+    for (const item of history) {
+      const label = formatDayLabel(item.timestamp);
+      const existing = groups[groups.length - 1];
+
+      if (!existing || existing.label !== label) {
+        groups.push({
+          id: `${new Date(item.timestamp).toISOString().slice(0, 10)}-${groups.length}`,
+          label,
+          items: [item],
+        });
+        continue;
+      }
+
+      existing.items.push(item);
+    }
+
+    return groups;
+  }, [history]);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <section
+        className="card"
+        style={{
+          display: "grid",
+          gap: 12,
+          padding: 18,
+          background: "rgba(255,255,255,0.72)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+          <div style={{ display: "grid", gap: 6, maxWidth: 560 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-hi)" }}>
+              Как начать запись
+            </div>
+            <div style={{ fontSize: 14, color: "var(--text-mid)", lineHeight: 1.7 }}>
+              Удерживайте горячую клавишу, говорите и отпустите ее, когда закончите. После обработки текст вставится автоматически.
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              color: "var(--text-hi)",
+              fontSize: 12,
+              fontWeight: 700,
+              letterSpacing: "0.02em",
+              whiteSpace: "nowrap",
+            }}
+          >
+            <span style={{ color: "var(--text-low)", letterSpacing: "0.08em" }}>Комбинация</span>
+            <span>{HOTKEY_LABEL}</span>
+          </div>
+        </div>
+      </section>
+
+      <section style={{ display: "grid", gap: 14 }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
+          <div>
+            <h2 style={{ fontSize: 18, fontWeight: 700, color: "var(--text-hi)", margin: "0 0 4px", letterSpacing: "-0.03em" }}>
+              История записей
+            </h2>
+            <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>
+              {history.length > 0
+                ? `Последние записи доступны для копирования и удаления.`
+                : `Записей пока нет. Удерживайте ${HOTKEY_LABEL} для записи.`}
+            </div>
+          </div>
+
+          {history.length > 0 && (
+            <button
+              onClick={async () => {
+                if (confirm("Очистить историю?")) {
+                  await clearHistory();
+                  setHistory([]);
+                }
+              }}
+              className="btn btn-danger"
+              style={{ minHeight: 34, padding: "0 12px" }}
+            >
+              <Trash2 size={12} strokeWidth={2} /> Очистить
+            </button>
+          )}
+        </div>
+
+        {history.length === 0 ? (
+          <div style={{ padding: "32px 20px", borderRadius: 12, border: "1px dashed rgba(0,0,0,0.12)", textAlign: "center" }}>
+            <div style={{ width: 56, height: 56, borderRadius: 999, background: "#000", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+              <span className="headline-accent" style={{ fontSize: 24, fontStyle: "italic" }}>◎</span>
+            </div>
+            <div className="label" style={{ marginBottom: 10 }}>История пуста</div>
+            <p style={{ margin: 0, fontSize: 14, color: "var(--text-mid)", lineHeight: 1.7 }}>
+              Записей пока нет. Удерживайте <b>{HOTKEY_LABEL}</b> для записи.
+            </p>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            {groupedHistory.map((group) => (
+              <div key={group.id} style={{ display: "grid", gap: 8 }}>
+                <div className="label" style={{ paddingLeft: 4 }}>{group.label}</div>
+                <table className="b-table" style={{ background: "transparent" }}>
+                    <thead>
+                      <tr>
+                        <th style={{ width: 110 }}>Время</th>
+                        <th>Текст</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {group.items.map((item, index) => (
+                        <tr key={item.id} onDoubleClick={() => navigator.clipboard.writeText(item.cleaned)} style={{ borderBottom: index < group.items.length - 1 ? "1px solid rgba(0,0,0,0.04)" : "none", cursor: "default" }}>
+                          <td style={{ whiteSpace: "nowrap", verticalAlign: "top", color: "var(--text-low)" }}>
+                            {new Date(item.timestamp).toLocaleTimeString("ru-RU", {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </td>
+                          <td style={{ verticalAlign: "top" }}>
+                            <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                              <span style={{ flex: 1, color: "var(--text-mid)", lineHeight: 1.7 }}>{item.cleaned}</span>
+                              <button onClick={() => copyText(item.id, item.cleaned)} className="btn" style={{ width: 32, minWidth: 32, height: 32, minHeight: 32, padding: 0, flexShrink: 0, borderRadius: 8 }} title="Скопировать">
+                                {copied === item.id ? <Check size={12} strokeWidth={2.5} /> : <Copy size={12} strokeWidth={2} />}
+                              </button>
+                              <button onClick={() => deleteEntry(item.id)} className="btn btn-danger" style={{ width: 32, minWidth: 32, height: 32, minHeight: 32, padding: 0, flexShrink: 0, borderRadius: 8 }} title="Удалить">
+                                <Trash2 size={12} strokeWidth={2} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}

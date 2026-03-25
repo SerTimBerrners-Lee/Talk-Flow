@@ -1,0 +1,34 @@
+{
+  "version": 2,
+  "defaultLanguage": "default",
+  "defaultStyle": "classic",
+  "baseFile": "base/common.json",
+  "styleOrder": ["classic", "business", "tech"],
+  "languages": {
+    "default": { "file": "languages/default.json" },
+    "ru": { "file": "languages/ru.json" },
+    "en": { "file": "languages/en.json" }
+  },
+  "styles": {
+    "classic": {
+      "file": "styles/classic.json",
+      "uiTitle": "Классический",
+      "uiDescription": "Исправляются ошибки, расставляются знаки пунктуации, удаляется словесный мусор. Текст остается максимально близким к оригиналу."
+    },
+    "business": {
+      "file": "styles/business.json",
+      "uiTitle": "Деловой",
+      "uiDescription": "Речь становится чище и формальнее, а явные речевые запинки сглаживаются. Подходит для писем, задач и рабочих переписок."
+    },
+    "tech": {
+      "file": "styles/tech.json",
+      "uiTitle": "Разработка",
+      "uiDescription": "Особый упор на терминологию, code-aware обработку и IT-контекст. Пути, команды и имена файлов сохраняются в техническом виде."
+    }
+  },
+  "overrides": {
+    "ru:classic": "overrides/ru.classic.json",
+    "ru:business": "overrides/ru.business.json",
+    "ru:tech": "overrides/ru.tech.json"
+  }
+}

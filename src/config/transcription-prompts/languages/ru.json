@@ -1,0 +1,24 @@
+{
+  "displayName": "Russian",
+  "fillerExamples": ["um", "uh", "like", "ну", "э", "короче", "вот", "типа"],
+  "rules": [
+    "Preserve meaningful Russian particles, discourse markers, and short service words unless they are unmistakably filler.",
+    "Treat spoken rhythm, colloquial phrasing, and mild slang as part of the user's voice, not as something to automatically normalize away.",
+    "When a word begins with a repeated leading sound plus a hyphen, such as 'П-практичность', treat it as a possible expressive hesitation or speech feature, not automatically as an error. Defer to the active style before smoothing it.",
+    "Fix obvious recognition slips in common Russian words when the intended word is clear from context, for example 'севодня' -> 'сегодня'."
+  ],
+  "examples": [
+    {
+      "raw": "На странице настроек также",
+      "cleaned": "На странице настроек также"
+    },
+    {
+      "raw": "Севодня открой настройки",
+      "cleaned": "Сегодня открой настройки"
+    },
+    {
+      "raw": "П-практичность",
+      "cleaned": "П-практичность"
+    }
+  ]
+}

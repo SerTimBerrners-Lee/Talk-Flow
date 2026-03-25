@@ -1,0 +1,269 @@
+use crate::logger;
+use crate::prompt_config;
+use base64::Engine;
+use reqwest::multipart;
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct TranscribeRequest {
+    pub audio_base64: String,
+    pub language: String,
+    pub api_key: String,
+    pub style: String,
+    pub whisper_endpoint: Option<String>,
+    pub llm_endpoint: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct TranscribeResponse {
+    pub raw: String,
+    pub cleaned: String,
+}
+
+fn build_whisper_prompt(language: &str) -> Option<&'static str> {
+    match language {
+        "ru" => Some(
+            "Это обычная русская речь. Корректно распознавай общеупотребительные слова: сегодня, сейчас, сегодняшний, также, тоже, ещё. Не дроби и не искажай слово 'сегодня'.",
+        ),
+        "en" => Some(
+            "This is natural spoken English. Preserve common everyday words accurately and avoid splitting or distorting short common words.",
+        ),
+        _ => None,
+    }
+}
+
+fn is_known_whisper_hallucination(text: &str) -> bool {
+    let normalized = text.trim().to_lowercase();
+    if normalized.is_empty() {
+        return true;
+    }
+
+    let has_subtitle_credit_pattern = normalized.contains("редактор субтитров")
+        || normalized.contains("editor subs")
+        || normalized.contains("subtitles by");
+    let has_proofreader_pattern = normalized.contains("корректор")
+        || normalized.contains("proofread")
+        || normalized.contains("correction by");
+    let has_known_name = normalized.contains("синецк") || normalized.contains("егоров");
+
+    (has_subtitle_credit_pattern && has_proofreader_pattern)
+        || (has_subtitle_credit_pattern && has_known_name)
+}
+
+#[tauri::command]
+pub async fn transcribe_and_clean(req: TranscribeRequest) -> Result<TranscribeResponse, String> {
+    logger::log_info("API", "Starting transcription...");
+
+    let client = reqwest::Client::new();
+    let audio_bytes = base64::engine::general_purpose::STANDARD
+        .decode(&req.audio_base64)
+        .map_err(|e| {
+            let err = format!("Base64 decode error: {}", e);
+            logger::log_error("API", &err);
+            err
+        })?;
+
+    // ── Step 1: Whisper Speech-to-Text ──────────────────────────────────
+    let whisper_url = req
+        .whisper_endpoint
+        .as_ref()
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            let base = s.trim_end_matches('/');
+            if base.ends_with("/transcriptions") {
+                base.to_string()
+            } else if base.ends_with("/audio") {
+                format!("{}/transcriptions", base)
+            } else {
+                format!("{}/v1/audio/transcriptions", base)
+            }
+        })
+        .unwrap_or_else(|| "https://api.openai.com/v1/audio/transcriptions".to_string());
+
+    logger::log_info(
+        "WHISPER",
+        &format!(
+            "Sending request to {}, audio_size: {} bytes",
+            whisper_url,
+            audio_bytes.len()
+        ),
+    );
+
+    let file_part = multipart::Part::bytes(audio_bytes)
+        .file_name("audio.webm")
+        .mime_str("audio/webm")
+        .map_err(|e| format!("MIME error: {}", e))?;
+
+    let lang_param = if req.language == "auto" {
+        String::new()
+    } else {
+        req.language.clone()
+    };
+
+    let mut form = multipart::Form::new()
+        .part("file", file_part)
+        .text("model", "whisper-1");
+
+    if let Some(prompt) = build_whisper_prompt(&req.language) {
+        form = form.text("prompt", prompt.to_string());
+    }
+
+    if !lang_param.is_empty() {
+        form = form.text("language", lang_param);
+    }
+
+    let whisper_res = client
+        .post(&whisper_url)
+        .bearer_auth(&req.api_key)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| {
+            let err = format!("Whisper request failed: {}", e);
+            logger::log_error("WHISPER", &err);
+            err
+        })?;
+
+    let status = whisper_res.status();
+    logger::log_info("WHISPER", &format!("Response status: {}", status));
+
+    if !status.is_success() {
+        let body = whisper_res.text().await.unwrap_or_default();
+        let err = format!("Whisper API error ({}): {}", status, body);
+        logger::log_error("WHISPER", &err);
+        return Err(err);
+    }
+
+    #[derive(Deserialize)]
+    struct WhisperResp {
+        text: String,
+    }
+    let whisper_body: WhisperResp = whisper_res.json().await.map_err(|e| {
+        let err = format!("Whisper response parse error: {}", e);
+        logger::log_error("WHISPER", &err);
+        err
+    })?;
+    let raw = whisper_body.text.trim().to_string();
+    logger::log_info("WHISPER", &format!("Transcribed: \"{}\"", raw));
+
+    if raw.is_empty() {
+        logger::log_info("WHISPER", "Empty transcription, returning empty response");
+        return Ok(TranscribeResponse {
+            raw: String::new(),
+            cleaned: String::new(),
+        });
+    }
+
+    if is_known_whisper_hallucination(&raw) {
+        logger::log_info(
+            "WHISPER",
+            &format!("Detected likely silence hallucination, dropping transcription: \"{}\"", raw),
+        );
+        return Ok(TranscribeResponse {
+            raw: String::new(),
+            cleaned: String::new(),
+        });
+    }
+
+    // ── Step 2: LLM Text Cleanup ────────────────────────────────────────
+    let prompt_preview = prompt_config::build_cleanup_prompt_preview(&req.language, &req.style)
+        .map_err(|err| {
+            logger::log_error("PROMPT", &err);
+            err
+        })?;
+    logger::log_info(
+        "PROMPT",
+        &format!(
+            "Using profile={} version={} layers={}",
+            prompt_preview.profile_key,
+            prompt_preview.version,
+            prompt_preview.layers.join(", ")
+        ),
+    );
+    let system_prompt = prompt_preview.prompt;
+
+    // Always use gpt-4o-mini — fast, cheap, excellent for cleanup tasks
+    let llm_model = "gpt-4o-mini";
+    let llm_url = req
+        .llm_endpoint
+        .as_ref()
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            let base = s.trim_end_matches('/');
+            if base.ends_with("/chat/completions") {
+                base.to_string()
+            } else if base.ends_with("/v1") {
+                format!("{}/chat/completions", base)
+            } else {
+                format!("{}/v1/chat/completions", base)
+            }
+        })
+        .unwrap_or_else(|| "https://api.openai.com/v1/chat/completions".to_string());
+
+    let gpt_body = serde_json::json!({
+        "model": llm_model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": raw}
+        ],
+        "temperature": 0.15,
+        "max_tokens": 4096
+    });
+
+    logger::log_info(
+        "LLM",
+        &format!("Sending to {}, model: {}", llm_url, llm_model),
+    );
+
+    let gpt_res = client
+        .post(&llm_url)
+        .bearer_auth(&req.api_key)
+        .header("Content-Type", "application/json")
+        .json(&gpt_body)
+        .send()
+        .await
+        .map_err(|e| {
+            let err = format!("LLM request failed: {}", e);
+            logger::log_error("LLM", &err);
+            err
+        })?;
+
+    let gpt_status = gpt_res.status();
+    logger::log_info("LLM", &format!("Response status: {}", gpt_status));
+
+    if !gpt_status.is_success() {
+        let body = gpt_res.text().await.unwrap_or_default();
+        let err = format!("LLM API error ({}): {}", gpt_status, body);
+        logger::log_error("LLM", &err);
+        return Err(err);
+    }
+
+    #[derive(Deserialize)]
+    struct Choice {
+        message: ChatMsg,
+    }
+    #[derive(Deserialize)]
+    struct ChatMsg {
+        content: String,
+    }
+    #[derive(Deserialize)]
+    struct GPTResp {
+        choices: Vec<Choice>,
+    }
+
+    let gpt_parsed: GPTResp = gpt_res.json().await.map_err(|e| {
+        let err = format!("LLM response parse error: {}", e);
+        logger::log_error("LLM", &err);
+        err
+    })?;
+    let cleaned = gpt_parsed
+        .choices
+        .first()
+        .map(|c| c.message.content.trim().to_string())
+        .unwrap_or_else(|| raw.clone());
+
+    logger::log_info("LLM", &format!("Cleaned: \"{}\"", cleaned));
+    logger::log_info("API", "Transcription complete");
+
+    Ok(TranscribeResponse { raw, cleaned })
+}

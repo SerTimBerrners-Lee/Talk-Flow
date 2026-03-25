@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TalkFlow — Pure Thought</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Унифицированные шрифты (как в приложении) -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Manrope:wght@600;700;800&family=Playfair+Display:ital,wght@0,700;1,700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --font-main: 'Inter', sans-serif;
+            --font-accent: 'Playfair Display', serif;
+            --font-brand: 'Manrope', 'Inter', sans-serif;
+            --bg-cappuccino: #FAF9F6; 
+        }
+
+        body { 
+            font-family: var(--font-main);
+            background-color: var(--bg-cappuccino);
+            color: #000000;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        h1, h2, .font-serif, .font-accent { font-family: var(--font-accent); }
+
+        .brand-wordmark {
+            font-family: var(--font-brand);
+            letter-spacing: -0.06em;
+            font-weight: 800;
+        }
+        
+        /* Фиксированная навигация с адаптивным фоном */
+        .sticky-nav {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background-color: rgba(250, 249, 246, 0.8);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid rgba(0, 0, 0, 0.03);
+        }
+
+        .btn-black {
+            background-color: #000000;
+            color: #ffffff;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            font-size: 0.75rem;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .btn-black:hover {
+            background-color: #222;
+            transform: translateY(-1px);
+        }
+
+        /* Анимированный логотип */
+        .voice-logo {
+            display: flex;
+            align-items: center;
+            gap: 3px;
+            height: 24px;
+        }
+        .voice-logo-bar {
+            width: 3px;
+            background-color: #000000;
+            border-radius: 10px;
+            animation: voicePulse 1.2s ease-in-out infinite;
+        }
+        .voice-logo-bar:nth-child(1) { height: 8px; animation-delay: 0.1s; }
+        .voice-logo-bar:nth-child(2) { height: 16px; animation-delay: 0.3s; }
+        .voice-logo-bar:nth-child(3) { height: 12px; animation-delay: 0.2s; }
+        .voice-logo-bar:nth-child(4) { height: 20px; animation-delay: 0.4s; }
+        .voice-logo-bar:nth-child(5) { height: 10px; animation-delay: 0.5s; }
+
+        @keyframes voicePulse {
+            0%, 100% { transform: scaleY(1); }
+            50% { transform: scaleY(0.6); }
+        }
+
+        /* Magic Cleanup: Strikethrough Concept */
+        .word-span {
+            display: inline-block;
+            margin-right: 8px;
+            transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            color: #b5b0a8;
+        }
+        .word-trash { opacity: 0.25; }
+        .word-trash::after {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 55%;
+            width: 100%;
+            height: 1px;
+            background: #000;
+            transform: scaleX(0);
+            transform-origin: left;
+            transition: transform 0.1s ease-out;
+        }
+        .word-trash.crossed::after { transform: scaleX(1); }
+        .word-keep { color: #000; font-weight: 500; }
+
+        .flow-arrow {
+            width: 1px; height: 40px;
+            background-color: #000;
+            position: relative;
+            margin: 20px 0;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        .flow-arrow::after {
+            content: ''; position: absolute; bottom: 0; left: 50%;
+            width: 6px; height: 6px;
+            border-right: 1px solid #000; border-bottom: 1px solid #000;
+            transform: translateX(-50%) rotate(45deg);
+        }
+        .flow-active .flow-arrow { opacity: 0.15; }
+
+        .message-bubble {
+            background: #000;
+            color: #fff;
+            padding: 22px 30px;
+            border-radius: 22px 22px 0 22px;
+            display: inline-block;
+            max-width: 95%;
+            position: relative;
+            text-align: left;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            opacity: 0;
+            transform: translateY(10px);
+            transition: opacity 0.8s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.8s cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+        .message-bubble.visible { opacity: 1; transform: translateY(0); }
+        .message-bubble::after {
+            content: ''; position: absolute; bottom: 0; right: -8px;
+            width: 0; height: 0; border-left: 10px solid #000; border-top: 10px solid transparent;
+        }
+        .status-checks { display: flex; justify-content: flex-end; margin-top: 8px; opacity: 0.4; }
+
+        /* Audio Waves */
+        .wave-bar {
+            width: 3px;
+            background-color: #ffffff;
+            margin: 0 2px;
+            border-radius: 10px;
+            transition: height 0.1s ease;
+            height: 4px;
+        }
+
+        .reveal-node {
+            opacity: 0;
+            transform: translateY(20px);
+            transition: opacity 1s cubic-bezier(0.2, 0.8, 0.2, 1), transform 1s cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+        .reveal-node.active { opacity: 1; transform: translateY(0); }
+
+        /* Modal styling */
+        #modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.4);
+            backdrop-filter: blur(12px);
+            z-index: 10000;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .modal-content {
+            background: white;
+            padding: 2.5rem 1.5rem;
+            max-width: 540px;
+            width: 100%;
+            position: relative;
+            box-shadow: 0 40px 80px -12px rgba(0,0,0,0.25);
+            max-height: 95vh;
+            overflow-y: auto;
+        }
+        @media (min-width: 768px) {
+            .modal-content {
+                padding: 3.5rem;
+            }
+        }
+        .form-input {
+            border-bottom: 1px solid #eee;
+            padding: 18px 0;
+            width: 100%;
+            outline: none;
+            transition: border-color 0.4s;
+            font-size: 1rem;
+            margin-bottom: 1.5rem;
+            background: transparent;
+        }
+        .form-input:focus { border-color: #000; }
+
+        /* Scroll */
+        .scroll-container {
+            display: flex;
+            width: max-content;
+            animation: scroll 45s linear infinite;
+        }
+        @keyframes scroll {
+            0% { transform: translateX(0); }
+            100% { transform: translateX(-50%); }
+        }
+        .integration-item {
+            padding: 0 20px;
+            height: 64px;
+            display: flex;
+            align-items: center;
+            font-size: 0.7rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: #9c978e;
+            border-right: 1px solid rgba(0,0,0,0.03);
+        }
+        @media (min-width: 768px) {
+            .integration-item {
+                padding: 0 40px;
+                font-size: 0.8rem;
+                letter-spacing: 0.15em;
+            }
+        }
+
+        .cursor { display: inline-block; width: 2px; height: 1.1em; background-color: currentColor; margin-left: 2px; vertical-align: middle; animation: blink 1s infinite; }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        .key-unit { width: 12px; height: 12px; border: 1px solid #f0f0f0; transition: all 0.1s ease; }
+        @media (min-width: 768px) {
+            .key-unit { width: 16px; height: 16px; }
+        }
+        .key-unit.active { background-color: #000; border-color: #000; }
+        
+        #voice-text span {
+            display: inline;
+            opacity: 0;
+            filter: blur(5px);
+            transition: all 0.6s ease;
+        }
+        #voice-text span.visible { opacity: 1; filter: blur(0); }
+
+        /* Updated Features List */
+        .features-list li {
+            position: relative;
+            margin-bottom: 10px;
+            font-size: 0.85rem;
+            line-height: 1.5;
+            color: #555;
+        }
+
+        /* Corporate-specific List with Dashes */
+        .features-list-corporate li {
+            position: relative;
+            padding-left: 20px;
+            margin-bottom: 12px;
+            font-size: 0.85rem;
+            line-height: 1.5;
+        }
+        .features-list-corporate li::before {
+            content: '—';
+            position: absolute;
+            left: 0;
+            color: rgba(255,255,255,0.4);
+        }
+    </style>
+</head>
+<body class="selection:bg-black selection:text-white">
+
+    <!-- Навигация -->
+    <nav class="sticky-nav px-4 py-4 md:px-10 md:py-6">
+        <div class="max-w-7xl mx-auto flex justify-between items-center">
+            <div class="flex items-center space-x-4 md:space-x-6">
+                <div class="voice-logo">
+                    <div class="voice-logo-bar"></div><div class="voice-logo-bar"></div><div class="voice-logo-bar"></div><div class="voice-logo-bar"></div><div class="voice-logo-bar"></div>
+                </div>
+                <div class="brand-wordmark text-lg md:text-xl tracking-tighter text-black uppercase">TalkFlow.</div>
+            </div>
+            <div class="flex items-center space-x-4 md:space-x-12">
+                <div class="hidden lg:flex items-center space-x-12 text-[10px] uppercase tracking-[0.2em] font-bold">
+                    <a href="#integrations" class="hover:text-gray-400 transition-colors text-black/50">Интеграции</a>
+                    <a href="#speed" class="hover:text-gray-400 transition-colors text-black/50">Скорость</a>
+                    <a href="#options" class="hover:text-gray-400 transition-colors text-black/50">Варианты</a>
+                </div>
+                <a href="#" class="btn-black px-4 py-2 md:px-6 md:py-2.5 rounded-full flex items-center space-x-2">
+                    <span class="platform-icon"></span>
+                    <span class="text-[9px] md:text-[10px]">скачать</span>
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- ГЛАВНЫЙ БЛОК -->
+    <header class="max-w-5xl mx-auto px-6 pt-16 pb-24 md:pt-40 md:pb-48 text-center reveal-node">
+        <h1 class="text-4xl sm:text-5xl md:text-7xl lg:text-[100px] font-bold leading-[1.1] md:leading-[1] mb-8 md:mb-10 tracking-tighter text-black">
+            Думайте вслух. <br> 
+            <span class="italic font-accent text-gray-300">Мы запишем.</span>
+        </h1>
+        <p class="text-base md:text-xl text-gray-500 max-w-xl mx-auto mb-12 md:mb-16 leading-relaxed font-normal">
+            Мгновенная трансформация ваших мыслей в структурированный текст. Работает везде, где есть курсор.
+        </p>
+        <div class="flex flex-col items-center justify-center space-y-6 md:space-y-8">
+            <button class="btn-black w-full sm:w-auto px-12 py-5 rounded-full text-[11px] shadow-xl flex items-center justify-center space-x-4">
+                <span class="platform-icon-large"></span>
+                <span>Скачать приложение</span>
+            </button>
+            <div class="text-[8px] md:text-[9px] uppercase tracking-[0.3em] md:tracking-[0.4em] text-gray-400 font-bold px-4 text-center leading-loose">
+                macOS &nbsp; Windows &nbsp; Linux &nbsp; Android &nbsp; iOS
+            </div>
+        </div>
+    </header>
+
+    <!-- ИНТЕГРАЦИИ -->
+    <section id="integrations" class="py-12 md:py-16 border-t border-b border-black/5 overflow-hidden reveal-node">
+        <div class="scroll-container">
+            <div class="integration-item">Telegram</div><div class="integration-item">Notion</div><div class="integration-item">Яндекс</div><div class="integration-item">Slack</div><div class="integration-item">VK Teams</div><div class="integration-item">Bitrix24</div><div class="integration-item">AmoCRM</div><div class="integration-item">Gmail</div><div class="integration-item">VS Code</div><div class="integration-item">Figma</div><div class="integration-item">Discord</div>
+            <div class="integration-item">Telegram</div><div class="integration-item">Notion</div><div class="integration-item">Яндекс</div><div class="integration-item">Slack</div><div class="integration-item">VK Teams</div><div class="integration-item">Bitrix24</div><div class="integration-item">AmoCRM</div><div class="integration-item">Gmail</div><div class="integration-item">VS Code</div><div class="integration-item">Figma</div><div class="integration-item">Discord</div>
+        </div>
+    </section>
+
+    <!-- МАГИЯ ОБРАБОТКИ -->
+    <section id="ai-demo" class="max-w-5xl mx-auto px-6 py-24 md:py-40 reveal-node text-center">
+        <div class="mb-12 md:mb-16">
+            <h2 class="text-3xl md:text-5xl font-bold italic mb-4 tracking-tighter text-black">Магия обработки</h2>
+            <p class="text-gray-500 text-sm md:text-lg max-w-xl mx-auto font-light leading-relaxed">Система автоматически очищает поток сознания от речевого шума.</p>
+        </div>
+
+        <div id="ai-flow-container" class="relative flex flex-col items-center">
+            <div id="dirty-container" class="text-lg md:text-2xl leading-relaxed font-normal max-w-2xl mx-auto transition-all duration-300 min-h-[100px] md:min-h-[120px]">
+                <!-- Words injected by JS -->
+            </div>
+            <div class="flow-arrow"></div>
+            <div id="clean-result" class="max-w-xl w-full flex justify-center">
+                <div class="message-bubble" id="target-bubble">
+                    <div id="ai-output" class="text-base md:text-xl font-medium leading-snug">
+                        <!-- Result from Gemini -->
+                    </div>
+                    <div class="status-checks">
+                        <svg class="w-4 h-4 md:w-5 md:h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M7 13l3 3 7-7"/><path d="M2 13l3 3 7-7"/></svg>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- СИНХРОННОЕ СРАВНЕНИЕ -->
+    <section id="speed" class="max-w-7xl mx-auto px-6 py-24 md:py-40 reveal-node">
+        <div class="mb-12 md:mb-16 flex flex-col md:flex-row justify-between items-start md:items-end gap-6 md:gap-8">
+            <div>
+                <h2 class="text-3xl md:text-5xl font-bold italic mb-3 tracking-tighter text-black uppercase">Синхронное сравнение</h2>
+                <p class="text-[10px] uppercase tracking-[0.2em] text-gray-500 font-bold">Один и тот же текст. Разные измерения.</p>
+            </div>
+            <button id="start-demo" class="text-[10px] w-full md:w-auto uppercase tracking-[0.2em] border border-black px-8 py-3 hover:bg-black hover:text-white transition-all font-bold">Перезапустить тест</button>
+        </div>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-px bg-black/5 border border-black/5 min-h-[400px] md:min-h-[480px]">
+            <div class="bg-white p-6 sm:p-10 md:p-14 flex flex-col justify-between">
+                <div>
+                    <div class="flex justify-between items-center mb-8 md:mb-10">
+                        <span class="text-[9px] md:text-[10px] uppercase tracking-[0.2em] font-bold text-gray-300">Обычная печать</span>
+                        <span class="text-[9px] md:text-[10px] text-gray-300 font-mono uppercase">~40 сл/мин</span>
+                    </div>
+                    <div id="keyboard-box" class="text-gray-400 text-sm md:text-xl leading-relaxed overflow-hidden font-mono min-h-[140px] md:min-h-[160px]">
+                        <span id="keyboard-text"></span><span class="cursor"></span>
+                    </div>
+                </div>
+                <div class="grid grid-cols-10 gap-1 md:gap-1.5 w-fit opacity-5 mt-8 md:mt-10" id="visual-keys"></div>
+            </div>
+
+            <div class="bg-black text-white p-6 sm:p-10 md:p-14 flex flex-col relative overflow-hidden">
+                <div class="flex justify-between items-center mb-8 md:mb-10 relative z-10">
+                    <span class="brand-wordmark text-[9px] md:text-[10px] uppercase tracking-[0.2em] text-white opacity-50 uppercase">TalkFlow Engine</span>
+                    <span class="text-[9px] md:text-[10px] text-gray-500 font-mono text-white uppercase">~150 сл/мин</span>
+                </div>
+                <div id="voice-box" class="flex-grow text-white text-xl md:text-3xl font-accent italic leading-tight overflow-hidden relative z-10 min-h-[140px] md:min-h-[160px]">
+                    <div id="voice-text"></div>
+                </div>
+                <div class="absolute bottom-0 left-0 w-full h-32 md:h-40 flex items-end justify-center px-6 md:px-10 pointer-events-none opacity-20" id="waveform-container"></div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ВАРИАНТЫ ИСПОЛЬЗОВАНИЯ -->
+    <section id="options" class="max-w-7xl mx-auto px-6 py-16 md:py-24 reveal-node">
+        <div class="mb-12 md:mb-20 text-center">
+            <h2 class="text-3xl md:text-4xl font-bold italic mb-4 tracking-tighter text-black uppercase">Варианты использования</h2>
+            <div class="w-12 md:w-16 h-[1px] bg-black mx-auto"></div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-[6fr_4fr] border border-black/10 overflow-hidden bg-white shadow-sm rounded-sm">
+            <!-- ПЕРСОНАЛЬНЫЙ (60%) -->
+            <div class="p-6 sm:p-10 md:p-14 lg:p-20 flex flex-col justify-between border-b lg:border-b-0 lg:border-r border-black/10">
+                <div class="mb-10 md:mb-12">
+                    <h3 class="text-4xl md:text-6xl font-bold mb-10 md:mb-14 font-accent italic tracking-tighter text-black">Для себя</h3>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-10 md:gap-12">
+                        <!-- Бесплатно -->
+                        <div class="space-y-4 md:space-y-6">
+                            <div class="pb-3 border-b border-gray-100">
+                                <h4 class="text-xs md:text-sm uppercase font-bold tracking-widest text-black">Бесплатно</h4>
+                            </div>
+                            <ul class="features-list">
+                                <li>Используйте свой личный ключ доступа к нейросетям</li>
+                                <li>Полный контроль над расходами — платите только за использование</li>
+                                <li>Ваши данные не проходят через наши серверы и не сохраняются</li>
+                                <li>Создавайте неограниченное количество заметок и записей</li>
+                                <li>Тонкая настройка инструкций для обработки под ваши задачи</li>
+                            </ul>
+                        </div>
+                        
+                        <!-- По подписке -->
+                        <div class="space-y-4 md:space-y-6">
+                            <div class="pb-3 border-b border-gray-100">
+                                <h4 class="text-xs md:text-sm uppercase font-bold tracking-widest text-black">По подписке</h4>
+                            </div>
+                            <ul class="features-list">
+                                <li>Доступ к самым мощным и современным моделям интеллекта</li>
+                                <li>Мгновенная синхронизация между всеми вашими устройствами</li>
+                                <li>Автоматическое форматирование и выделение ключевых задач</li>
+                                <li>Безопасное облачное хранилище для вашей истории мыслей</li>
+                                <li>Приоритетная техническая поддержка в любое время</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+                <button class="btn-black w-full py-5 rounded-full shadow-lg text-[10px] mt-8">Скачать приложение</button>
+            </div>
+
+            <!-- КОРПОРАЦИЯ (40%) -->
+            <div class="p-6 sm:p-10 md:p-14 lg:p-20 bg-black text-white flex flex-col justify-between">
+                <div>
+                    <h3 class="text-4xl md:text-6xl font-bold mb-8 md:mb-12 font-accent italic tracking-tighter text-white">Корпорация</h3>
+                    <p class="text-sm md:text-base text-gray-200 leading-relaxed mb-10 md:mb-12 font-normal">
+                        Комплексное решение для команд. Интеграция в существующую инфраструктуру компании с соблюдением высших стандартов защиты данных.
+                    </p>
+                    <ul class="features-list-corporate text-gray-100 font-light">
+                        <li>Удобная панель управления доступами для всех сотрудников</li>
+                        <li>Возможность работы внутри закрытого контура вашей компании</li>
+                        <li>Индивидуальные алгоритмы обработки для ваших бизнес-процессов</li>
+                        <li>Единая система авторизации и полный аудит безопасности</li>
+                    </ul>
+                </div>
+                <button id="open-modal-btn" class="bg-white text-black w-full py-5 rounded-full text-[11px] font-bold uppercase tracking-widest hover:bg-gray-100 transition-colors shadow-lg mt-8 md:mt-0">Связаться с нами</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- МОДАЛЬНОЕ ОКНО -->
+    <div id="modal-overlay">
+        <div class="modal-content">
+            <button id="close-modal-btn" class="absolute top-6 right-6 text-3xl font-light hover:rotate-90 transition-transform">×</button>
+            <h3 class="text-3xl md:text-4xl font-bold mb-4 font-accent italic tracking-tighter text-black uppercase">Связаться</h3>
+            <p class="text-[9px] md:text-[10px] uppercase tracking-[0.2em] text-gray-400 mb-8 md:mb-12 uppercase font-bold">Оставьте заявку для вашей команды</p>
+            
+            <form id="enterprise-form" class="space-y-2 md:space-y-4">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-8">
+                    <input type="text" name="name" class="form-input" placeholder="Имя" required>
+                    <input type="text" name="surname" class="form-input" placeholder="Фамилия" required>
+                </div>
+                <input type="email" name="email" class="form-input" placeholder="Электронная почта" required>
+                <input type="tel" name="phone" class="form-input" placeholder="Номер телефона (+7...)" required>
+                
+                <button type="submit" class="btn-black w-full py-5 rounded-full mt-6 md:mt-8 uppercase">Отправить данные</button>
+            </form>
+            
+            <div id="form-success" class="hidden text-center py-10 md:py-12">
+                <div class="text-4xl md:text-5xl mb-6 text-black">✓</div>
+                <p class="text-[10px] md:text-[11px] uppercase tracking-[0.2em] font-bold text-black uppercase">Данные отправлены.<br>Ожидайте звонка.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ПОДВАЛ -->
+    <footer class="py-16 md:py-24 text-center border-t border-black/5 mt-12 flex flex-col items-center">
+        <div class="flex items-center space-x-4 md:space-x-6">
+            <div class="voice-logo">
+                <div class="voice-logo-bar"></div><div class="voice-logo-bar"></div><div class="voice-logo-bar"></div><div class="voice-logo-bar"></div><div class="voice-logo-bar"></div>
+            </div>
+            <div class="brand-wordmark text-2xl md:text-3xl tracking-tighter text-black uppercase">TalkFlow.</div>
+        </div>
+    </footer>
+
+    <script type="module">
+        const textToCompare = "В современном мире мысль часто теряется в процессе механического набора. TalkFlow освобождает ваш разум от клавиатуры, превращая голос в идеально структурированный текст мгновенно.";
+        const voiceChunks = ["В современном мире мысль часто теряется...", "в процессе механического набора.", "TalkFlow освобождает ваш разум от клавиатуры,", "превращая голос в идеально структурированный текст мгновенно."];
+
+        const rawDictation = "слушай... ну эээ короч зафтра... надо... в 9 встретица... типа... обсудить... проект феникс... ну и доки... захвати... лан? ага";
+        const noiseWords = ["ну", "эээ", "короч", "типа...", "лан?", "ага", "ну", "и"];
+
+        const platformIcons = {
+            mac: `<svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M17.073 21.318c-.71.533-1.42 1.033-2.13 1.033-.82 0-1.11-.533-2.11-.533-1 0-1.33.511-2.12.511-.78 0-1.5-.555-2.22-1.089-1.533-1.088-2.61-3.11-2.61-5.066 0-3.088 2.01-4.733 3.966-4.733.988 0 1.833.644 2.455.644.6 0 1.577-.689 2.688-.689 1.156 0 2.223.511 2.91 1.378-2.31 1.355-1.956 4.6 0 5.866-.556 1.4-1.289 2.822-2.244 3.678M13.682 7.15c.5-1.355-.389-2.733-1.422-3.666-1.123-1-2.634-1.123-3.212-1.123-.11.8.211 2.256 1.256 3.322.955 1.044 2.533 1.155 3.378 1.467"></path></svg>`,
+            win: `<svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M0 3.449L9.75 2.1v9.451H0V3.449zM0 12.45h9.75v9.451L0 20.551V12.45zm10.549-10.559L24 0v11.551h-13.451V1.891zM24 12.45V24l-13.451-1.891V12.45H24z"></path></svg>`,
+            linux: `<svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12.422 1c-1.332 0-2.43.914-2.43 2.04 0 .428.16.822.433 1.144-.754.267-1.463.763-2.008 1.43-.807.986-1.216 2.37-1.216 3.903 0 .49.043.956.126 1.396-.583.52-1.066 1.216-1.376 1.992-1.488 3.72-.037 8.32 1.764 10.435.534.626 1.205 1.05 1.95 1.25.742.2 1.542.235 2.336.102 1.19-.2 2.308-.737 3.238-1.554.93.817 2.048 1.355 3.238 1.554.793.133 1.593.1 2.335-.102.744-.2 1.415-.624 1.95-1.25 1.8-2.115 3.25-6.716 1.763-10.435-.31-.776-.793-1.472-1.376-1.992.083-.44.126-.906.126-1.396 0-1.533-.409-2.917-1.216-3.903-.545-.667-1.254-1.163-2.008-1.43.273-.322.433-.716.433-1.144 0-1.126-1.098-2.04-2.43-2.04h-.23z"></path></svg>`,
+            mobile: `<svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z"></path></svg>`
+        };
+
+        let cleanupStarted = false;
+        let isAnimating = false;
+        let animationIntervals = [];
+
+        // --- GLOBAL UTILS ---
+        window.detectPlatform = function() {
+            const ua = window.navigator.userAgent.toLowerCase();
+            let p = 'win';
+            if(ua.indexOf("mac")!==-1)p='mac';
+            else if(ua.indexOf("linux")!==-1)p='linux';
+            else if(ua.indexOf("android")!==-1||ua.indexOf("iphone")!==-1)p='mobile';
+            
+            document.querySelectorAll('.platform-icon').forEach(el=>el.innerHTML=platformIcons[p]);
+            document.querySelectorAll('.platform-icon-large').forEach(el=>{
+                el.innerHTML=platformIcons[p]; 
+                const s=el.querySelector('svg'); 
+                if(s)s.setAttribute('class','w-5 h-5 md:w-6 md:h-6');
+            });
+        }
+
+        window.toggleModal = function(show) {
+            const modal = document.getElementById('modal-overlay');
+            if (modal) {
+                modal.style.display = show ? 'flex' : 'none';
+                document.body.style.overflow = show ? 'hidden' : 'auto';
+            }
+        }
+
+        function clearAllIntervals() {
+            animationIntervals.forEach(id => clearInterval(id));
+            animationIntervals = [];
+        }
+
+        function animateKeys() {
+            const keys = document.querySelectorAll('.key-unit');
+            if (keys.length === 0) return;
+            const randomKey = keys[Math.floor(Math.random() * keys.length)];
+            if (randomKey) {
+                randomKey.classList.add('active');
+                setTimeout(() => randomKey.classList.remove('active'), 100);
+            }
+        }
+
+        // --- MAGIC CLEANUP ---
+        window.runMagicCleanup = async function() {
+            if (cleanupStarted) return;
+            cleanupStarted = true;
+
+            const container = document.getElementById('dirty-container');
+            const flowContainer = document.getElementById('ai-flow-container');
+            const cleanResult = document.getElementById('clean-result');
+            const bubble = document.getElementById('target-bubble');
+            const outputEl = document.getElementById('ai-output');
+
+            const apiKey = "";
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+            const systemPrompt = "Ты — TalkFlow AI. Преврати грязную диктовку в ОДНУ лаконичную и четкую фразу. Только текст.";
+            
+            const apiPromise = fetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ parts: [{ text: rawDictation }] }],
+                    systemInstruction: { parts: [{ text: systemPrompt }] }
+                })
+            }).then(r => r.json());
+
+            flowContainer.classList.add('flow-active');
+
+            const spans = document.querySelectorAll('.word-span');
+            spans.forEach((span, i) => {
+                setTimeout(() => {
+                    const isTrash = noiseWords.includes(span.innerText.trim().toLowerCase());
+                    if (isTrash) {
+                        span.classList.add('word-trash');
+                        setTimeout(() => span.classList.add('crossed'), 50);
+                    } else {
+                        span.classList.add('word-keep');
+                    }
+                    
+                    if (i === spans.length - 1) {
+                        setTimeout(async () => {
+                            try {
+                                const data = await apiPromise;
+                                outputEl.innerText = data.candidates?.[0]?.content?.parts?.[0]?.text || "Нужно подготовить отчет к среде и позвонить Ивану.";
+                                cleanResult.classList.remove('opacity-0');
+                                bubble.classList.add('visible');
+                            } catch (e) {
+                                outputEl.innerText = "Завтра в 9:00 встреча по проекту. Не забудь документы.";
+                                cleanResult.classList.remove('opacity-0');
+                                bubble.classList.add('visible');
+                            }
+                        }, 400);
+                    }
+                }, i * 180);
+            });
+        }
+
+        // --- SPEED COMPARISON ---
+        window.startComparison = async function() {
+            if (isAnimating) clearAllIntervals();
+            isAnimating = true;
+
+            const keyboardEl = document.getElementById('keyboard-text');
+            const voiceEl = document.getElementById('voice-text');
+            const waveContainer = document.getElementById('waveform-container');
+            
+            keyboardEl.innerText = "";
+            voiceEl.innerHTML = "";
+            waveContainer.innerHTML = "";
+
+            const waveCount = window.innerWidth < 768 ? 20 : 30;
+            for(let i=0; i<waveCount; i++) {
+                const b = document.createElement('div');
+                b.className = 'wave-bar';
+                waveContainer.appendChild(b);
+            }
+            const waveBars = document.querySelectorAll('.wave-bar');
+
+            voiceChunks.forEach(chunk => {
+                const span = document.createElement('span');
+                span.innerText = chunk + " ";
+                voiceEl.appendChild(span);
+            });
+
+            const voiceSpans = voiceEl.querySelectorAll('span');
+            
+            let charIndex = 0;
+            const kInterval = setInterval(() => {
+                if (charIndex < textToCompare.length) {
+                    keyboardEl.innerText += textToCompare[charIndex];
+                    if (textToCompare[charIndex] !== " ") animateKeys();
+                    charIndex++;
+                } else clearInterval(kInterval);
+            }, 75); 
+            animationIntervals.push(kInterval);
+
+            const waveInterval = setInterval(() => {
+                waveBars.forEach(bar => {
+                    const maxH = window.innerWidth < 768 ? 40 : 60;
+                    bar.style.height = (Math.random() * maxH + 5) + 'px';
+                });
+            }, 100);
+            animationIntervals.push(waveInterval);
+
+            let chunkIndex = 0;
+            const vInterval = setInterval(() => {
+                if (chunkIndex < voiceSpans.length) {
+                    voiceSpans[chunkIndex].classList.add('visible');
+                    chunkIndex++;
+                } else {
+                    clearInterval(vInterval);
+                    clearInterval(waveInterval);
+                    waveBars.forEach(b => b.style.height = '4px');
+                    isAnimating = false;
+                }
+            }, 700);
+            animationIntervals.push(vInterval);
+        }
+
+        // --- OBSERVERS ---
+        window.setupObservers = function() {
+            const nodeObserver = new IntersectionObserver((entries) => {
+                entries.forEach(entry => { if (entry.isIntersecting) entry.target.classList.add('active'); });
+            }, { threshold: 0.1 });
+
+            document.querySelectorAll('.reveal-node').forEach(node => nodeObserver.observe(node));
+
+            const aiObserver = new IntersectionObserver((entries) => {
+                entries.forEach(entry => { if (entry.isIntersecting) window.runMagicCleanup(); });
+            }, { threshold: 0.5 });
+            aiObserver.observe(document.getElementById('ai-demo'));
+
+            const speedObserver = new IntersectionObserver((entries) => {
+                entries.forEach(entry => { if (entry.isIntersecting && !isAnimating) window.startComparison(); });
+            }, { threshold: 0.3 });
+            speedObserver.observe(document.getElementById('speed'));
+        };
+
+        // --- INIT ---
+        window.onload = () => {
+            window.detectPlatform();
+            
+            const openModalBtn = document.getElementById('open-modal-btn');
+            const closeModalBtn = document.getElementById('close-modal-btn');
+            if (openModalBtn) openModalBtn.onclick = () => window.toggleModal(true);
+            if (closeModalBtn) closeModalBtn.onclick = () => window.toggleModal(false);
+            
+            const modalOverlay = document.getElementById('modal-overlay');
+            if (modalOverlay) {
+                modalOverlay.onclick = (e) => { if(e.target === modalOverlay) window.toggleModal(false); };
+            }
+
+            const keysContainer = document.getElementById('visual-keys');
+            const keyCount = window.innerWidth < 768 ? 15 : 30;
+            for (let i = 0; i < keyCount; i++) {
+                const key = document.createElement('div');
+                key.className = 'key-unit';
+                keysContainer.appendChild(key);
+            }
+            
+            const container = document.getElementById('dirty-container');
+            const words = rawDictation.split(' ');
+            container.innerHTML = words.map(w => `<span class="word-span">${w}</span>`).join(' ');
+
+            window.setupObservers();
+        };
+
+        const form = document.getElementById('enterprise-form');
+        if (form) {
+            form.addEventListener('submit', (e) => {
+                e.preventDefault();
+                form.classList.add('hidden');
+                document.getElementById('form-success').classList.remove('hidden');
+            });
+        }
+
+        const startDemoBtn = document.getElementById('start-demo');
+        if (startDemoBtn) {
+            startDemoBtn.addEventListener('click', window.startComparison);
+        }
+    </script>
+</body>
+</html>

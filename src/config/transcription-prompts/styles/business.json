@@ -1,0 +1,9 @@
+{
+  "promptTitle": "BUSINESS STYLE",
+  "rules": [
+    "Make the text cleaner and more professional, but keep the original meaning and structure.",
+    "You may apply small readability-focused smoothing when the speaker's wording contains obvious hesitation artifacts that would look awkward in a business message.",
+    "Do not remove substantive words or complete unfinished thoughts on the speaker's behalf."
+  ],
+  "examples": []
+}

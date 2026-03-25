@@ -1,0 +1,8 @@
+{
+  "displayName": "English",
+  "fillerExamples": ["um", "uh", "like", "you know"],
+  "rules": [
+    "Preserve short trailing qualifiers and colloquial speech if they may carry meaning in context."
+  ],
+  "examples": []
+}

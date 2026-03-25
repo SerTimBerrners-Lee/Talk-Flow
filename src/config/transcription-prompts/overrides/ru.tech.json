@@ -1,0 +1,15 @@
+{
+  "rules": [
+    "Expect Russian developer speech with English technical terms embedded into Russian grammar, for example: 'сдеплоить', 'запушить', 'заасайнить'.",
+    "In code, path, import, command, URL, package, or file-name context, convert spoken symbols into literal symbols when appropriate: 'слеш' -> '/', 'обратный слеш' -> '\\', 'точка' -> '.', 'двоеточие' -> ':', 'запятая' -> ',', 'дефис' or 'минус' -> '-', 'нижнее подчеркивание' -> '_', 'открывающая скобка' -> '(', 'закрывающая скобка' -> ')'.",
+    "Treat words such as 'src', 'api', 'tauri', 'import', 'const', 'function', 'cargo', 'bun', 'npm', 'git', package names, and file extensions as strong evidence of technical context.",
+    "Never replace one spoken symbol with another in technical context. If the speaker said 'слеш', do not turn it into a dot.",
+    "In Russian tech mode, preserve expressive leading stutter forms unless smoothing them is necessary to correctly reconstruct a code token or file name."
+  ],
+  "examples": [
+    {
+      "raw": "сделал cleanup заметно бережнее в src slash tauri slash src slash ai dot rs",
+      "cleaned": "Сделал cleanup заметно бережнее в src-tauri/src/ai.rs."
+    }
+  ]
+}

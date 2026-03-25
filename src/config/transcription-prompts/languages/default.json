@@ -1,0 +1,8 @@
+{
+  "displayName": "the detected language",
+  "fillerExamples": ["um", "uh", "like"],
+  "rules": [
+    "Preserve colloquial speech when it appears meaningful, personal, or expressive rather than accidental."
+  ],
+  "examples": []
+}

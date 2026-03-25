@@ -1,0 +1,365 @@
+import { useState, useEffect, useRef } from "react";
+import { emit } from "@tauri-apps/api/event";
+import { getSettings, saveSettings, AppSettings, DEFAULT_HOTKEY, formatHotkeyLabel } from "../../../lib/store";
+import { Check, ChevronDown, Search } from "lucide-react";
+import { SETTINGS_UPDATED_EVENT } from "../../../lib/hotkeyEvents";
+import { logError, logInfo } from "../../../lib/logger";
+
+const LANGUAGES: { code: string; name: string; native: string }[] = [
+  { code: "auto", name: "Автоопределение", native: "Auto" },
+  { code: "af",   name: "Африкаанс",       native: "Afrikaans" },
+  { code: "sq",   name: "Албанский",       native: "Shqip" },
+  { code: "am",   name: "Амхарский",       native: "አማርኛ" },
+  { code: "ar",   name: "Арабский",        native: "العربية" },
+  { code: "hy",   name: "Армянский",       native: "Հայերեն" },
+  { code: "az",   name: "Азербайджанский", native: "Azərbaycan" },
+  { code: "eu",   name: "Баскский",        native: "Euskara" },
+  { code: "be",   name: "Белорусский",     native: "Беларуская" },
+  { code: "bn",   name: "Бенгальский",     native: "বাংলা" },
+  { code: "bs",   name: "Боснийский",      native: "Bosanski" },
+  { code: "bg",   name: "Болгарский",      native: "Български" },
+  { code: "ca",   name: "Каталанский",     native: "Català" },
+  { code: "zh",   name: "Китайский",       native: "中文" },
+  { code: "hr",   name: "Хорватский",      native: "Hrvatski" },
+  { code: "cs",   name: "Чешский",         native: "Čeština" },
+  { code: "da",   name: "Датский",         native: "Dansk" },
+  { code: "nl",   name: "Нидерландский",   native: "Nederlands" },
+  { code: "en",   name: "Английский",      native: "English" },
+  { code: "et",   name: "Эстонский",       native: "Eesti" },
+  { code: "fi",   name: "Финский",         native: "Suomi" },
+  { code: "fr",   name: "Французский",     native: "Français" },
+  { code: "gl",   name: "Галисийский",     native: "Galego" },
+  { code: "ka",   name: "Грузинский",      native: "ქართული" },
+  { code: "de",   name: "Немецкий",        native: "Deutsch" },
+  { code: "el",   name: "Греческий",       native: "Ελληνικά" },
+  { code: "gu",   name: "Гуджарати",       native: "ગુજરાતી" },
+  { code: "ht",   name: "Гаитянский креольский", native: "Kreyòl ayisyen" },
+  { code: "he",   name: "Иврит",           native: "עברית" },
+  { code: "hi",   name: "Хинди",           native: "हिन्दी" },
+  { code: "hu",   name: "Венгерский",      native: "Magyar" },
+  { code: "is",   name: "Исландский",      native: "Íslenska" },
+  { code: "id",   name: "Индонезийский",   native: "Bahasa Indonesia" },
+  { code: "ga",   name: "Ирландский",      native: "Gaeilge" },
+  { code: "it",   name: "Итальянский",     native: "Italiano" },
+  { code: "ja",   name: "Японский",        native: "日本語" },
+  { code: "kn",   name: "Каннада",         native: "ಕನ್ನಡ" },
+  { code: "kk",   name: "Казахский",       native: "Қазақша" },
+  { code: "km",   name: "Кхмерский",       native: "ខ្មែរ" },
+  { code: "ko",   name: "Корейский",       native: "한국어" },
+  { code: "ky",   name: "Кыргызский",      native: "Кыргызча" },
+  { code: "lo",   name: "Лаосский",        native: "ລາວ" },
+  { code: "lv",   name: "Латвийский",      native: "Latviešu" },
+  { code: "lt",   name: "Литовский",       native: "Lietuvių" },
+  { code: "mk",   name: "Македонский",     native: "Македонски" },
+  { code: "ms",   name: "Малайский",       native: "Bahasa Melayu" },
+  { code: "ml",   name: "Малаялам",        native: "മലയാളം" },
+  { code: "mt",   name: "Мальтийский",     native: "Malti" },
+  { code: "mi",   name: "Маори",           native: "Te Reo Māori" },
+  { code: "mn",   name: "Монгольский",     native: "Монгол" },
+  { code: "ne",   name: "Непальский",      native: "नेपाली" },
+  { code: "nb",   name: "Норвежский",      native: "Norsk" },
+  { code: "ps",   name: "Пушту",           native: "پښتو" },
+  { code: "fa",   name: "Персидский",      native: "فارسی" },
+  { code: "pl",   name: "Польский",        native: "Polski" },
+  { code: "pt",   name: "Португальский",   native: "Português" },
+  { code: "pa",   name: "Панджаби",        native: "ਪੰਜਾਬੀ" },
+  { code: "ro",   name: "Румынский",       native: "Română" },
+  { code: "ru",   name: "Русский",         native: "Русский" },
+  { code: "sr",   name: "Сербский",        native: "Српски" },
+  { code: "si",   name: "Сингальский",     native: "සිංහල" },
+  { code: "sk",   name: "Словацкий",       native: "Slovenčina" },
+  { code: "sl",   name: "Словенский",      native: "Slovenščina" },
+  { code: "so",   name: "Сомалийский",     native: "Soomaali" },
+  { code: "es",   name: "Испанский",       native: "Español" },
+  { code: "sw",   name: "Суахили",         native: "Kiswahili" },
+  { code: "sv",   name: "Шведский",        native: "Svenska" },
+  { code: "tg",   name: "Таджикский",      native: "Тоҷикӣ" },
+  { code: "ta",   name: "Тамильский",      native: "தமிழ்" },
+  { code: "te",   name: "Телугу",          native: "తెలుగు" },
+  { code: "th",   name: "Тайский",         native: "ภาษาไทย" },
+  { code: "tr",   name: "Турецкий",        native: "Türkçe" },
+  { code: "uk",   name: "Украинский",      native: "Українська" },
+  { code: "ur",   name: "Урду",            native: "اردو" },
+  { code: "uz",   name: "Узбекский",       native: "O'zbek" },
+  { code: "vi",   name: "Вьетнамский",     native: "Tiếng Việt" },
+  { code: "cy",   name: "Валлийский",      native: "Cymraeg" },
+  { code: "xh",   name: "Коса",            native: "isiXhosa" },
+  { code: "yi",   name: "Идиш",            native: "ייִדיש" },
+  { code: "yo",   name: "Йоруба",          native: "Yorùbá" },
+  { code: "zu",   name: "Зулу",            native: "isiZulu" },
+];
+
+export function SettingsTab() {
+  const [settings, setSettings] = useState<AppSettings | null>(null);
+
+  // Language picker state
+  const [langSearch, setLangSearch] = useState("");
+  const [langOpen, setLangOpen] = useState(false);
+  const langRef = useRef<HTMLDivElement>(null);
+
+  const [microphones, setMicrophones] = useState<MediaDeviceInfo[]>([]);
+  const [micOpen, setMicOpen] = useState(false);
+  const [micStatus, setMicStatus] = useState<MicAvailabilityState>("empty");
+  const [micMessage, setMicMessage] = useState("Проверяем доступные микрофоны...");
+  const micRef = useRef<HTMLDivElement>(null);
+
+  const settingsRef = useRef<AppSettings | null>(null);
+
+  type MicAvailabilityState = "ready" | "missing-selected" | "permission-needed" | "empty";
+
+  useEffect(() => {
+    getSettings().then(s => {
+      setSettings(s);
+      settingsRef.current = s;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!settings) return;
+
+    const fetchMics = async () => {
+      try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+          void logInfo("SETTINGS", "Media devices API not available");
+          setMicStatus("empty");
+          setMicMessage("Список микрофонов недоступен в этой среде.");
+          return;
+        }
+
+        let devices = await navigator.mediaDevices.enumerateDevices();
+        let mics = devices.filter(d => d.kind === "audioinput");
+        let needsPermission = false;
+
+        if (mics.length === 0 || mics.some(m => !m.label || m.label === "")) {
+          if (navigator.mediaDevices.getUserMedia) {
+            try {
+              const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+              await new Promise(r => setTimeout(r, 50));
+              devices = await navigator.mediaDevices.enumerateDevices();
+              mics = devices.filter(d => d.kind === "audioinput");
+              stream.getTracks().forEach(t => t.stop());
+            } catch (permitErr) {
+              void logInfo("SETTINGS", `Microphone permission denied or no mic available: ${permitErr instanceof Error ? permitErr.message : String(permitErr)}`);
+              needsPermission = true;
+            }
+          }
+        }
+
+        const uniqueMics: MediaDeviceInfo[] = [];
+        const seenIds = new Set<string>();
+        for (const m of mics) {
+          if (m.deviceId && !seenIds.has(m.deviceId)) {
+            uniqueMics.push(m);
+            seenIds.add(m.deviceId);
+          }
+        }
+
+        setMicrophones(uniqueMics);
+
+        const selectedMic = settings.micId ? uniqueMics.find(m => m.deviceId === settings.micId) : null;
+        if (settings.micId && !selectedMic) {
+          setMicStatus("missing-selected");
+          setMicMessage("Ранее выбранный микрофон недоступен. Во время записи будет использован системный по умолчанию.");
+          return;
+        }
+
+        if (uniqueMics.length === 0) {
+          if (needsPermission) {
+            setMicStatus("permission-needed");
+            setMicMessage("Список микрофонов появится после доступа к микрофону в macOS.");
+            return;
+          }
+
+          setMicStatus("empty");
+          setMicMessage("Не удалось найти доступные микрофоны. Подключите устройство или проверьте системные настройки.");
+          return;
+        }
+
+        const activeLabel = selectedMic ? getMicrophoneLabel(selectedMic, uniqueMics.indexOf(selectedMic)) : "Системный микрофон по умолчанию";
+        setMicStatus("ready");
+        setMicMessage(selectedMic ? `Сейчас используется: ${activeLabel}` : `Сейчас используется: ${activeLabel}`);
+      } catch (err) {
+        void logError("SETTINGS", `Mic enumeration error: ${err instanceof Error ? err.message : String(err)}`);
+        setMicStatus("empty");
+        setMicMessage("Не удалось получить список микрофонов. Попробуйте открыть настройки ещё раз.");
+      }
+    };
+
+    fetchMics();
+
+    navigator.mediaDevices?.addEventListener?.("devicechange", fetchMics);
+    return () => {
+      navigator.mediaDevices?.removeEventListener?.("devicechange", fetchMics);
+    };
+  }, [settings?.micId]);
+
+  // Close dropdowns on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (langRef.current && !langRef.current.contains(e.target as Node)) setLangOpen(false);
+      if (micRef.current && !micRef.current.contains(e.target as Node)) setMicOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const update = async (patch: Partial<AppSettings>): Promise<AppSettings | null> => {
+    if (!settingsRef.current) return null;
+    const s = { ...settingsRef.current, ...patch };
+    settingsRef.current = s;
+    setSettings(s);
+    await saveSettings(s);
+    emit(SETTINGS_UPDATED_EVENT).catch((e) => {
+      void logError("SETTINGS", `Failed to emit settings update event: ${e instanceof Error ? e.message : String(e)}`);
+    });
+    return s;
+  };
+
+  const getMicrophoneLabel = (mic: MediaDeviceInfo, index: number): string => {
+    const label = mic.label?.trim();
+    return label ? label : `Микрофон ${index + 1}`;
+  };
+
+  if (!settings) return null;
+
+  const filteredLangs = LANGUAGES.filter(l =>
+    l.name.toLowerCase().includes(langSearch.toLowerCase()) ||
+    l.native.toLowerCase().includes(langSearch.toLowerCase()) ||
+    l.code.toLowerCase().includes(langSearch.toLowerCase())
+  );
+  const currentLang = LANGUAGES.find(l => l.code === settings.language);
+  const selectedMicrophone = microphones.find(m => m.deviceId === settings.micId) || null;
+  const visibleMicrophoneLabel = selectedMicrophone
+    ? getMicrophoneLabel(selectedMicrophone, microphones.indexOf(selectedMicrophone))
+    : settings.micId
+      ? "Системный микрофон по умолчанию"
+      : "Системный микрофон по умолчанию";
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div className="card" style={{ display: "grid", gap: 10, zIndex: langOpen ? 20 : 1 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 280px", alignItems: "start", gap: 16 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-hi)", margin: 0 }}>Язык распознавания</div>
+          </div>
+        <div ref={langRef} style={{ position: "relative", width: "100%" }}>
+          <button onClick={() => setLangOpen((o) => !o)} className="btn" style={{ width: "100%", justifyContent: "space-between", gap: 8, minHeight: 46 }}>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {currentLang ? `${currentLang.native} (${currentLang.name})` : settings.language}
+            </span>
+            <ChevronDown size={13} strokeWidth={2} style={{ flexShrink: 0, transform: langOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
+          </button>
+          {langOpen && (
+            <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, width: 320, maxHeight: 320, background: "rgba(255,255,255,0.98)", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 24, boxShadow: "var(--shadow-panel)", zIndex: 100, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+              <div style={{ padding: 12, borderBottom: "1px solid rgba(0,0,0,0.06)", display: "flex", alignItems: "center", gap: 8 }}>
+                <Search size={13} style={{ color: "var(--text-low)", flexShrink: 0 }} />
+                <input autoFocus value={langSearch} onChange={(e) => setLangSearch(e.target.value)} placeholder="Поиск языка..." style={{ border: "none", outline: "none", background: "transparent", fontSize: 12, color: "var(--text-hi)", flex: 1 }} />
+              </div>
+              <div style={{ overflow: "auto", flex: 1 }}>
+                {filteredLangs.length === 0 ? (
+                  <div style={{ padding: "14px 16px", fontSize: 12, color: "var(--text-low)" }}>Не найдено</div>
+                ) : filteredLangs.map((lang) => (
+                  <button
+                    key={lang.code}
+                    onClick={() => { update({ language: lang.code }); setLangOpen(false); setLangSearch(""); }}
+                    style={{
+                      width: "100%",
+                      textAlign: "left",
+                      border: "none",
+                      cursor: "pointer",
+                      padding: "10px 16px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      background: settings.language === lang.code ? "rgba(0,0,0,0.04)" : "transparent",
+                      color: settings.language === lang.code ? "var(--text-hi)" : "var(--text-mid)",
+                      fontSize: 12,
+                      transition: "background 0.1s",
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = "rgba(0,0,0,0.03)"}
+                    onMouseLeave={(e) => e.currentTarget.style.background = settings.language === lang.code ? "rgba(0,0,0,0.04)" : "transparent"}
+                  >
+                    <span style={{ minWidth: 28, fontSize: 10, color: "var(--text-low)", fontFamily: "monospace" }}>{lang.code}</span>
+                    <span style={{ flex: 1 }}>{lang.native}</span>
+                    <span style={{ fontSize: 10, color: "var(--text-low)" }}>{lang.name}</span>
+                    {settings.language === lang.code && <Check size={12} strokeWidth={2.5} style={{ color: "var(--text-hi)", flexShrink: 0 }} />}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        </div>
+        <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>Язык, на котором вы говорите.</div>
+      </div>
+
+      <div className="card" style={{ display: "grid", gap: 10, zIndex: micOpen ? 20 : 1 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 280px", alignItems: "start", gap: 16 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-hi)", margin: 0 }}>Микрофон</div>
+          </div>
+        <div ref={micRef} style={{ position: "relative", width: "100%" }}>
+          <button
+            onClick={() => {
+              if (microphones.length === 0 || micStatus === "permission-needed") return;
+              setMicOpen((o) => !o);
+            }}
+            className="btn"
+            style={{ width: "100%", justifyContent: "space-between", gap: 8, minHeight: 46, opacity: microphones.length === 0 || micStatus === "permission-needed" ? 0.7 : 1, cursor: microphones.length === 0 || micStatus === "permission-needed" ? "not-allowed" : "pointer" }}
+          >
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {microphones.length === 0 ? "Системный микрофон по умолчанию" : visibleMicrophoneLabel}
+            </span>
+            <ChevronDown size={13} strokeWidth={2} style={{ flexShrink: 0, transform: micOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
+          </button>
+
+          {micOpen && microphones.length > 0 && (
+            <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, width: "100%", maxHeight: 240, background: "rgba(255,255,255,0.98)", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 24, boxShadow: "var(--shadow-panel)", zIndex: 100, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+              <div style={{ overflow: "auto", flex: 1, padding: "6px 0" }}>
+                <button
+                  onClick={() => { void update({ micId: "" }); setMicOpen(false); }}
+                  style={{ width: "100%", textAlign: "left", border: "none", cursor: "pointer", padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", background: settings.micId === "" ? "rgba(0,0,0,0.04)" : "transparent", color: settings.micId === "" ? "var(--text-hi)" : "var(--text-mid)", fontSize: 12, transition: "background 0.1s" }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = "rgba(0,0,0,0.03)"}
+                  onMouseLeave={(e) => e.currentTarget.style.background = settings.micId === "" ? "rgba(0,0,0,0.04)" : "transparent"}
+                >
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Системный микрофон по умолчанию</span>
+                  {settings.micId === "" && <Check size={12} strokeWidth={2.5} style={{ color: "var(--text-hi)", flexShrink: 0 }} />}
+                </button>
+                {microphones.map((m, i) => (
+                  <button
+                    key={m.deviceId}
+                    onClick={() => { void update({ micId: m.deviceId }); setMicOpen(false); }}
+                    style={{ width: "100%", textAlign: "left", border: "none", cursor: "pointer", padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", background: settings.micId === m.deviceId ? "rgba(0,0,0,0.04)" : "transparent", color: settings.micId === m.deviceId ? "var(--text-hi)" : "var(--text-mid)", fontSize: 12, transition: "background 0.1s" }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = "rgba(0,0,0,0.03)"}
+                    onMouseLeave={(e) => e.currentTarget.style.background = settings.micId === m.deviceId ? "rgba(0,0,0,0.04)" : "transparent"}
+                  >
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{getMicrophoneLabel(m, i)}</span>
+                    {settings.micId === m.deviceId && <Check size={12} strokeWidth={2.5} style={{ color: "var(--text-hi)", flexShrink: 0 }} />}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        </div>
+        <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>Устройство для записи голоса.</div>
+        <div style={{ fontSize: 13, color: "var(--text-low)", lineHeight: 1.6 }}>{micMessage}</div>
+      </div>
+
+      <div className="card" style={{ display: "grid", gap: 10, background: "rgba(255,255,255,0.82)" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "center", gap: 16 }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-hi)", margin: 0 }}>Горячая клавиша</div>
+            <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.65, marginTop: 6 }}>
+              Комбинация фиксированная для всех пользователей и больше не меняется в настройках.
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--text-hi)", fontSize: 12, fontWeight: 700, letterSpacing: "0.02em", whiteSpace: "nowrap" }}>
+            <span style={{ color: "var(--text-low)", letterSpacing: "0.08em" }}>Комбинация</span>
+            <span>{formatHotkeyLabel(DEFAULT_HOTKEY)}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
