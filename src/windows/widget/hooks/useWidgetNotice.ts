@@ -2,12 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
 
 import {
-  NOTICE_TIMEOUT_MS,
-  NOTICE_BUBBLE_HEIGHT,
-  NOTICE_WIDGET_GAP,
-  NOTICE_WIDGET_WIDTH,
   IDLE_WIDGET_HEIGHT,
   IDLE_WIDGET_WIDTH,
+  NOTICE_AREA_HEIGHT,
+  NOTICE_TIMEOUT_MS,
+  NOTICE_WIDGET_GAP,
+  NOTICE_WIDGET_WIDTH,
   PROCESSING_WIDGET_SIZE,
   RECORDING_WIDGET_HEIGHT,
   RECORDING_WIDGET_WIDTH,
@@ -43,7 +43,7 @@ function getNoticeDimensions(state: WidgetState): { width: number; height: numbe
 
   return {
     width: Math.max(base.width, NOTICE_WIDGET_WIDTH),
-    height: base.height + NOTICE_BUBBLE_HEIGHT + NOTICE_WIDGET_GAP,
+    height: base.height + NOTICE_AREA_HEIGHT + NOTICE_WIDGET_GAP,
   };
 }
 

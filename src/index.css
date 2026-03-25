@@ -354,10 +354,10 @@ select {
 @keyframes widget-notice-in {
   from {
     opacity: 0;
-    transform: translateX(-50%) translateY(6px) scale(0.98);
+    transform: translateY(-4px) scale(0.985);
   }
   to {
     opacity: 1;
-    transform: translateX(-50%) translateY(0) scale(1);
+    transform: translateY(0) scale(1);
   }
 }

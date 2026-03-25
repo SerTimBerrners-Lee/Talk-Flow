@@ -15,5 +15,5 @@ export const RECORDING_WIDGET_WIDTH = 140;
 export const RECORDING_WIDGET_HEIGHT = 48;
 export const PROCESSING_WIDGET_SIZE = 40;
 export const NOTICE_WIDGET_WIDTH = 228;
-export const NOTICE_BUBBLE_HEIGHT = 52;
-export const NOTICE_WIDGET_GAP = 10;
+export const NOTICE_AREA_HEIGHT = 68;
+export const NOTICE_WIDGET_GAP = 8;

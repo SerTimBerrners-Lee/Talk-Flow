@@ -4,7 +4,7 @@ import { AlertCircle, Bell } from "lucide-react";
 
 import { Waveform } from "../../components/Waveform";
 import { useWidgetController } from "./hooks/useWidgetController";
-import { IDLE_WIDGET_HEIGHT, IDLE_WIDGET_WIDTH, NOTICE_WIDGET_GAP, WidgetNoticeState } from "./widgetConstants";
+import { IDLE_WIDGET_HEIGHT, IDLE_WIDGET_WIDTH, NOTICE_AREA_HEIGHT, WidgetNoticeState } from "./widgetConstants";
 
 export function Widget() {
   const { state, stream, notice, lockedRecording } = useWidgetController();
@@ -14,21 +14,43 @@ export function Widget() {
       style={{
         width: "100vw",
         height: "100vh",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "flex-end",
         background: "transparent",
         overflow: "visible",
         pointerEvents: "none",
         position: "relative",
-        paddingBottom: 2,
       }}
     >
-      {notice && <WidgetNotice message={notice.message} tone={notice.tone} />}
-      {state === "idle" && <IdlePill />}
-      {state === "recording" && <RecordingPill stream={stream} locked={lockedRecording} />}
-      {state === "processing" && <ProcessingPill />}
+      <div
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          height: NOTICE_AREA_HEIGHT,
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "center",
+          overflow: "visible",
+        }}
+      >
+        {notice && <WidgetNotice message={notice.message} tone={notice.tone} />}
+      </div>
+      <div
+        style={{
+          position: "absolute",
+          left: "50%",
+          bottom: 0,
+          transform: "translateX(-50%)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          overflow: "visible",
+        }}
+      >
+        {state === "idle" && <IdlePill />}
+        {state === "recording" && <RecordingPill stream={stream} locked={lockedRecording} />}
+        {state === "processing" && <ProcessingPill />}
+      </div>
     </div>
   );
 }
@@ -39,10 +61,7 @@ function WidgetNotice({ message, tone }: WidgetNoticeState) {
   return (
     <div
       style={{
-        position: "absolute",
-        bottom: `calc(100% - ${NOTICE_WIDGET_GAP + 2}px)`,
-        left: "50%",
-        transform: "translateX(-50%)",
+        marginTop: 2,
         width: 212,
         minHeight: 52,
         padding: "10px 34px 10px 14px",
@@ -58,6 +77,7 @@ function WidgetNotice({ message, tone }: WidgetNoticeState) {
         WebkitBackdropFilter: "blur(18px)",
         pointerEvents: "none",
         animation: "widget-notice-in 0.22s cubic-bezier(0.22, 1, 0.36, 1)",
+        overflow: "hidden",
       }}
     >
       <div
@@ -77,7 +97,18 @@ function WidgetNotice({ message, tone }: WidgetNoticeState) {
       >
         <Icon size={11} strokeWidth={2.2} />
       </div>
-      {message}
+      <div
+        style={{
+          display: "-webkit-box",
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: "vertical",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          paddingRight: 4,
+        }}
+      >
+        {message}
+      </div>
     </div>
   );
 }
