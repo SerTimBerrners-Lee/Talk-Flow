@@ -1,5 +1,4 @@
 import { useState, useEffect, useMemo } from "react";
-import type { ReactElement } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { clearHistory, DEFAULT_HOTKEY, deleteHistoryEntry, formatHotkeyLabel, getHistory, getSettings, HistoryEntry } from "../../../lib/store";
 import { AlertCircle, Check, Copy, RotateCcw, Trash2 } from "lucide-react";
@@ -14,47 +13,6 @@ interface HistoryGroup {
   id: string;
   label: string;
   items: HistoryEntry[];
-}
-
-type HistoryFilter = "all" | "failed";
-
-const ALL_FILTER_WIDTH = 118;
-const FAILED_FILTER_WIDTH = 156;
-const FILTER_TRACK_PADDING = 3;
-
-function FilterChip({
-  active,
-  label,
-  onClick,
-  width,
-}: {
-  active: boolean;
-  label: string;
-  onClick: () => void;
-  width: number;
-}): ReactElement {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        position: "relative",
-        zIndex: 1,
-        minHeight: 28,
-        width,
-        padding: "0 12px",
-        border: "none",
-        borderRadius: 999,
-        background: "transparent",
-        color: active ? "#fff" : "var(--text-mid)",
-        fontSize: 12,
-        fontWeight: 600,
-        cursor: "pointer",
-        transition: "color 0.18s ease",
-      }}
-    >
-      {label}
-    </button>
-  );
 }
 
 function formatDayLabel(timestamp: string): string {
@@ -80,7 +38,6 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
   const [history, setHistory] = useState<HistoryEntry[]>(initialHistory);
   const [copied, setCopied] = useState<string | null>(null);
   const [retryingId, setRetryingId] = useState<string | null>(null);
-  const [historyFilter, setHistoryFilter] = useState<HistoryFilter>("all");
 
   useEffect(() => {
     getHistory().then(setHistory);
@@ -123,13 +80,9 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
   };
 
   const groupedHistory = useMemo<HistoryGroup[]>(() => {
-    const visibleHistory = historyFilter === "failed"
-      ? history.filter((item) => item.status === "failed")
-      : history;
-
     const groups: HistoryGroup[] = [];
 
-    for (const item of visibleHistory) {
+    for (const item of history) {
       const label = formatDayLabel(item.timestamp);
       const existing = groups[groups.length - 1];
 
@@ -146,12 +99,7 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
     }
 
     return groups;
-  }, [history, historyFilter]);
-
-  const failedCount = useMemo(
-    () => history.filter((item) => item.status === "failed").length,
-    [history],
-  );
+  }, [history]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -221,44 +169,6 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
           )}
         </div>
 
-        {history.length > 0 && (
-          <div
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 0,
-              padding: FILTER_TRACK_PADDING,
-              width: "fit-content",
-              borderRadius: 999,
-              background: "rgba(255,255,255,0.6)",
-              border: "1px solid rgba(0,0,0,0.06)",
-              position: "relative",
-            }}
-          >
-            <div
-              style={{
-                position: "absolute",
-                top: FILTER_TRACK_PADDING,
-                left: historyFilter === "all" ? FILTER_TRACK_PADDING : FILTER_TRACK_PADDING + ALL_FILTER_WIDTH,
-                width: historyFilter === "all" ? ALL_FILTER_WIDTH : FAILED_FILTER_WIDTH,
-                height: 28,
-                borderRadius: 999,
-                background: "#000",
-                border: "1px solid #000",
-                boxShadow: "0 4px 10px rgba(0,0,0,0.12)",
-                transition: "left 0.2s ease, width 0.2s ease",
-              }}
-            />
-            <FilterChip active={historyFilter === "all"} label="Все записи" width={ALL_FILTER_WIDTH} onClick={() => setHistoryFilter("all")} />
-            <FilterChip
-              active={historyFilter === "failed"}
-              label={`Нужен повтор${failedCount > 0 ? ` (${failedCount})` : ""}`}
-              width={FAILED_FILTER_WIDTH}
-              onClick={() => setHistoryFilter("failed")}
-            />
-          </div>
-        )}
-
         <div
           style={{
             display: "grid",
@@ -273,13 +183,6 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
               <div className="label" style={{ marginBottom: 10 }}>История пуста</div>
               <p style={{ margin: 0, fontSize: 14, color: "var(--text-mid)", lineHeight: 1.7 }}>
                 Записей пока нет. Удерживайте <b>{HOTKEY_LABEL}</b> для записи.
-              </p>
-            </div>
-          ) : groupedHistory.length === 0 ? (
-            <div style={{ padding: "28px 20px", borderRadius: 12, border: "1px dashed rgba(0,0,0,0.12)", textAlign: "center", color: "var(--text-mid)" }}>
-              <div className="label" style={{ marginBottom: 10 }}>Ничего не найдено</div>
-              <p style={{ margin: 0, fontSize: 14, lineHeight: 1.7 }}>
-                Сейчас нет записей, которым нужен повтор.
               </p>
             </div>
           ) : (
@@ -325,10 +228,13 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                                      onClick={() => retryEntry(item)}
                                      className="btn"
                                      disabled={retryingId === item.id}
-                                     style={{ width: 32, minWidth: 32, height: 32, minHeight: 32, padding: 0, flexShrink: 0, borderRadius: 8 }}
+                                     style={{ minWidth: 96, height: 32, minHeight: 32, padding: "0 10px", flexShrink: 0, borderRadius: 999 }}
                                      title="Отправить повторно"
                                    >
                                      <RotateCcw size={12} strokeWidth={2} style={{ opacity: retryingId === item.id ? 0.45 : 1 }} />
+                                     <span style={{ opacity: retryingId === item.id ? 0.6 : 1 }}>
+                                       {retryingId === item.id ? "Повтор..." : "Повторить"}
+                                     </span>
                                   </button>
                                 ) : (
                                  <button onClick={() => copyText(item.id, item.cleaned)} className="btn" style={{ width: 32, minWidth: 32, height: 32, minHeight: 32, padding: 0, flexShrink: 0, borderRadius: 8 }} title="Скопировать">
