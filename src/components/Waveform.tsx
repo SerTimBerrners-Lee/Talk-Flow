@@ -17,10 +17,10 @@ export function Waveform({ stream, isActive }: WaveformProps) {
       return;
     }
 
-    const audioCtx = new AudioContext();
+    const audioCtx = new AudioContext({ latencyHint: "interactive" });
     const analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 1024;
-    analyser.smoothingTimeConstant = 0.88;
+    analyser.fftSize = 512;
+    analyser.smoothingTimeConstant = 0.35;
 
     const source = audioCtx.createMediaStreamSource(stream);
     source.connect(analyser);
@@ -54,10 +54,10 @@ export function Waveform({ stream, isActive }: WaveformProps) {
       }
 
       const rms = Math.sqrt(sumSquares / dataArray.length);
-      const boostedLevel = Math.pow(Math.min(1, rms * 8.5), 0.55);
-      const quietFloor = rms > 0.006 ? 0.12 : 0;
+      const boostedLevel = Math.pow(Math.min(1, rms * 11), 0.5);
+      const quietFloor = rms > 0.003 ? 0.16 : 0;
       const levelTarget = Math.max(quietFloor, boostedLevel);
-      levelRef.current = levelRef.current * 0.7 + levelTarget * 0.3;
+      levelRef.current = levelRef.current * 0.42 + levelTarget * 0.58;
 
       const time = performance.now() / 340;
       const centerY = displayHeight / 2;
@@ -102,6 +102,7 @@ export function Waveform({ stream, isActive }: WaveformProps) {
       ctx.shadowBlur = 0;
     };
 
+    void audioCtx.resume().catch(() => {});
     draw();
 
     return () => {

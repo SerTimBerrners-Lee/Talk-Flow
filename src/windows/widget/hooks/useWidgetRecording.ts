@@ -53,6 +53,50 @@ function formatErrorMessage(error: unknown): string {
   }
 }
 
+function getAudioConstraints(micId: string): MediaTrackConstraints | true {
+  const constraints: MediaTrackConstraints = {
+    echoCancellation: false,
+    noiseSuppression: false,
+    autoGainControl: false,
+    channelCount: { ideal: 1 },
+  };
+
+  if (micId) {
+    constraints.deviceId = { ideal: micId };
+  }
+
+  return constraints;
+}
+
+function stopStreamTracks(stream: MediaStream): void {
+  stream.getTracks().forEach((track) => track.stop());
+}
+
+async function waitForTrackReady(stream: MediaStream, timeoutMs: number): Promise<void> {
+  const [track] = stream.getAudioTracks();
+  if (!track || (!track.muted && track.readyState === "live")) {
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    let settled = false;
+
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      track.removeEventListener("unmute", finish);
+      clearTimeout(timer);
+      resolve();
+    };
+
+    const timer = setTimeout(finish, timeoutMs);
+    track.addEventListener("unmute", finish, { once: true });
+  });
+}
+
 export function useWidgetRecording({
   settings,
   setState,
@@ -69,6 +113,39 @@ export function useWidgetRecording({
   stopAndProcessRef,
 }: UseWidgetRecordingParams): UseWidgetRecordingResult {
   const runtimeRef = useRef(createRecordingRuntimeController());
+
+  useEffect(() => {
+    const micId = settings?.micId;
+    if (micId === undefined) {
+      return;
+    }
+
+    let disposed = false;
+
+    const prewarmMicrophone = async () => {
+      try {
+        const warmupStream = await navigator.mediaDevices.getUserMedia({
+          audio: getAudioConstraints(micId),
+        });
+
+        stopStreamTracks(warmupStream);
+
+        if (!disposed) {
+          logInfo("RECORDING", "Microphone pre-initialized");
+        }
+      } catch (error) {
+        if (!disposed) {
+          logInfo("RECORDING", `Microphone pre-initialization skipped: ${formatErrorMessage(error)}`);
+        }
+      }
+    };
+
+    void prewarmMicrophone();
+
+    return () => {
+      disposed = true;
+    };
+  }, [settings?.micId]);
 
   const startRecording = useCallback(async () => {
     logInfo("RECORDING", "startRecording called");
@@ -92,10 +169,9 @@ export function useWidgetRecording({
       setState("recording");
       void resizeWidget(RECORDING_WIDGET_WIDTH, RECORDING_WIDGET_HEIGHT);
 
-      let audioConstraints: MediaTrackConstraints | true = true;
+      const audioConstraints = getAudioConstraints(settings.micId);
       if (settings.micId) {
-        audioConstraints = { deviceId: { exact: settings.micId } };
-        logInfo("RECORDING", `Using specific mic: ${settings.micId}`);
+        logInfo("RECORDING", `Using preferred mic: ${settings.micId}`);
       }
 
       let recordingStream: MediaStream;
@@ -124,6 +200,7 @@ export function useWidgetRecording({
         }
       }
 
+      await waitForTrackReady(recordingStream, 250);
       setStream(recordingStream);
       const codec = runtimeRef.current.start(recordingStream);
       if (codec === "webm") {
