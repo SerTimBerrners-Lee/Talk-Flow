@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { getHistory, deleteHistoryEntry, clearHistory, HistoryEntry, DEFAULT_HOTKEY, formatHotkeyLabel } from "../../../lib/store";
-import { Copy, Trash2, Check } from "lucide-react";
+import { clearHistory, DEFAULT_HOTKEY, deleteHistoryEntry, formatHotkeyLabel, getHistory, getSettings, HistoryEntry } from "../../../lib/store";
+import { AlertCircle, Check, Copy, RotateCcw, Trash2 } from "lucide-react";
 import { HISTORY_UPDATED_EVENT } from "../../../lib/hotkeyEvents";
+import { retryHistoryEntry } from "../../widget/services/transcriptionPipeline";
 
 interface MainTabProps {
   initialHistory?: HistoryEntry[];
@@ -36,6 +37,7 @@ const HOTKEY_LABEL = formatHotkeyLabel(DEFAULT_HOTKEY);
 export function MainTab({ initialHistory = [] }: MainTabProps) {
   const [history, setHistory] = useState<HistoryEntry[]>(initialHistory);
   const [copied, setCopied] = useState<string | null>(null);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
 
   useEffect(() => {
     getHistory().then(setHistory);
@@ -61,6 +63,20 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
     await navigator.clipboard.writeText(text);
     setCopied(id);
     setTimeout(() => setCopied((current) => (current === id ? null : current)), 1500);
+  };
+
+  const retryEntry = async (entry: HistoryEntry) => {
+    setRetryingId(entry.id);
+
+    try {
+      const settings = await getSettings();
+      await retryHistoryEntry(entry, settings);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Не удалось повторно отправить запись.";
+      alert(message);
+    } finally {
+      setRetryingId((current) => (current === entry.id ? null : current));
+    }
   };
 
   const groupedHistory = useMemo<HistoryGroup[]>(() => {
@@ -186,13 +202,39 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                           </td>
                           <td style={{ verticalAlign: "top" }}>
                             <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-                              <span style={{ flex: 1, color: "var(--text-mid)", lineHeight: 1.7 }}>{item.cleaned}</span>
-                              <button onClick={() => copyText(item.id, item.cleaned)} className="btn" style={{ width: 32, minWidth: 32, height: 32, minHeight: 32, padding: 0, flexShrink: 0, borderRadius: 8 }} title="Скопировать">
-                                {copied === item.id ? <Check size={12} strokeWidth={2.5} /> : <Copy size={12} strokeWidth={2} />}
-                              </button>
-                              <button onClick={() => deleteEntry(item.id)} className="btn btn-danger" style={{ width: 32, minWidth: 32, height: 32, minHeight: 32, padding: 0, flexShrink: 0, borderRadius: 8 }} title="Удалить">
-                                <Trash2 size={12} strokeWidth={2} />
-                              </button>
+                               <div style={{ flex: 1, display: "grid", gap: 8 }}>
+                                 {item.status === "failed" ? (
+                                   <>
+                                     <div style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 999, background: "rgba(143,45,32,0.08)", border: "1px solid rgba(143,45,32,0.14)", color: "var(--danger)", fontSize: 12, lineHeight: 1.4, width: "fit-content" }}>
+                                       <AlertCircle size={13} strokeWidth={2} />
+                                       <span>Обработка не завершилась</span>
+                                     </div>
+                                     <div style={{ color: "var(--text-mid)", lineHeight: 1.7 }}>
+                                       {item.errorMessage || "Аудио сохранено локально. Можно отправить повторно."}
+                                     </div>
+                                   </>
+                                 ) : (
+                                   <span style={{ color: "var(--text-mid)", lineHeight: 1.7 }}>{item.cleaned}</span>
+                                 )}
+                               </div>
+                               {item.status === "failed" ? (
+                                 <button
+                                   onClick={() => retryEntry(item)}
+                                   className="btn"
+                                   disabled={retryingId === item.id}
+                                   style={{ minWidth: 98, height: 32, minHeight: 32, padding: "0 10px", flexShrink: 0, borderRadius: 8 }}
+                                   title="Отправить повторно"
+                                 >
+                                   <RotateCcw size={12} strokeWidth={2} /> {retryingId === item.id ? "Повтор..." : "Повторить"}
+                                 </button>
+                               ) : (
+                                 <button onClick={() => copyText(item.id, item.cleaned)} className="btn" style={{ width: 32, minWidth: 32, height: 32, minHeight: 32, padding: 0, flexShrink: 0, borderRadius: 8 }} title="Скопировать">
+                                   {copied === item.id ? <Check size={12} strokeWidth={2.5} /> : <Copy size={12} strokeWidth={2} />}
+                                 </button>
+                               )}
+                               <button onClick={() => deleteEntry(item.id)} className="btn btn-danger" style={{ width: 32, minWidth: 32, height: 32, minHeight: 32, padding: 0, flexShrink: 0, borderRadius: 8 }} title="Удалить">
+                                 <Trash2 size={12} strokeWidth={2} />
+                               </button>
                             </div>
                           </td>
                         </tr>

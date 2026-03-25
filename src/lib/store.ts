@@ -6,6 +6,11 @@ export interface HistoryEntry {
   duration: number;
   raw: string;
   cleaned: string;
+  status?: "completed" | "failed";
+  errorMessage?: string;
+  audioBase64?: string;
+  language?: string;
+  style?: AppSettings["style"];
 }
 
 export interface AppSettings {
@@ -161,6 +166,14 @@ export async function addHistoryEntry(entry: HistoryEntry): Promise<void> {
   const store = await getStore();
   const history = await getHistory();
   const updated = [entry, ...history].slice(0, 500); // max 500 entries
+  await store.set("history", updated);
+  await store.save();
+}
+
+export async function updateHistoryEntry(entry: HistoryEntry): Promise<void> {
+  const store = await getStore();
+  const history = await getHistory();
+  const updated = history.map((item) => (item.id === entry.id ? entry : item));
   await store.set("history", updated);
   await store.save();
 }

@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 
-import { addHistoryEntry, AppSettings } from "../../../lib/store";
+import { addHistoryEntry, AppSettings, HistoryEntry, updateHistoryEntry } from "../../../lib/store";
 import { logError, logInfo } from "../../../lib/logger";
 import { HISTORY_UPDATED_EVENT } from "../../../lib/hotkeyEvents";
 
@@ -14,6 +14,11 @@ export interface ProcessRecordingBlobParams {
 export interface ProcessRecordingBlobResult {
   durationSeconds: number;
   hasTranscription: boolean;
+}
+
+export interface RetryHistoryEntryResult {
+  hasTranscription: boolean;
+  updatedEntry: HistoryEntry;
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
@@ -45,23 +50,18 @@ function formatErrorMessage(error: unknown): string {
   }
 }
 
-export async function processRecordingBlob({
-  blob,
+async function transcribeAudio({
+  audioBase64,
   settings,
-  recordingStartTimestamp,
-}: ProcessRecordingBlobParams): Promise<ProcessRecordingBlobResult> {
-  const buffer = await blob.arrayBuffer();
-  const base64Audio = arrayBufferToBase64(buffer);
-  const durationSeconds = Math.floor((Date.now() - recordingStartTimestamp) / 1000);
-
-  logInfo(
-    "API",
-    `Sending to backend, audio_size: ${base64Audio.length} chars, duration: ${durationSeconds}s`,
-  );
+}: {
+  audioBase64: string;
+  settings: AppSettings;
+}): Promise<{ raw: string; cleaned: string }> {
+  logInfo("API", `Sending to backend, audio_size: ${audioBase64.length} chars`);
 
   const result = await invoke<{ raw: string; cleaned: string }>("transcribe_and_clean", {
     req: {
-      audio_base64: base64Audio,
+      audio_base64: audioBase64,
       language: settings.language,
       api_key: settings.apiKey,
       style: settings.style || "classic",
@@ -70,31 +70,129 @@ export async function processRecordingBlob({
     },
   });
 
-  if (!result.raw.trim() && !result.cleaned.trim()) {
-    logInfo("API", "Nothing recognized, skipping history save and paste");
-    return { durationSeconds, hasTranscription: false };
+  return result;
+}
+
+async function pasteCleanedText(text: string): Promise<void> {
+  logInfo("PASTE", "Sending cleaned text to paste_text");
+  await invoke("paste_text", { text });
+  logInfo("PASTE", "paste_text finished successfully");
+}
+
+async function saveAndEmitHistoryEntry(entry: HistoryEntry, mode: "add" | "update"): Promise<void> {
+  try {
+    if (mode === "add") {
+      await addHistoryEntry(entry);
+    } else {
+      await updateHistoryEntry(entry);
+    }
+
+    logInfo("HISTORY", `History entry ${mode === "add" ? "saved" : "updated"}`);
+    await emit(HISTORY_UPDATED_EVENT, entry);
+  } catch (historyError) {
+    logError("HISTORY", `Failed to persist entry: ${formatErrorMessage(historyError)}`);
+  }
+}
+
+export async function processRecordingBlob({
+  blob,
+  settings,
+  recordingStartTimestamp,
+}: ProcessRecordingBlobParams): Promise<ProcessRecordingBlobResult> {
+  const buffer = await blob.arrayBuffer();
+  const base64Audio = arrayBufferToBase64(buffer);
+  const durationSeconds = Math.floor((Date.now() - recordingStartTimestamp) / 1000);
+  try {
+    const result = await transcribeAudio({
+      audioBase64: base64Audio,
+      settings,
+    });
+
+    if (!result.raw.trim() && !result.cleaned.trim()) {
+      logInfo("API", "Nothing recognized, skipping history save and paste");
+      return { durationSeconds, hasTranscription: false };
+    }
+
+    logInfo("API", `Transcription complete: "${result.cleaned}"`);
+    const historyEntry: HistoryEntry = {
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      duration: durationSeconds,
+      raw: result.raw,
+      cleaned: result.cleaned,
+      status: "completed",
+    };
+
+    await saveAndEmitHistoryEntry(historyEntry, "add");
+    await pasteCleanedText(result.cleaned);
+    return { durationSeconds, hasTranscription: true };
+  } catch (error) {
+    const failedEntry: HistoryEntry = {
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      duration: durationSeconds,
+      raw: "",
+      cleaned: "",
+      status: "failed",
+      errorMessage: formatErrorMessage(error),
+      audioBase64: base64Audio,
+      language: settings.language,
+      style: settings.style || "classic",
+    };
+
+    await saveAndEmitHistoryEntry(failedEntry, "add");
+    throw error;
+  }
+}
+
+export async function retryHistoryEntry(
+  entry: HistoryEntry,
+  settings: AppSettings,
+): Promise<RetryHistoryEntryResult> {
+  if (!entry.audioBase64) {
+    throw new Error("У этой записи нет сохраненного аудио для повторной отправки.");
   }
 
-  logInfo("API", `Transcription complete: "${result.cleaned}"`);
-  const historyEntry = {
-    id: crypto.randomUUID(),
-    timestamp: new Date().toISOString(),
-    duration: durationSeconds,
-    raw: result.raw,
-    cleaned: result.cleaned,
+  const retrySettings: AppSettings = {
+    ...settings,
+    language: entry.language || settings.language,
+    style: entry.style || settings.style,
   };
 
   try {
-    await addHistoryEntry(historyEntry);
-    logInfo("HISTORY", "History entry saved");
-    await emit(HISTORY_UPDATED_EVENT, historyEntry);
-  } catch (historyError) {
-    logError("HISTORY", `Failed to save entry: ${formatErrorMessage(historyError)}`);
+    const result = await transcribeAudio({
+      audioBase64: entry.audioBase64,
+      settings: retrySettings,
+    });
+
+    if (!result.raw.trim() && !result.cleaned.trim()) {
+      throw new Error("Речь не распознана. Попробуйте отправить запись еще раз.");
+    }
+
+    const updatedEntry: HistoryEntry = {
+      ...entry,
+      raw: result.raw,
+      cleaned: result.cleaned,
+      status: "completed",
+      errorMessage: undefined,
+      audioBase64: undefined,
+    };
+
+    await saveAndEmitHistoryEntry(updatedEntry, "update");
+    await pasteCleanedText(result.cleaned);
+
+    return {
+      hasTranscription: true,
+      updatedEntry,
+    };
+  } catch (error) {
+    const failedEntry: HistoryEntry = {
+      ...entry,
+      status: "failed",
+      errorMessage: formatErrorMessage(error),
+    };
+
+    await saveAndEmitHistoryEntry(failedEntry, "update");
+    throw error;
   }
-
-  logInfo("PASTE", "Sending cleaned text to paste_text");
-  await invoke("paste_text", { text: result.cleaned });
-  logInfo("PASTE", "paste_text finished successfully");
-
-  return { durationSeconds, hasTranscription: true };
 }
