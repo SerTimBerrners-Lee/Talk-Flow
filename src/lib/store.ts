@@ -27,6 +27,11 @@ export interface AppSettings {
   useOwnKey: boolean;
 }
 
+export interface WidgetPosition {
+  x: number;
+  y: number;
+}
+
 const MODIFIERS = ["Ctrl", "Alt", "Option", "Shift", "Command", "Cmd", "Meta", "Control"];
 export const DEFAULT_HOTKEY = "Command+Space";
 
@@ -192,6 +197,7 @@ export async function clearHistory(): Promise<void> {
 }
 
 const PERMISSIONS_PASSED_KEY = "permissions_passed";
+const WIDGET_POSITION_KEY = "widget_position";
 
 export async function getPermissionsPassed(): Promise<boolean> {
   const store = await getStore();
@@ -201,5 +207,27 @@ export async function getPermissionsPassed(): Promise<boolean> {
 export async function setPermissionsPassed(value: boolean): Promise<void> {
   const store = await getStore();
   await store.set(PERMISSIONS_PASSED_KEY, value);
+  await store.save();
+}
+
+export async function getWidgetPosition(): Promise<WidgetPosition | null> {
+  const store = await getStore();
+  const saved = await store.get<unknown>(WIDGET_POSITION_KEY);
+
+  if (!saved || typeof saved !== "object") {
+    return null;
+  }
+
+  const raw = saved as Record<string, unknown>;
+  if (typeof raw.x !== "number" || typeof raw.y !== "number") {
+    return null;
+  }
+
+  return { x: raw.x, y: raw.y };
+}
+
+export async function saveWidgetPosition(position: WidgetPosition): Promise<void> {
+  const store = await getStore();
+  await store.set(WIDGET_POSITION_KEY, position);
   await store.save();
 }

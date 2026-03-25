@@ -29,7 +29,7 @@ async fn open_settings(app: AppHandle) -> Result<(), String> {
         "settings",
         WebviewUrl::App("index.html?window=settings".into()),
     )
-    .title("TalkFlow — Settings")
+    .title("Talk Flow — Settings")
     .inner_size(920.0, 680.0)
     .min_inner_size(820.0, 560.0)
     .decorations(false)
@@ -65,11 +65,30 @@ async fn open_settings(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 async fn widget_resize(app: AppHandle, width: f64, height: f64) -> Result<(), String> {
     if let Some(win) = app.get_webview_window("widget") {
+        let current_position = win.outer_position().ok();
+        let current_size = win.outer_size().ok();
+        let scale_factor = win.scale_factor().unwrap_or(1.0);
+
         if let Err(err) = win.set_size(tauri::Size::Logical(tauri::LogicalSize { width, height })) {
             logger::log_error("WINDOW", &format!("Failed to resize widget window: {}", err));
         }
 
-        if let Ok(Some(monitor)) = win.primary_monitor() {
+        if let (Some(position), Some(size)) = (current_position, current_size) {
+            let target_width = width * scale_factor;
+            let target_height = height * scale_factor;
+            let x = position.x as f64 + (size.width as f64 - target_width) / 2.0;
+            let y = position.y as f64 + (size.height as f64 - target_height) / 2.0;
+
+            if let Err(err) = win.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+                x: x.round() as i32,
+                y: y.round() as i32,
+            })) {
+                logger::log_error(
+                    "WINDOW",
+                    &format!("Failed to preserve widget position on resize: {}", err),
+                );
+            }
+        } else if let Ok(Some(monitor)) = win.primary_monitor() {
             let screen_size = monitor.size();
             let scale_factor = monitor.scale_factor();
             let x = (screen_size.width as f64 / scale_factor - width) / 2.0;
@@ -191,5 +210,5 @@ pub fn run() {
             get_cleanup_prompt_preview,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running TalkFlow");
+        .expect("error while running Talk Flow");
 }

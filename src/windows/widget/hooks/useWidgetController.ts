@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { PhysicalPosition } from "@tauri-apps/api/dpi";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
-import { AppSettings, DEFAULT_HOTKEY, getSettings } from "../../../lib/store";
+import { AppSettings, DEFAULT_HOTKEY, getSettings, getWidgetPosition } from "../../../lib/store";
 import { logError, logInfo } from "../../../lib/logger";
 import { WidgetNoticeState, WidgetState } from "../widgetConstants";
 import { useWidgetHotkey } from "./useWidgetHotkey";
@@ -32,6 +34,7 @@ function formatErrorMessage(error: unknown): string {
 }
 
 export function useWidgetController(): WidgetControllerState {
+  const widgetWindow = getCurrentWindow();
   const [state, setState] = useState<WidgetState>("idle");
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -88,6 +91,31 @@ export function useWidgetController(): WidgetControllerState {
   useEffect(() => {
     settingsRef.current = settings;
   }, [settings]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const restoreWidgetPosition = async () => {
+      try {
+        const savedPosition = await getWidgetPosition();
+        if (!savedPosition || cancelled) {
+          return;
+        }
+
+        await widgetWindow.setPosition(new PhysicalPosition(savedPosition.x, savedPosition.y));
+      } catch (error) {
+        if (!cancelled) {
+          logError("WIDGET", `Failed to restore widget position: ${formatErrorMessage(error)}`);
+        }
+      }
+    };
+
+    void restoreWidgetPosition();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [widgetWindow]);
 
   const resizeWidget = useCallback(async (width: number, height: number) => {
     try {

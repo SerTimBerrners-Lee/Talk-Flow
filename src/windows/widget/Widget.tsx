@@ -1,13 +1,66 @@
-import type { ReactNode } from "react";
+import { useRef } from "react";
+import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AlertCircle, Bell } from "lucide-react";
 
+import { saveWidgetPosition } from "../../lib/store";
 import { Waveform } from "../../components/Waveform";
 import { useWidgetController } from "./hooks/useWidgetController";
 import { IDLE_WIDGET_HEIGHT, IDLE_WIDGET_WIDTH, NOTICE_AREA_HEIGHT, WidgetNoticeState } from "./widgetConstants";
 
 export function Widget() {
+  const widgetWindow = getCurrentWindow();
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
+  const dragTriggeredRef = useRef(false);
   const { state, stream, notice, lockedRecording } = useWidgetController();
+
+  const handleDragPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) {
+      return;
+    }
+
+    dragStartRef.current = { x: event.clientX, y: event.clientY };
+    dragTriggeredRef.current = false;
+  };
+
+  const handleDragPointerMove = async (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!dragStartRef.current || dragTriggeredRef.current || (event.buttons & 1) === 0) {
+      return;
+    }
+
+    const deltaX = Math.abs(event.clientX - dragStartRef.current.x);
+    const deltaY = Math.abs(event.clientY - dragStartRef.current.y);
+
+    if (deltaX < 4 && deltaY < 4) {
+      return;
+    }
+
+    dragTriggeredRef.current = true;
+
+    try {
+      await widgetWindow.startDragging();
+      const position = await widgetWindow.outerPosition();
+      await saveWidgetPosition({ x: position.x, y: position.y });
+    } catch {
+      dragTriggeredRef.current = false;
+    }
+  };
+
+  const handleDragPointerUp = () => {
+    window.setTimeout(() => {
+      dragStartRef.current = null;
+      dragTriggeredRef.current = false;
+    }, 0);
+  };
+
+  const handleIdleClick = async () => {
+    if (dragTriggeredRef.current) {
+      return;
+    }
+
+    await invoke("open_settings");
+  };
 
   return (
     <div
@@ -47,9 +100,33 @@ export function Widget() {
           overflow: "visible",
         }}
       >
-        {state === "idle" && <IdlePill />}
-        {state === "recording" && <RecordingPill stream={stream} locked={lockedRecording} />}
-        {state === "processing" && <ProcessingPill />}
+        {state === "idle" && (
+          <IdlePill
+            onClick={handleIdleClick}
+            onPointerDown={handleDragPointerDown}
+            onPointerMove={handleDragPointerMove}
+            onPointerUp={handleDragPointerUp}
+            onPointerCancel={handleDragPointerUp}
+          />
+        )}
+        {state === "recording" && (
+          <RecordingPill
+            stream={stream}
+            locked={lockedRecording}
+            onPointerDown={handleDragPointerDown}
+            onPointerMove={handleDragPointerMove}
+            onPointerUp={handleDragPointerUp}
+            onPointerCancel={handleDragPointerUp}
+          />
+        )}
+        {state === "processing" && (
+          <ProcessingPill
+            onPointerDown={handleDragPointerDown}
+            onPointerMove={handleDragPointerMove}
+            onPointerUp={handleDragPointerUp}
+            onPointerCancel={handleDragPointerUp}
+          />
+        )}
       </div>
     </div>
   );
@@ -113,7 +190,14 @@ function WidgetNotice({ message, tone }: WidgetNoticeState) {
   );
 }
 
-function IdlePill() {
+interface DragHandlers {
+  onPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  onPointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  onPointerUp: () => void;
+  onPointerCancel: () => void;
+}
+
+function IdlePill({ onClick, onPointerDown, onPointerMove, onPointerUp, onPointerCancel }: DragHandlers & { onClick: () => void }) {
   return (
     <div
       style={{
@@ -126,7 +210,15 @@ function IdlePill() {
         cursor: "pointer",
         pointerEvents: "auto",
       }}
-      onClick={() => invoke("open_settings")}
+      onClick={() => {
+        void onClick();
+      }}
+      onPointerDown={onPointerDown}
+      onPointerMove={(event) => {
+        void onPointerMove(event);
+      }}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
     >
       <div
         style={{
@@ -149,7 +241,7 @@ interface RecordingPillProps {
   locked: boolean;
 }
 
-function ActiveWidgetShell({ children }: { children: ReactNode }) {
+function ActiveWidgetShell({ children, onPointerDown, onPointerMove, onPointerUp, onPointerCancel }: { children: ReactNode } & DragHandlers) {
   return (
     <div
       style={{
@@ -170,16 +262,28 @@ function ActiveWidgetShell({ children }: { children: ReactNode }) {
         transition:
           "width 0.18s ease, height 0.18s ease, background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease",
         overflow: "hidden",
+        cursor: "grab",
       }}
+      onPointerDown={onPointerDown}
+      onPointerMove={(event) => {
+        void onPointerMove(event);
+      }}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
     >
       {children}
     </div>
   );
 }
 
-function RecordingPill({ stream, locked }: RecordingPillProps) {
+function RecordingPill({ stream, locked, onPointerDown, onPointerMove, onPointerUp, onPointerCancel }: RecordingPillProps & DragHandlers) {
   return (
-    <ActiveWidgetShell>
+    <ActiveWidgetShell
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
+    >
       <div
         style={{
           width: "100%",
@@ -209,7 +313,7 @@ function RecordingPill({ stream, locked }: RecordingPillProps) {
   );
 }
 
-function ProcessingPill() {
+function ProcessingPill({ onPointerDown, onPointerMove, onPointerUp, onPointerCancel }: DragHandlers) {
   return (
     <div
       style={{
@@ -225,7 +329,14 @@ function ProcessingPill() {
         alignItems: "center",
         justifyContent: "center",
         pointerEvents: "auto",
+        cursor: "grab",
       }}
+      onPointerDown={onPointerDown}
+      onPointerMove={(event) => {
+        void onPointerMove(event);
+      }}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
     >
       <div
         style={{
