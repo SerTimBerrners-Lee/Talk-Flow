@@ -291,7 +291,7 @@ function RecordingPill({ stream, locked, onPointerDown, onPointerMove, onPointer
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            padding: "0 3px",
+            padding: locked ? "0 10px 0 3px" : "0 3px",
           }}
         >
           <Waveform stream={stream} isActive={true} />
