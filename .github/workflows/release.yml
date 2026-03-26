@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Tag to publish, for example v0.1.0"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            target: macos
+            enabled: true
+          - runner: windows-latest
+            target: windows
+            enabled: false
+          - runner: ubuntu-22.04
+            target: linux
+            enabled: false
+
+    if: matrix.enabled == true
+    runs-on: ${{ matrix.runner }}
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.13
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run release checks
+        run: bun run check:release
+
+      - name: Build and upload release assets
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseName: Talk Flow ${{ env.RELEASE_TAG }}
+          releaseBody: |
+            Automated release for ${{ env.RELEASE_TAG }}.
+
+            Current workflow publishes macOS artifacts.
+            Windows and Linux are intentionally disabled until platform-specific support is implemented.
+          releaseDraft: true
+          prerelease: ${{ contains(env.RELEASE_TAG, '-') }}

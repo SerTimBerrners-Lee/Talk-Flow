@@ -166,6 +166,26 @@ bun run logs
 bun run logs:clear
 ```
 
+## GitHub releases
+
+The repository includes a GitHub Actions workflow at `.github/workflows/release.yml`.
+
+- Push a tag like `v0.1.0` to build and publish a draft GitHub Release
+- Or run the workflow manually and provide a tag like `v0.1.0`
+- The current workflow publishes macOS artifacts only
+- Windows and Linux are listed in the matrix but intentionally disabled until platform-specific support is added
+
+Optional macOS signing/notarization secrets:
+
+- `APPLE_CERTIFICATE`
+- `APPLE_CERTIFICATE_PASSWORD`
+- `APPLE_SIGNING_IDENTITY`
+- `APPLE_ID`
+- `APPLE_PASSWORD`
+- `APPLE_TEAM_ID`
+
+Without these secrets, the workflow can still produce unsigned macOS release artifacts.
+
 ## Tech stack
 
 - Tauri v2
