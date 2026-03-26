@@ -159,8 +159,8 @@ pub fn run() {
                         ns_win.setAcceptsMouseMovedEvents(true);
                     }
                 }
-                let width = 56.0;
-                let height = 56.0;
+                let width = 62.0;
+                let height = 62.0;
 
                 if let Ok(Some(monitor)) = win.primary_monitor() {
                     let screen_size = monitor.size();
