@@ -11,7 +11,7 @@ const NOTICE_WINDOW_LABEL: &str = "widget-notice";
 const NOTICE_EVENT: &str = "widget-notice:update";
 const NOTICE_WIDTH: f64 = 228.0;
 const NOTICE_HEIGHT: f64 = 68.0;
-const NOTICE_GAP: f64 = 10.0;
+const NOTICE_GAP: f64 = 2.0;
 
 #[derive(Clone, Serialize)]
 struct WidgetNoticePayload {
