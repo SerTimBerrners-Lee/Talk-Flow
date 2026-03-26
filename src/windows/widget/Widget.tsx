@@ -218,7 +218,7 @@ function WidgetCoreShell({ children }: { children?: ReactNode }) {
   return (
     <div
       style={{
-        width: 42,
+        width: 50,
         height: 18,
         borderRadius: 999,
         background: "linear-gradient(180deg, rgba(252,251,248,0.98) 0%, rgba(245,241,234,0.98) 100%)",
@@ -285,22 +285,24 @@ function RecordingPill({ stream, locked, onPointerDown, onPointerMove, onPointer
       <WidgetCoreShell>
         <div
           style={{
+            position: "relative",
             width: "100%",
             height: "100%",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            gap: 4,
-            padding: "0 6px",
+            padding: "0 3px",
           }}
         >
           <Waveform stream={stream} isActive={true} />
           {locked && (
             <span
               style={{
+                position: "absolute",
+                top: 4,
+                right: 4,
                 width: 4,
                 height: 4,
-                flexShrink: 0,
                 borderRadius: 999,
                 background: "#d92d20",
                 boxShadow: "0 0 0 2px rgba(217,45,32,0.14)",

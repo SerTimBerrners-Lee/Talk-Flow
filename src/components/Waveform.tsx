@@ -54,21 +54,27 @@ export function Waveform({ stream, isActive }: WaveformProps) {
       }
 
       const rms = Math.sqrt(sumSquares / dataArray.length);
-      const boostedLevel = Math.pow(Math.min(1, rms * 11), 0.5);
-      const quietFloor = rms > 0.003 ? 0.16 : 0;
+      const boostedLevel = Math.pow(Math.min(1, rms * 10.5), 0.58);
+      const quietFloor = rms > 0.003 ? 0.1 : 0;
       const levelTarget = Math.max(quietFloor, boostedLevel);
-      levelRef.current = levelRef.current * 0.42 + levelTarget * 0.58;
+      levelRef.current = levelRef.current * 0.5 + levelTarget * 0.5;
 
-      const time = performance.now() / 340;
+      const time = performance.now() / 420;
       const centerY = displayHeight / 2;
-      const baseAmplitude = 1.2 + levelRef.current * displayHeight * 0.34;
+      const baseAmplitude = 0.7 + levelRef.current * displayHeight * 0.22;
       const lineConfigs = [
-        { amplitude: 1.28, speed: 1, phase: 0, alpha: 0.94, width: 2.4 },
-        { amplitude: 1.08, speed: 1.16, phase: Math.PI / 5.2, alpha: 0.58, width: 1.9 },
-        { amplitude: 0.92, speed: 1.32, phase: Math.PI / 2.9, alpha: 0.42, width: 1.55 },
-        { amplitude: 0.78, speed: 0.86, phase: Math.PI / 1.9, alpha: 0.3, width: 1.3 },
-        { amplitude: 0.66, speed: 1.54, phase: Math.PI / 1.35, alpha: 0.22, width: 1.1 },
-        { amplitude: 0.56, speed: 0.68, phase: Math.PI / 1.08, alpha: 0.16, width: 1 },
+        { amplitude: 1.22, speed: 1, phase: 0, alpha: 0.34, width: 1.1 },
+        { amplitude: 1.14, speed: 1.08, phase: Math.PI / 8, alpha: 0.3, width: 1 },
+        { amplitude: 1.06, speed: 1.16, phase: Math.PI / 5.5, alpha: 0.27, width: 0.95 },
+        { amplitude: 0.98, speed: 1.24, phase: Math.PI / 4.2, alpha: 0.24, width: 0.9 },
+        { amplitude: 0.9, speed: 0.92, phase: Math.PI / 3.3, alpha: 0.21, width: 0.85 },
+        { amplitude: 0.82, speed: 1.32, phase: Math.PI / 2.8, alpha: 0.19, width: 0.8 },
+        { amplitude: 0.75, speed: 0.84, phase: Math.PI / 2.25, alpha: 0.17, width: 0.78 },
+        { amplitude: 0.68, speed: 1.42, phase: Math.PI / 1.9, alpha: 0.15, width: 0.72 },
+        { amplitude: 0.61, speed: 0.74, phase: Math.PI / 1.6, alpha: 0.13, width: 0.68 },
+        { amplitude: 0.54, speed: 1.54, phase: Math.PI / 1.35, alpha: 0.11, width: 0.64 },
+        { amplitude: 0.48, speed: 0.66, phase: Math.PI / 1.14, alpha: 0.1, width: 0.6 },
+        { amplitude: 0.42, speed: 1.68, phase: Math.PI / 1.02, alpha: 0.09, width: 0.56 },
       ];
 
       ctx.lineCap = "round";
@@ -77,13 +83,13 @@ export function Waveform({ stream, isActive }: WaveformProps) {
       lineConfigs.forEach((line) => {
         ctx.beginPath();
 
-        for (let x = 0; x <= displayWidth; x += 2) {
-          const progress = x / displayWidth;
-          const envelope = Math.sin(progress * Math.PI);
-          const primary = Math.sin(progress * Math.PI * 2.1 + time * line.speed + line.phase);
-          const secondary = Math.sin(progress * Math.PI * 4.2 - time * (line.speed * 1.15) + line.phase * 0.65);
-          const tertiary = Math.cos(progress * Math.PI * 6.4 + time * 0.8 + line.phase);
-          const y = centerY + ((primary * 0.72) + (secondary * 0.2) + (tertiary * 0.08)) * baseAmplitude * line.amplitude * envelope;
+          for (let x = 0; x <= displayWidth; x += 1) {
+            const progress = x / displayWidth;
+            const envelope = 0.72 + Math.sin(progress * Math.PI) * 0.28;
+            const primary = Math.sin(progress * Math.PI * 2.8 + time * line.speed + line.phase);
+            const secondary = Math.sin(progress * Math.PI * 5.6 - time * (line.speed * 1.08) + line.phase * 0.72);
+            const tertiary = Math.cos(progress * Math.PI * 8.2 + time * 0.74 + line.phase);
+            const y = centerY + ((primary * 0.68) + (secondary * 0.22) + (tertiary * 0.1)) * baseAmplitude * line.amplitude * envelope;
 
           if (x === 0) {
             ctx.moveTo(x, y);
@@ -92,12 +98,12 @@ export function Waveform({ stream, isActive }: WaveformProps) {
           }
         }
 
-        ctx.strokeStyle = `rgba(0, 0, 0, ${line.alpha})`;
-        ctx.lineWidth = line.width;
-        ctx.shadowBlur = line.alpha > 0.85 ? 12 : line.alpha > 0.5 ? 6 : 0;
-        ctx.shadowColor = "rgba(0, 0, 0, 0.12)";
-        ctx.stroke();
-      });
+          ctx.strokeStyle = `rgba(0, 0, 0, ${line.alpha})`;
+          ctx.lineWidth = line.width;
+          ctx.shadowBlur = line.alpha > 0.28 ? 4 : 0;
+          ctx.shadowColor = "rgba(0, 0, 0, 0.08)";
+          ctx.stroke();
+        });
 
       ctx.shadowBlur = 0;
     };
