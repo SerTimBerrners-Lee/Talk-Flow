@@ -45,6 +45,14 @@ pub async fn paste_text(app: tauri::AppHandle, text: String) -> Result<(), Strin
                 .key(Key::Meta, enigo::Direction::Release)
                 .map_err(|e| format!("Meta release failed: {}", e))?;
 
+            std::thread::sleep(Duration::from_millis(120));
+
+            logger::log_info("PASTE", "Clearing clipboard after paste");
+            handle
+                .clipboard()
+                .write_text(String::new())
+                .map_err(|e| format!("Clipboard clear failed: {}", e))?;
+
             Ok(())
         })();
 
