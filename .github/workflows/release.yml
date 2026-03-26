@@ -14,23 +14,8 @@ permissions:
   contents: write
 
 jobs:
-  build-and-release:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-latest
-            target: macos
-            enabled: true
-          - runner: windows-latest
-            target: windows
-            enabled: false
-          - runner: ubuntu-22.04
-            target: linux
-            enabled: false
-
-    if: matrix.enabled == true
-    runs-on: ${{ matrix.runner }}
+  build-and-release-macos:
+    runs-on: macos-latest
     env:
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
 
@@ -72,3 +57,19 @@ jobs:
             Windows and Linux are intentionally disabled until platform-specific support is implemented.
           releaseDraft: false
           prerelease: ${{ contains(env.RELEASE_TAG, '-') }}
+
+  disabled-platform-placeholders:
+    if: ${{ false }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            target: windows
+          - runner: ubuntu-22.04
+            target: linux
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Placeholder
+        run: |
+          echo "${{ matrix.target }} releases are intentionally disabled until platform support is implemented."
