@@ -37,26 +37,29 @@ jobs:
       - name: Run release checks
         run: bunx tsc --noEmit && bun run smoke:hotkey && bun run build
 
-      - name: Build and upload release assets
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      - name: Build macOS bundles
+        run: bun run tauri build
+
+      - name: Archive macOS app bundle
+        run: ditto -c -k --sequesterRsrc --keepParent "/tmp/talk-flow-target/release/bundle/macos/Talk Flow.app" "Talk Flow-${{ env.RELEASE_TAG }}-macos.zip"
+
+      - name: Publish GitHub release assets
+        uses: softprops/action-gh-release@v2
         with:
-          tagName: ${{ env.RELEASE_TAG }}
-          releaseName: Talk Flow ${{ env.RELEASE_TAG }}
-          releaseBody: |
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Talk Flow ${{ env.RELEASE_TAG }}
+          body: |
             Automated release for ${{ env.RELEASE_TAG }}.
 
             Current workflow publishes macOS artifacts.
             Windows and Linux are intentionally disabled until platform-specific support is implemented.
-          releaseDraft: false
+          draft: false
           prerelease: ${{ contains(env.RELEASE_TAG, '-') }}
+          files: |
+            /tmp/talk-flow-target/release/bundle/dmg/*.dmg
+            Talk Flow-${{ env.RELEASE_TAG }}-macos.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   disabled-platform-placeholders:
     if: ${{ false }}
