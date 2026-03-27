@@ -42,6 +42,9 @@ bunx tsc --noEmit
 # Rust check
 cd src-tauri && cargo check
 
+# Release checks
+bun run check:release
+
 # View logs
 bun run logs          # tail -f ~/.talkflow/talkflow.log
 bun run logs:clear    # rm ~/.talkflow/talkflow.log
@@ -148,16 +151,24 @@ logger::log_error("TAG", &format!("error: {}", e));
 
 ## Architecture Notes
 
-- **Two windows:** Widget (44x44px floating) and Settings (separate window)
+- **Two windows:** Widget (50x18px floating) and Settings (separate window)
 - **Global shortcuts:** Use `tauri-plugin-global-shortcut` for hotkey registration
 - **Persistent storage:** Use `tauri-plugin-store` with JSON file
 - **Permissions:** Check microphone via `getUserMedia()`, accessibility via system dialog
 - **API calls:** Whisper for transcription, GPT-4o-mini for text cleanup
+
+## Release Workflow
+
+- Follow `docs/release/rule.md` for every release
+- Always update `README.md` before publishing a release
+- Create a per-release review file from `docs/release/review-template.md`
+- Push release work to `release/vX.Y.Z` first, then to `main`, then push tag `vX.Y.Z`
+- Treat `.github/workflows/release.yml` as the release automation source of truth
 
 ## Key Conventions
 
 1. **Language:** UI text in Russian, code/comments in English
 2. **Hotkeys:** Format is `Modifier+Key` (e.g., `Ctrl+Alt+Space`), always validate with `validateHotkey()`
 3. **Settings:** Load once at startup via `getSettings()`, save immediately on change
-4. **Window sizes:** Widget is 44x44 (idle) or 220x140 (recording)
+4. **Window sizes:** Widget is 50x18 in its compact state; keep window sizing in sync with `src/windows/widget/widgetConstants.ts`
 5. **Logs location:** `~/.talkflow/talkflow.log`

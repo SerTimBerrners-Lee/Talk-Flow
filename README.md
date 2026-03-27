@@ -170,9 +170,11 @@ bun run logs:clear
 
 The repository includes a GitHub Actions workflow at `.github/workflows/release.yml`.
 
-- Push a tag like `v0.1.0` to build and publish a draft GitHub Release
-- Or run the workflow manually and provide a tag like `v0.1.0`
-- The current workflow publishes macOS artifacts only
+- The canonical release process is documented in `docs/release/rule.md`
+- Before every release, refresh `README.md` and create a release review file from `docs/release/review-template.md`
+- Push a tag like `v0.1.2` to build and publish a GitHub Release
+- Or run the workflow manually and provide a tag like `v0.1.2`
+- The current workflow publishes all currently supported release artifacts, which is macOS only right now
 - Windows and Linux are listed in the matrix but intentionally disabled until platform-specific support is added
 
 Optional macOS signing/notarization secrets:

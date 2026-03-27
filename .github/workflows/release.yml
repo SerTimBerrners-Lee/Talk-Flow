@@ -35,7 +35,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Run release checks
-        run: bunx tsc --noEmit && bun run smoke:hotkey && bun run build
+        run: bun run check:release
 
       - name: Build macOS bundles
         run: bun run tauri build
@@ -51,7 +51,7 @@ jobs:
           body: |
             Automated release for ${{ env.RELEASE_TAG }}.
 
-            Current workflow publishes macOS artifacts.
+            Current workflow publishes all currently supported release artifacts, which is macOS only right now.
             Windows and Linux are intentionally disabled until platform-specific support is implemented.
           draft: false
           prerelease: ${{ contains(env.RELEASE_TAG, '-') }}
