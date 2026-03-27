@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Mic, Keyboard, Check, AlertCircle } from "lucide-react";
 import {
@@ -81,10 +81,60 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
   const [micStatus, setMicStatus] = useState<PermissionStatus>("unknown");
   const [accStatus, setAccStatus] = useState<PermissionStatus>("unknown");
 
-  useEffect(() => {
-    checkMicrophonePermission().then(setMicStatus);
-    checkAccessibilityPermission().then(setAccStatus);
+  const refreshAccessibilityStatus = useCallback(async () => {
+    const nextStatus = await checkAccessibilityPermission();
+
+    setAccStatus((current) => {
+      if (nextStatus === "granted") {
+        return "granted";
+      }
+
+      return current === "prompting" ? "prompting" : nextStatus;
+    });
+
+    return nextStatus;
   }, []);
+
+  const refreshAllPermissions = useCallback(async () => {
+    const [nextMicStatus, nextAccStatus] = await Promise.all([
+      checkMicrophonePermission(),
+      refreshAccessibilityStatus(),
+    ]);
+
+    setMicStatus(nextMicStatus);
+    return { nextMicStatus, nextAccStatus };
+  }, [refreshAccessibilityStatus]);
+
+  useEffect(() => {
+    void refreshAllPermissions();
+  }, [refreshAllPermissions]);
+
+  useEffect(() => {
+    if (accStatus !== "prompting") {
+      return;
+    }
+
+    const refreshOnReturn = () => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+
+      void refreshAccessibilityStatus();
+    };
+
+    const intervalId = window.setInterval(() => {
+      void refreshAccessibilityStatus();
+    }, 1000);
+
+    window.addEventListener("focus", refreshOnReturn);
+    document.addEventListener("visibilitychange", refreshOnReturn);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", refreshOnReturn);
+      document.removeEventListener("visibilitychange", refreshOnReturn);
+    };
+  }, [accStatus, refreshAccessibilityStatus]);
 
   const handleMicRequest = async () => {
     setMicStatus("prompting");
@@ -94,8 +144,7 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
 
   const handleAccessibilityRequest = async () => {
     if (accStatus === "prompting") {
-      const nextAccStatus = await checkAccessibilityPermission();
-      setAccStatus(nextAccStatus);
+      await refreshAccessibilityStatus();
       return;
     }
 
@@ -109,13 +158,7 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
   };
 
   const handleContinue = async () => {
-    const [nextMicStatus, nextAccStatus] = await Promise.all([
-      checkMicrophonePermission(),
-      checkAccessibilityPermission(),
-    ]);
-
-    setMicStatus(nextMicStatus);
-    setAccStatus(nextAccStatus);
+    const { nextMicStatus, nextAccStatus } = await refreshAllPermissions();
 
     if (nextMicStatus !== "granted" || nextAccStatus !== "granted") {
       return;
