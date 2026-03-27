@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { Mic, Keyboard, Check, AlertCircle } from "lucide-react";
 import {
   PermissionStatus,
@@ -175,6 +176,11 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
   };
 
   const handleContinue = async () => {
+    if (shouldShowInstallWarning) {
+      await openPath("/Applications");
+      return;
+    }
+
     const { nextMicStatus, nextAccStatus } = await refreshAllPermissions();
 
     if (nextMicStatus !== "granted" || nextAccStatus !== "granted") {
@@ -187,6 +193,7 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
 
   const canContinue = micStatus === "granted" && accStatus === "granted";
   const shouldShowInstallWarning = Boolean(runtimeInfo?.shouldMoveToApplications);
+  const canCompleteOnboarding = canContinue && !shouldShowInstallWarning;
 
   return (
     <div
@@ -267,9 +274,18 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
               icon={<Keyboard size={18} strokeWidth={1.75} />}
               title="Универсальный доступ"
               description="Нужен для глобальной горячей клавиши и вставки текста в активное приложение."
-              status={accStatus}
-              onAction={handleAccessibilityRequest}
-              helpText="Откроются системные настройки macOS. После выдачи доступа вернитесь сюда и нажмите «Продолжить»."
+              status={shouldShowInstallWarning ? "denied" : accStatus}
+              onAction={() => {
+                if (shouldShowInstallWarning) {
+                  void openPath("/Applications");
+                  return;
+                }
+
+                void handleAccessibilityRequest();
+              }}
+              helpText={shouldShowInstallWarning
+                ? `Сейчас приложение запущено не из Applications: ${runtimeInfo?.bundlePath ?? "неизвестный путь"}`
+                : "Откроются системные настройки macOS. После выдачи доступа вернитесь сюда и нажмите «Продолжить»."}
             />
           </div>
 
@@ -298,14 +314,18 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
 
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 18, paddingTop: 6 }}>
             <div style={{ fontSize: 12, color: canContinue ? "var(--success)" : "var(--text-low)", lineHeight: 1.55 }}>
-              {canContinue ? "Все доступы выданы." : "Продолжение станет доступно после проверки обоих разрешений."}
+              {shouldShowInstallWarning
+                ? "Сначала запустите Talk Flow из Applications, затем повторите выдачу доступов."
+                : canContinue
+                  ? "Все доступы выданы."
+                  : "Продолжение станет доступно после проверки обоих разрешений."}
             </div>
             <button
               onClick={handleContinue}
-              className={canContinue ? "btn btn-primary" : "btn"}
+              className={canCompleteOnboarding ? "btn btn-primary" : "btn"}
               style={{ minWidth: 160 }}
             >
-              {canContinue ? "Продолжить" : "Проверить доступы"}
+              {canCompleteOnboarding ? "Продолжить" : shouldShowInstallWarning ? "Запустить из Applications" : "Проверить доступы"}
             </button>
           </div>
         </div>
