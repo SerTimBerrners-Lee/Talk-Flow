@@ -237,4 +237,6 @@ Project conventions:
 
 ## License
 
-No license file is included in this checkout yet. Add a `LICENSE` file before publishing the repository as a fully open-source project or accepting external contributions.
+Talkis is licensed under the [GNU Affero General Public License v3.0 or later](LICENSE) (`AGPL-3.0-or-later`).
+
+This license keeps the desktop app open-source and also requires source availability for modified versions that are offered to users over a network, which matters for the Talkis Cloud/API companion surface.

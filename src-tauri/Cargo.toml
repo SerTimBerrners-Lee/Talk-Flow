@@ -3,6 +3,7 @@ name = "talkis"
 version = "0.1.24"
 description = "Talkis - Voice to Text Desktop Widget"
 authors = ["trixter"]
+license = "AGPL-3.0-or-later"
 edition = "2021"
 default-run = "talkis"
 
