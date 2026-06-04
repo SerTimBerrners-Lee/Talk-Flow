@@ -233,7 +233,7 @@ Issues и pull requests приветствуются. Перед изменен�
 - Код и комментарии - на английском.
 - Package manager - Bun.
 - Настройки сохраняются сразу после изменения.
-- Release workflow описан в [docs/release/rule.md](docs/release/rule.md).
+- Release workflow описан в [rules/release.rule.md](rules/release.rule.md).
 
 ## Лицензия
 

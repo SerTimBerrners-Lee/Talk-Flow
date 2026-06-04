@@ -55,5 +55,6 @@ objc2-foundation = "0.3"
 tauri-plugin-autostart = "2.5.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+pipewire = "0.10.0"
 webkit2gtk = { version = "2.0.2", features = ["v2_8"] }
 x11rb = { version = "0.13.2", features = ["xtest"] }

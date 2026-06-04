@@ -31,7 +31,7 @@ export interface HotkeyCaptureStatePayload {
 }
 
 export interface SettingsNavigatePayload {
-  tab: "main" | "file" | "settings" | "model" | "style";
+  tab: "main" | "file" | "interpreter" | "settings" | "model" | "style";
   resultId?: string | null;
 }
 

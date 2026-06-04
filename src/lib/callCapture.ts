@@ -34,6 +34,7 @@ export interface StartCallCaptureRequest {
   includeSystem?: boolean;
   micDeviceId?: string | null;
   sampleRate?: number | null;
+  storageDir?: string | null;
 }
 
 export interface CallCaptureTrack {

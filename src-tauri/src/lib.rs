@@ -1,6 +1,7 @@
 mod ai;
 mod call_capture;
 mod commands;
+mod history_storage;
 mod hotkey_capture;
 mod local_stt;
 mod logger;
@@ -9,6 +10,7 @@ mod media_permissions;
 mod native_voice_recorder;
 mod paste;
 mod prompt_config;
+mod realtime_interpreter;
 
 use commands::{
     accessibility, runtime_info, settings_window,
@@ -114,12 +116,20 @@ pub fn run() {
             ai::transcribe_and_clean,
             ai::transcribe_only,
             ai::transcribe_file_path,
+            history_storage::read_history_file,
+            history_storage::write_history_file,
+            history_storage::get_default_transcription_storage_dir,
             call_capture::list_call_capture_targets,
             call_capture::start_call_capture,
             call_capture::stop_call_capture,
             call_capture::save_call_capture_mic_track,
             call_capture::get_call_capture_status,
             call_capture::get_call_capture_duration_ms,
+            realtime_interpreter::list_realtime_audio_devices,
+            realtime_interpreter::start_realtime_interpreter,
+            realtime_interpreter::stop_realtime_interpreter,
+            realtime_interpreter::get_realtime_interpreter_status,
+            realtime_interpreter::test_virtual_mic_output,
             media::prepare_media_for_transcription,
             native_voice_recorder::start_native_voice_recording,
             native_voice_recorder::pause_native_voice_recording,

@@ -31,6 +31,7 @@ import {
   type WidgetRetryProcessingPayload,
 } from "../../../lib/hotkeyEvents";
 import { retryCallCaptureHistoryEntry } from "../../../lib/callCapture";
+import { logError } from "../../../lib/logger";
 import { retryHistoryEntry } from "../../widget/services/transcriptionPipeline";
 
 interface MainTabProps {
@@ -277,15 +278,24 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
       setHotkeyLabel(formatHotkeyLabel(settings.hotkey || DEFAULT_HOTKEY));
     };
 
-    getHistory().then(setHistory);
+    const loadHistory = async (): Promise<void> => {
+      try {
+        setHistory(await getHistory());
+      } catch (error) {
+        void logError("HISTORY", `Failed to load history: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    };
+
+    void loadHistory();
     void syncHotkeyLabel();
 
     const unlistenHistory = listen<HistoryEntry>(HISTORY_UPDATED_EVENT, () => {
-      void getHistory().then(setHistory);
+      void loadHistory();
     });
 
     const unlistenSettings = listen(SETTINGS_UPDATED_EVENT, () => {
       void syncHotkeyLabel(true);
+      void loadHistory();
     });
 
     return () => {

@@ -233,7 +233,7 @@ Project conventions:
 - Code and comments are English.
 - Package manager is Bun.
 - Settings are persisted immediately after change.
-- Release workflow is documented in [docs/release/rule.md](docs/release/rule.md).
+- Release workflow is documented in [rules/release.rule.md](rules/release.rule.md).
 
 ## License
 

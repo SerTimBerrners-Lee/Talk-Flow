@@ -2,6 +2,15 @@
 
 Talkis is a macOS voice-to-text application built with Tauri v2 (Rust backend) and React (TypeScript frontend), with a companion cloud platform (Next.js).
 
+## Project Rules
+
+All reusable project rules are connected from this root `AGENTS.md`.
+
+- For website or landing-page style work, follow `rules/style.rule.md`.
+- For release work, follow `rules/release.rule.md`.
+- Keep `site/` for actual website files only; do not store agent rules there.
+- Keep `docs/release/` for release review artifacts and templates only; do not store the release workflow rule there.
+
 ## Project Structure
 
 ```
@@ -25,7 +34,11 @@ talkis/
 │   │   ├── paste.rs          # Clipboard paste simulation
 │   │   └── logger.rs         # File logging
 │   └── Cargo.toml
-├── talkis-web/             # Cloud platform (Next.js 15)
+├── rules/                   # Agent-facing project rules
+│   ├── style.rule.md        # Website style rule
+│   └── release.rule.md      # Release workflow rule
+├── site/                    # Static website files
+├── talkis-web/              # Cloud platform (Next.js 15)
 │   ├── src/app/              # Pages: landing, auth, dashboard
 │   ├── src/components/       # Landing, dashboard, shared components
 │   ├── src/lib/              # Auth, Prisma, email
@@ -240,12 +253,12 @@ Stable principles:
 - Local STT input must be `WAV 16 kHz mono PCM16`; skip ffmpeg when audio already matches that format.
 - Keep ffmpeg for arbitrary files, video, unsupported formats, diarization preparation, and file chunking.
 - Long local Whisper jobs can hallucinate repeated caption-like text on silence. Preserve the no-context local runtime settings and the repetitive-text filters unless a replacement is tested against long silent recordings.
-- macOS call system-audio capture is the only implemented system-audio path. Windows/Linux call capture should remain explicit unsupported placeholders until WASAPI loopback / PipeWire monitor capture is implemented.
+- macOS call system-audio capture is implemented via Core Audio, and Windows call system-audio capture is implemented via WASAPI loopback. Linux call capture should remain an explicit unsupported placeholder until PipeWire monitor capture is implemented.
 - Every audio path needs structured logs with enough evidence to debug runtime behavior: recorder stats, ffmpeg timing, STT endpoint, chunk index/size, and call-capture levels.
 
 ## Release Workflow
 
-- Follow `docs/release/rule.md` for every release
+- Follow `rules/release.rule.md` for every release
 - Always update `README.md` before publishing a release
 - Create a per-release review file from `docs/release/review-template.md`
 - Push release work to `release/vX.Y.Z` first, then to `main`, then push tag `vX.Y.Z`

@@ -7,7 +7,10 @@ import { Check, ChevronDown, Monitor, Moon, Search, Sun, type LucideIcon } from 
 
 import {
   getSettings,
+  getHistory,
   saveSettings,
+  writeHistoryToDefaultStorage,
+  writeHistoryToStorageDir,
   AppSettings,
   DEFAULT_HOTKEY,
   formatHotkeyLabel,
@@ -35,6 +38,7 @@ import { logError, logInfo } from "../../../lib/logger";
 import { LANGUAGES } from "../../../config/languages";
 
 type HotkeyFeedbackTone = "idle" | "success" | "error";
+type StorageFeedbackTone = "idle" | "success" | "error";
 type FrontendHotkeyCaptureEvent = Pick<KeyboardEvent, "altKey" | "ctrlKey" | "key" | "metaKey" | "shiftKey">;
 
 const SETTING_ROW_COLUMNS = "minmax(0, 1fr) 280px";
@@ -127,6 +131,9 @@ export function SettingsTab() {
   const [autostartLoaded, setAutostartLoaded] = useState(false);
   const [autostartPending, setAutostartPending] = useState(false);
   const [defaultLocalModelsDir, setDefaultLocalModelsDir] = useState("");
+  const [defaultTranscriptionStorageDir, setDefaultTranscriptionStorageDir] = useState("");
+  const [transcriptionStorageFeedback, setTranscriptionStorageFeedback] = useState("");
+  const [transcriptionStorageFeedbackTone, setTranscriptionStorageFeedbackTone] = useState<StorageFeedbackTone>("idle");
 
   type MicAvailabilityState = "ready" | "missing-selected" | "permission-needed" | "empty";
 
@@ -151,6 +158,14 @@ export function SettingsTab() {
       .then(setDefaultLocalModelsDir)
       .catch((error) => {
         void logError("SETTINGS", `Failed to load default local models directory: ${error instanceof Error ? error.message : String(error)}`);
+      });
+  }, []);
+
+  useEffect(() => {
+    invoke<string>("get_default_transcription_storage_dir")
+      .then(setDefaultTranscriptionStorageDir)
+      .catch((error) => {
+        void logError("SETTINGS", `Failed to load default transcription storage directory: ${error instanceof Error ? error.message : String(error)}`);
       });
   }, []);
 
@@ -402,6 +417,16 @@ export function SettingsTab() {
     return s;
   };
 
+  const restorePersistedSettings = async (): Promise<void> => {
+    try {
+      const latestSettings = await getSettings({ reload: true });
+      settingsRef.current = latestSettings;
+      setSettings(latestSettings);
+    } catch (error) {
+      void logError("SETTINGS", `Failed to reload persisted settings: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
   const applyCapturedHotkey = async (candidate: string | null): Promise<void> => {
     await emit(HOTKEY_CAPTURE_STATE_EVENT, { active: false }).catch(() => null);
 
@@ -558,6 +583,51 @@ export function SettingsTab() {
     }
   };
 
+  const changeTranscriptionStorageDir = async (): Promise<void> => {
+    try {
+      const selected = await openDialog({
+        title: "Выберите папку хранения истории",
+        directory: true,
+        multiple: false,
+        defaultPath: (settingsRef.current?.transcriptionStorageDir || "").trim() || defaultTranscriptionStorageDir || undefined,
+      });
+
+      if (typeof selected !== "string") {
+        return;
+      }
+
+      const history = await getHistory();
+      await writeHistoryToStorageDir(selected, history);
+      await update({ transcriptionStorageDir: selected });
+      setTranscriptionStorageFeedbackTone("success");
+      setTranscriptionStorageFeedback("История перенесена в выбранную папку.");
+      void logInfo("SETTINGS", "Transcription storage directory changed.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await restorePersistedSettings();
+      setTranscriptionStorageFeedbackTone("error");
+      setTranscriptionStorageFeedback("Не удалось сохранить историю в выбранную папку. Текущая папка не изменилась.");
+      void logError("SETTINGS", `Failed to change transcription storage directory: ${message}`);
+    }
+  };
+
+  const resetTranscriptionStorageDir = async (): Promise<void> => {
+    try {
+      const history = await getHistory();
+      await writeHistoryToDefaultStorage(history);
+      await update({ transcriptionStorageDir: "" });
+      setTranscriptionStorageFeedbackTone("success");
+      setTranscriptionStorageFeedback("История возвращена в директорию по умолчанию.");
+      void logInfo("SETTINGS", "Transcription storage directory reset to default.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await restorePersistedSettings();
+      setTranscriptionStorageFeedbackTone("error");
+      setTranscriptionStorageFeedback("Не удалось вернуть директорию по умолчанию. Текущая папка не изменилась.");
+      void logError("SETTINGS", `Failed to reset transcription storage directory: ${message}`);
+    }
+  };
+
   const getMicrophoneLabel = (mic: MediaDeviceInfo, index: number): string => {
     const label = mic.label?.trim();
     return label ? label : `Микрофон ${index + 1}`;
@@ -590,6 +660,12 @@ export function SettingsTab() {
   const autostartDisabled = !autostartLoaded || autostartPending;
   const localModelsDir = (settings.localModelsDir || "").trim();
   const effectiveLocalModelsDir = localModelsDir || defaultLocalModelsDir;
+  const transcriptionStorageDir = (settings.transcriptionStorageDir || "").trim();
+  const transcriptionStorageFeedbackColor = transcriptionStorageFeedbackTone === "error"
+    ? "var(--danger)"
+    : transcriptionStorageFeedbackTone === "success"
+      ? "var(--success)"
+      : "var(--text-mid)";
   const widgetScale = normalizeWidgetScale(settings.widgetScale);
 
   return (
@@ -942,6 +1018,50 @@ export function SettingsTab() {
         <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.65 }}>
           Папка для скачанных локальных моделей. Оставьте поле пустым, чтобы использовать директорию по умолчанию.
         </div>
+      </div>
+
+      <div className="card" style={SETTINGS_CARD_STYLE}>
+        <div style={{ display: "grid", gridTemplateColumns: SETTING_ROW_COLUMNS, alignItems: "center", gap: SETTING_ROW_GAP }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-hi)", margin: 0 }}>Хранение истории</div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, justifySelf: "end", width: "100%" }}>
+            <button
+              type="button"
+              onClick={() => { void changeTranscriptionStorageDir(); }}
+              className="btn"
+              style={{ minHeight: CONTROL_HEIGHT, flex: 1, justifyContent: "center", padding: "0 10px", borderRadius: CONTROL_RADIUS, fontSize: CONTROL_FONT_SIZE }}
+            >
+              Изменить
+            </button>
+            {transcriptionStorageDir && (
+              <button
+                type="button"
+                onClick={() => { void resetTranscriptionStorageDir(); }}
+                className="btn"
+                style={{ minHeight: CONTROL_HEIGHT, flex: 1, justifyContent: "center", padding: "0 10px", borderRadius: CONTROL_RADIUS, fontSize: CONTROL_FONT_SIZE }}
+              >
+                По умолчанию
+              </button>
+            )}
+          </div>
+        </div>
+        <input
+          type="text"
+          value={settings.transcriptionStorageDir}
+          readOnly
+          className="input"
+          placeholder={defaultTranscriptionStorageDir || "Директория по умолчанию"}
+          style={{ height: 40, padding: "8px 10px", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize: 11 }}
+        />
+        <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.65 }}>
+          Папка для истории диктовки и записей звонков. Оставьте пустым, чтобы использовать директорию по умолчанию.
+        </div>
+        {transcriptionStorageFeedback && (
+          <div style={{ fontSize: 13, color: transcriptionStorageFeedbackColor, lineHeight: 1.6 }}>
+            {transcriptionStorageFeedback}
+          </div>
+        )}
       </div>
     </div>
   );

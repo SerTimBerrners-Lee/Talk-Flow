@@ -45,6 +45,17 @@ Widget call mode
 -> file transcription pipeline
 ```
 
+Realtime Interpreter:
+
+```text
+Settings / Realtime Interpreter beta
+-> src/lib/realtimeInterpreter.ts
+-> realtime_interpreter.rs
+-> real mic + system audio adapters
+-> OpenAI Realtime sessions
+-> virtual mic output + local playback
+```
+
 ## Voice Dictation
 
 The primary voice path is native Rust capture:
@@ -158,18 +169,44 @@ Call capture has two different tracks:
 Current system-audio support:
 
 - macOS: implemented via Core Audio process tap / aggregate device in `call_capture.rs`;
-- Windows: intentionally unsupported placeholder until WASAPI loopback is implemented;
-- Linux: intentionally unsupported placeholder until PipeWire monitor capture is implemented.
+- Windows: implemented via `cpal` WASAPI loopback on the default output device in `call_capture.rs`;
+- Linux: implemented via PipeWire default output monitor capture in `call_capture.rs`.
 
-Do not present Windows/Linux system-call capture as working until platform capture is implemented and manually verified.
+Linux call system capture is PipeWire-only. PulseAudio-only systems without PipeWire
+remain unsupported and should show an honest PipeWire unavailable / monitor not found
+error instead of silently falling back.
 
-For macOS system track diagnostics, rely on stop-time logs:
+For macOS, Windows, and Linux system track diagnostics, rely on stop-time logs:
 
 ```text
 System audio capture level: max=... dBFS, frames_above_noise_floor=...
 ```
 
 If `max=-120.0 dBFS` and `frames_above_noise_floor=0`, the system track is silent. The transcript should not treat that as usable remote-speaker audio.
+
+## Realtime Interpreter
+
+Realtime Interpreter is a separate beta audio path. It must not be wired into
+`transcribeCallCaptureSession()` or stored as `source: "call"` history unless a
+future feature explicitly adds realtime session history.
+
+Current contract:
+
+- Tauri commands live in `src-tauri/src/realtime_interpreter.rs`.
+- Frontend command wrappers live in `src/lib/realtimeInterpreter.ts`.
+- Settings UI lives in `src/windows/settings/tabs/RealtimeInterpreterTab.tsx`.
+- External virtual audio drivers are required for MVP routing: BlackHole on
+  macOS, VB-CABLE on Windows, PipeWire virtual source/sink on Linux.
+- The fixed first language pair is RU -> EN for the user's mic and EN -> RU for
+  system audio.
+- Start requests must validate a virtual mic output, API/cloud credentials,
+  system-audio support, and a headphones/separate-output confirmation before any
+  streaming begins.
+- `test_virtual_mic_output` may play a short test tone to the selected virtual
+  output; it must not silently fall back to the real speakers.
+
+Do not present realtime translation as fully running until both OpenAI Realtime
+WebSocket transport and platform audio routing are implemented and verified.
 
 ## Speaker Diarization
 
@@ -227,10 +264,14 @@ Manual checks when behavior changes:
 - Ready `16 kHz mono PCM WAV` file skips ffmpeg.
 - MP3/MP4/WebM files still go through ffmpeg.
 - Long local call/file transcription with pauses does not produce repeated `Спасибо` / `Продолжение следует`.
-- macOS call capture does not regress; Windows/Linux call system capture remains clearly unsupported.
+- macOS call capture does not regress; Windows call capture writes a non-empty `system.wav`; Linux PipeWire call capture writes a non-empty `system.wav`; Linux without PipeWire remains clearly unsupported.
 
 ## Release Notes For Audio Dependencies
 
-`cpal` pulls platform audio backends.
+`cpal` pulls platform audio backends. Linux call system capture also depends on
+PipeWire.
 
-Linux release jobs need `libasound2-dev` for ALSA builds. If changing `cpal` features or replacing the recorder backend, re-check `.github/workflows/release.yml` and Linux Tauri dependency installation.
+Linux release jobs need `libasound2-dev` for ALSA builds and
+`libpipewire-0.3-dev` for PipeWire system-audio capture. If changing `cpal`
+features, PipeWire bindings, or replacing the recorder backend, re-check
+`.github/workflows/release.yml` and Linux Tauri dependency installation.

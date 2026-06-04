@@ -7,6 +7,7 @@ import {
   FileAudio,
   Home,
   Cpu,
+  Languages,
   Loader2,
   Sparkles,
   Sliders,
@@ -15,6 +16,7 @@ import {
 import { TitleBar } from "../../components/TitleBar";
 import { MainTab } from "./tabs/MainTab";
 import { FileTranscriptionTab } from "./tabs/FileTranscriptionTab";
+import { RealtimeInterpreterTab } from "./tabs/RealtimeInterpreterTab";
 import { SettingsTab } from "./tabs/SettingsTab";
 import { SettingsTabs } from "./tabs/SettingsTabs";
 import { PermissionScreen } from "../../components/PermissionScreen";
@@ -42,18 +44,25 @@ import {
   type AppUpdateState,
 } from "../../lib/updater";
 
-type Tab = "main" | "file" | "settings" | "model" | "style";
+type Tab = "main" | "file" | "interpreter" | "settings" | "model" | "style";
+
+const SHOW_INTERPRETER_TAB = import.meta.env.DEV;
+
+function isVisibleTab(tab: Tab): boolean {
+  return tab !== "interpreter" || SHOW_INTERPRETER_TAB;
+}
 
 function resolveInitialTab(): Tab {
   const requestedTab = new URLSearchParams(window.location.search).get("tab");
 
   if (
     requestedTab === "file" ||
+    requestedTab === "interpreter" ||
     requestedTab === "settings" ||
     requestedTab === "model" ||
     requestedTab === "style"
   ) {
-    return requestedTab;
+    return isVisibleTab(requestedTab) ? requestedTab : "main";
   }
 
   return "main";
@@ -66,6 +75,12 @@ const TABS: { id: Tab; label: string; icon: LucideIcon; note: string }[] = [
     label: "Транскрибация",
     icon: FileAudio,
     note: "Транскрибация",
+  },
+  {
+    id: "interpreter",
+    label: "Переводчик (бета)",
+    icon: Languages,
+    note: "Realtime Interpreter beta",
   },
   {
     id: "settings",
@@ -355,9 +370,10 @@ export function SettingsApp() {
     const unlisten = listen<SettingsNavigatePayload>(
       SETTINGS_NAVIGATE_EVENT,
       ({ payload }) => {
-        setActiveTab(payload.tab);
+        const nextTab = isVisibleTab(payload.tab) ? payload.tab : "main";
+        setActiveTab(nextTab);
         setFocusedFileResultId(
-          payload.tab === "file" ? payload.resultId || null : null,
+          nextTab === "file" ? payload.resultId || null : null,
         );
         setNavigationNonce((current) => current + 1);
 
@@ -428,7 +444,7 @@ export function SettingsApp() {
             <SidebarLogo />
 
             <nav style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {TABS.map((t) => (
+              {TABS.filter((tab) => isVisibleTab(tab.id)).map((t) => (
                 <TabButton
                   key={t.id}
                   tab={t}
@@ -490,6 +506,15 @@ export function SettingsApp() {
                 >
                   <FileTranscriptionTab focusedEntryId={focusedFileResultId} />
                 </div>
+                {SHOW_INTERPRETER_TAB && (
+                  <div
+                    style={{
+                      display: activeTab === "interpreter" ? "block" : "none",
+                    }}
+                  >
+                    <RealtimeInterpreterTab />
+                  </div>
+                )}
                 <div
                   style={{
                     display: activeTab === "settings" ? "block" : "none",

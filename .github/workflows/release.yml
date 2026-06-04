@@ -60,6 +60,7 @@ jobs:
             libayatana-appindicator3-dev \
             libxdo-dev \
             libasound2-dev \
+            libpipewire-0.3-dev \
             librsvg2-dev \
             patchelf \
             clang \

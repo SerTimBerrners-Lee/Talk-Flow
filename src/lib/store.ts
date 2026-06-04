@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { load } from "@tauri-apps/plugin-store";
 
 import { DEFAULT_WIDGET_SCALE, normalizeWidgetScale } from "./widgetScale";
@@ -65,6 +66,18 @@ export interface LocalModelSettings {
   lastCheckedAt?: string;
 }
 
+export type RealtimeInterpreterApiMode = "api" | "cloud";
+export type RealtimeInterpreterLanguagePair = "ru_en";
+
+export interface RealtimeInterpreterSettings {
+  realMicDeviceId: string;
+  virtualMicOutputDeviceId: string;
+  localPlaybackDeviceId: string;
+  languagePair: RealtimeInterpreterLanguagePair;
+  apiMode: RealtimeInterpreterApiMode;
+  headphonesConfirmed: boolean;
+}
+
 export interface AppSettings {
   apiKey: string;
   /** Saved API adapter credentials keyed by adapter id */
@@ -75,6 +88,8 @@ export interface AppSettings {
   localModels: Record<string, LocalModelSettings>;
   /** Optional custom directory for downloaded local STT models; empty means default app data path */
   localModelsDir: string;
+  /** Optional custom directory for transcript history and call recordings; empty means default app storage */
+  transcriptionStorageDir: string;
   /** Separate API key for Whisper/STT endpoint (used in custom mode) */
   whisperApiKey: string;
   /** Separate API key for LLM endpoint (used in custom mode; empty = skip LLM) */
@@ -103,6 +118,8 @@ export interface AppSettings {
   deviceToken: string;
   /** Default file transcription mode: split uploaded files by speakers */
   fileSpeakerDiarization: boolean;
+  /** Beta realtime interpreter device and mode choices */
+  realtimeInterpreter: RealtimeInterpreterSettings;
 }
 
 export interface WidgetPosition {
@@ -333,6 +350,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   selectedApiAdapter: "openai",
   localModels: {},
   localModelsDir: "",
+  transcriptionStorageDir: "",
   whisperApiKey: "",
   llmApiKey: "",
   provider: "openai",
@@ -350,6 +368,14 @@ const DEFAULT_SETTINGS: AppSettings = {
   useOwnKey: true,
   deviceToken: "",
   fileSpeakerDiarization: false,
+  realtimeInterpreter: {
+    realMicDeviceId: "",
+    virtualMicOutputDeviceId: "",
+    localPlaybackDeviceId: "",
+    languagePair: "ru_en",
+    apiMode: "api",
+    headphonesConfirmed: false,
+  },
 };
 
 function parseStyle(value: unknown): AppSettings["style"] | undefined {
@@ -377,6 +403,34 @@ function parseProvider(value: unknown): ApiProvider | undefined {
     return value;
   }
   return undefined;
+}
+
+function parseRealtimeInterpreterSettings(
+  value: unknown,
+): RealtimeInterpreterSettings | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const raw = value as Record<string, unknown>;
+  return {
+    realMicDeviceId:
+      typeof raw.realMicDeviceId === "string" ? raw.realMicDeviceId : "",
+    virtualMicOutputDeviceId:
+      typeof raw.virtualMicOutputDeviceId === "string"
+        ? raw.virtualMicOutputDeviceId
+        : "",
+    localPlaybackDeviceId:
+      typeof raw.localPlaybackDeviceId === "string"
+        ? raw.localPlaybackDeviceId
+        : "",
+    languagePair: raw.languagePair === "ru_en" ? "ru_en" : "ru_en",
+    apiMode: raw.apiMode === "cloud" ? "cloud" : "api",
+    headphonesConfirmed:
+      typeof raw.headphonesConfirmed === "boolean"
+        ? raw.headphonesConfirmed
+        : false,
+  };
 }
 
 function normalizeSavedSettings(saved: unknown): Partial<AppSettings> {
@@ -473,6 +527,10 @@ function normalizeSavedSettings(saved: unknown): Partial<AppSettings> {
     localModels: rawLocalModels,
     localModelsDir:
       typeof raw.localModelsDir === "string" ? raw.localModelsDir : undefined,
+    transcriptionStorageDir:
+      typeof raw.transcriptionStorageDir === "string"
+        ? raw.transcriptionStorageDir
+        : undefined,
     whisperApiKey:
       typeof raw.whisperApiKey === "string" ? raw.whisperApiKey : undefined,
     llmApiKey: typeof raw.llmApiKey === "string" ? raw.llmApiKey : undefined,
@@ -504,6 +562,9 @@ function normalizeSavedSettings(saved: unknown): Partial<AppSettings> {
       typeof raw.fileSpeakerDiarization === "boolean"
         ? raw.fileSpeakerDiarization
         : undefined,
+    realtimeInterpreter: parseRealtimeInterpreterSettings(
+      raw.realtimeInterpreter,
+    ),
   };
 }
 
@@ -631,42 +692,81 @@ export async function saveSettings(
 }
 
 export async function getHistory(): Promise<HistoryEntry[]> {
-  const store = await getStore();
-  return (await store.get<HistoryEntry[]>("history")) || [];
+  const storageDir = await getHistoryStorageDir();
+  if (storageDir) {
+    return readHistoryFromStorageDir(storageDir);
+  }
+
+  return readHistoryFromDefaultStorage();
 }
 
 export async function addHistoryEntry(entry: HistoryEntry): Promise<void> {
-  const store = await getStore();
   const history = await getHistory();
   const updated = pruneHistory([entry, ...history]);
-  await store.set("history", updated);
-  await store.save();
+  await writeHistory(updated);
 }
 
 export async function updateHistoryEntry(entry: HistoryEntry): Promise<void> {
-  const store = await getStore();
   const history = await getHistory();
   const updated = pruneHistory(
     history.map((item) => (item.id === entry.id ? entry : item)),
   );
-  await store.set("history", updated);
-  await store.save();
+  await writeHistory(updated);
 }
 
 export async function deleteHistoryEntry(id: string): Promise<void> {
-  const store = await getStore();
   const history = await getHistory();
-  await store.set(
-    "history",
+  await writeHistory(
     history.filter((e) => e.id !== id),
   );
-  await store.save();
 }
 
 export async function clearHistory(): Promise<void> {
+  await writeHistory([]);
+}
+
+async function getHistoryStorageDir(): Promise<string> {
+  const settings = await getSettings({ reload: true });
+  return settings.transcriptionStorageDir.trim();
+}
+
+async function readHistoryFromDefaultStorage(): Promise<HistoryEntry[]> {
   const store = await getStore();
-  await store.set("history", []);
+  return (await store.get<HistoryEntry[]>("history")) || [];
+}
+
+export async function writeHistoryToDefaultStorage(
+  history: HistoryEntry[],
+): Promise<void> {
+  const store = await getStore();
+  await store.set("history", pruneHistory(history));
   await store.save();
+}
+
+async function readHistoryFromStorageDir(
+  storageDir: string,
+): Promise<HistoryEntry[]> {
+  return invoke<HistoryEntry[]>("read_history_file", { storageDir });
+}
+
+export async function writeHistoryToStorageDir(
+  storageDir: string,
+  history: HistoryEntry[],
+): Promise<void> {
+  await invoke("write_history_file", {
+    storageDir,
+    history: pruneHistory(history),
+  });
+}
+
+async function writeHistory(history: HistoryEntry[]): Promise<void> {
+  const storageDir = await getHistoryStorageDir();
+  if (storageDir) {
+    await writeHistoryToStorageDir(storageDir, history);
+    return;
+  }
+
+  await writeHistoryToDefaultStorage(history);
 }
 
 const PERMISSIONS_PASSED_KEY = "permissions_passed";

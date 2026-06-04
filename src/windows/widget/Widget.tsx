@@ -11,6 +11,7 @@ import {
   HISTORY_CLEARED_EVENT,
   HISTORY_DELETED_EVENT,
   HISTORY_UPDATED_EVENT,
+  SETTINGS_UPDATED_EVENT,
   WIDGET_RETRY_PROCESSING_EVENT,
   type WidgetRetryProcessingPayload,
 } from "../../lib/hotkeyEvents";
@@ -246,12 +247,24 @@ function callCaptureStartErrorMessage(error: unknown): string {
   const rawMessage = error instanceof Error ? error.message : String(error);
   const normalized = rawMessage.toLowerCase();
 
+  if (normalized.includes("pipewire")) {
+    return "Не удалось начать запись системного звука Linux. Убедитесь, что PipeWire запущен и есть активное устройство вывода.";
+  }
+
+  if (normalized.includes("не поддерживается")) {
+    return "Запись системного звука не поддерживается на этой платформе.";
+  }
+
+  if (normalized.includes("устройство вывода windows")) {
+    return "Не найдено устройство вывода Windows для записи системного звука.";
+  }
+
   if (
     normalized.includes("wasapi") ||
-    normalized.includes("pipewire") ||
-    normalized.includes("не поддерживается")
+    normalized.includes("windows loopback") ||
+    normalized.includes("запись системного звука windows")
   ) {
-    return "Запись системного звука пока доступна только на macOS.";
+    return "Не удалось начать запись системного звука Windows.";
   }
 
   if (
@@ -559,6 +572,7 @@ export function Widget() {
         targetId: "system-output",
         includeMic: false,
         includeSystem: true,
+        storageDir: settings.transcriptionStorageDir || null,
       });
       setCallStartedAt(Date.now());
       setCallSession(session);
@@ -866,12 +880,16 @@ export function Widget() {
     const unlistenClearedPromise = listen(HISTORY_CLEARED_EVENT, () => {
       setLatestCopyText(null);
     });
+    const unlistenSettingsPromise = listen(SETTINGS_UPDATED_EVENT, () => {
+      void refreshLatestCopyText();
+    });
 
     return () => {
       mounted = false;
       void unlistenUpdatedPromise.then((unlisten) => unlisten());
       void unlistenDeletedPromise.then((unlisten) => unlisten());
       void unlistenClearedPromise.then((unlisten) => unlisten());
+      void unlistenSettingsPromise.then((unlisten) => unlisten());
     };
   }, []);
 
