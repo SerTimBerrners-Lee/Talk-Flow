@@ -52,7 +52,8 @@ Settings / Realtime Interpreter beta
 -> src/lib/realtimeInterpreter.ts
 -> realtime_interpreter.rs
 -> real mic + system audio adapters
--> OpenAI Realtime sessions
+-> Talkis Cloud WebSocket proxy
+-> Gemini Live Translate sessions
 -> virtual mic output + local playback
 ```
 
@@ -187,25 +188,42 @@ If `max=-120.0 dBFS` and `frames_above_noise_floor=0`, the system track is silen
 ## Realtime Interpreter
 
 Realtime Interpreter is a separate beta audio path. It must not be wired into
-`transcribeCallCaptureSession()` or stored as `source: "call"` history unless a
-future feature explicitly adds realtime session history.
+`transcribeCallCaptureSession()`. Realtime translation history is allowed only
+from final live transcript segments collected by the interpreter session itself.
 
 Current contract:
 
 - Tauri commands live in `src-tauri/src/realtime_interpreter.rs`.
 - Frontend command wrappers live in `src/lib/realtimeInterpreter.ts`.
 - Settings UI lives in `src/windows/settings/tabs/RealtimeInterpreterTab.tsx`.
+- V1 is cloud-only. The desktop must use the saved Talkis `deviceToken`; do not
+  expose Google API keys, BYOK, or direct Google WebSocket credentials in the UI.
+- Desktop defaults to `wss://proxy.talkis.ru/api/realtime-translate`.
+- The proxy is responsible for JWT/subscription checks and for bridging to
+  Gemini Live Translate with `gemini-3.5-live-translate-preview`.
+- Gemini Live Translate input is raw PCM16, 16 kHz, mono, little-endian, sent as
+  `audio/pcm;rate=16000`. Output audio is raw PCM16, 24 kHz, mono, returned as
+  `audio/pcm;rate=24000`.
+- Transcript events should carry both source and translated text from
+  `inputAudioTranscription` and `outputAudioTranscription`.
 - External virtual audio drivers are required for MVP routing: BlackHole on
   macOS, VB-CABLE on Windows, PipeWire virtual source/sink on Linux.
-- The fixed first language pair is RU -> EN for the user's mic and EN -> RU for
-  system audio.
-- Start requests must validate a virtual mic output, API/cloud credentials,
+- Supported v1 language pairs keep Russian as the local user language:
+  RU -> EN / EN -> RU, RU -> ES / ES -> RU, RU -> DE / DE -> RU, and
+  RU -> zh-Hans / zh-Hans -> RU.
+- Start requests must validate a virtual mic output, Talkis Cloud credentials,
   system-audio support, and a headphones/separate-output confirmation before any
   streaming begins.
 - `test_virtual_mic_output` may play a short test tone to the selected virtual
   output; it must not silently fall back to the real speakers.
+- On stop, if final transcript segments exist, save a call-like history entry:
+  `source: "call"`, `fileName: "Перевод звонка"`, `callSessionId`, `duration`,
+  `status`, original text in `raw`, bilingual translated text in `cleaned`, and
+  optional `translation` metadata with provider/model/language pair/segments.
+- Do not retry realtime translation from history unless raw audio tracks are
+  explicitly saved in a later feature.
 
-Do not present realtime translation as fully running until both OpenAI Realtime
+Do not present realtime translation as fully running until the Talkis proxy
 WebSocket transport and platform audio routing are implemented and verified.
 
 ## Speaker Diarization

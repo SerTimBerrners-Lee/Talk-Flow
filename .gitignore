@@ -31,3 +31,8 @@ src-tauri/binaries/ffmpeg-*
 
 # Local-only Cargo config (contains absolute target-dir for external drive)
 .cargo/config.toml
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key

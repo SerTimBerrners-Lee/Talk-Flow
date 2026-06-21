@@ -1,0 +1,4 @@
+interface:
+  display_name: "Talkis Product UI Style"
+  short_description: "Apply Talkis-inspired product UI"
+  default_prompt: "Use $talkis-product-ui-style to apply the Talkis product UI language to this interface."

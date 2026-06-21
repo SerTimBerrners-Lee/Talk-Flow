@@ -15,12 +15,18 @@ import {
 } from "lucide-react";
 
 import {
+  addHistoryEntry,
   AppSettings,
   getSettings,
+  HistoryEntry,
   RealtimeInterpreterSettings,
+  RealtimeTranslationSegment,
   saveSettings,
 } from "../../../lib/store";
-import { SETTINGS_UPDATED_EVENT } from "../../../lib/hotkeyEvents";
+import {
+  HISTORY_UPDATED_EVENT,
+  SETTINGS_UPDATED_EVENT,
+} from "../../../lib/hotkeyEvents";
 import { logError } from "../../../lib/logger";
 import {
   getRealtimeInterpreterStatus,
@@ -29,12 +35,16 @@ import {
   REALTIME_INTERPRETER_ERROR_EVENT,
   REALTIME_INTERPRETER_PARTIAL_TEXT_EVENT,
   REALTIME_INTERPRETER_STATUS_EVENT,
+  REALTIME_LANGUAGE_PAIRS,
+  REALTIME_TRANSLATE_ENDPOINT,
+  REALTIME_TRANSLATE_MODEL,
   RealtimeAudioDevice,
   RealtimeAudioDevices,
   RealtimeInterpreterAudioLevelEvent,
   RealtimeInterpreterErrorEvent,
   RealtimeInterpreterPartialTextEvent,
   RealtimeInterpreterStatus,
+  realtimeLanguagePairDefinition,
   startRealtimeInterpreter,
   stopRealtimeInterpreter,
   testVirtualMicOutput,
@@ -91,11 +101,6 @@ function statusColor(status: RealtimeInterpreterStatus | null): string {
   return "var(--text-low)";
 }
 
-function formatCost(value: number | undefined): string {
-  if (!Number.isFinite(value)) return "$0.068/min";
-  return `$${Number(value).toFixed(3)}/min`;
-}
-
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -117,11 +122,6 @@ function preferredPlaybackDevice(
   );
 }
 
-function resolveOpenAiApiKey(settings: AppSettings): string {
-  const openAiAdapterKey = settings.apiAdapters?.openai?.apiKey?.trim();
-  return openAiAdapterKey || settings.apiKey.trim();
-}
-
 function SettingField({
   label,
   note,
@@ -138,7 +138,9 @@ function SettingField({
           {label}
         </div>
         {note && (
-          <div style={{ fontSize: 12, color: "var(--text-low)", lineHeight: 1.5 }}>
+          <div
+            style={{ fontSize: 12, color: "var(--text-low)", lineHeight: 1.5 }}
+          >
             {note}
           </div>
         )}
@@ -146,6 +148,54 @@ function SettingField({
       <div style={{ minWidth: 0 }}>{children}</div>
     </div>
   );
+}
+
+function formatDurationSeconds(startedAt?: string | null): number {
+  if (!startedAt) return 0;
+  const started = Date.parse(startedAt);
+  if (!Number.isFinite(started)) return 0;
+  return Math.max(0, Math.round((Date.now() - started) / 1000));
+}
+
+function directionSpeakerLabel(
+  direction: RealtimeTranslationSegment["direction"],
+): string {
+  return direction === "user_to_remote" ? "Вы" : "Собеседник";
+}
+
+function formatRealtimeRawTranscript(
+  segments: RealtimeTranslationSegment[],
+): string {
+  return segments
+    .map(
+      (segment) =>
+        `${directionSpeakerLabel(segment.direction)} (${segment.sourceLanguage}): ${segment.sourceText}`,
+    )
+    .join("\n");
+}
+
+function formatRealtimeBilingualTranscript(
+  segments: RealtimeTranslationSegment[],
+): string {
+  return segments
+    .map(
+      (segment) =>
+        `${directionSpeakerLabel(segment.direction)}: ${segment.sourceText}\nПеревод (${segment.targetLanguage}): ${segment.translatedText}`,
+    )
+    .join("\n\n");
+}
+
+function transcriptDisplayText(
+  payload: RealtimeInterpreterPartialTextEvent,
+): string {
+  const source = payload.sourceText?.trim();
+  const translated = payload.translatedText?.trim();
+
+  if (source && translated) {
+    return `${source}\n→ ${translated}`;
+  }
+
+  return translated || source || payload.text;
 }
 
 function DeviceSelect({
@@ -237,8 +287,12 @@ function LevelMeter({
 
   return (
     <div style={{ display: "grid", gap: 7 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-        <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-hi)" }}>
+      <div
+        style={{ display: "flex", justifyContent: "space-between", gap: 10 }}
+      >
+        <span
+          style={{ fontSize: 13, fontWeight: 700, color: "var(--text-hi)" }}
+        >
           {label}
         </span>
         <span
@@ -269,7 +323,9 @@ function LevelMeter({
             height: "100%",
             borderRadius: 999,
             background:
-              safeOutput >= safeInput ? "var(--success-bright)" : "var(--text-hi)",
+              safeOutput >= safeInput
+                ? "var(--success-bright)"
+                : "var(--text-hi)",
             transition: "width 0.12s ease",
           }}
         />
@@ -290,11 +346,14 @@ export function RealtimeInterpreterTab(): ReactElement {
     userToRemote: "",
     remoteToUser: "",
   });
+  const [finalSegments, setFinalSegments] = useState<
+    RealtimeTranslationSegment[]
+  >([]);
 
   const interpreterSettings = settings?.realtimeInterpreter;
-  const apiKey = settings ? resolveOpenAiApiKey(settings) : "";
   const hasCloudToken = Boolean(settings?.deviceToken);
-  const apiMode = interpreterSettings?.apiMode || "api";
+  const languagePair = interpreterSettings?.languagePair || "ru_en";
+  const pairDefinition = realtimeLanguagePairDefinition(languagePair);
   const selectedVirtualOutput = devices?.virtualMicOutputs.find(
     (device) => device.id === interpreterSettings?.virtualMicOutputDeviceId,
   );
@@ -366,12 +425,40 @@ export function RealtimeInterpreterTab(): ReactElement {
     const textListener = listen<RealtimeInterpreterPartialTextEvent>(
       REALTIME_INTERPRETER_PARTIAL_TEXT_EVENT,
       ({ payload }) => {
+        const displayText = transcriptDisplayText(payload);
         setLiveText((current) => ({
           ...current,
           [payload.direction === "user_to_remote"
             ? "userToRemote"
-            : "remoteToUser"]: payload.text,
+            : "remoteToUser"]: displayText,
         }));
+        if (!payload.isFinal) return;
+
+        const sourceText = payload.sourceText?.trim() || "";
+        const translatedText =
+          payload.translatedText?.trim() || payload.text.trim();
+        if (!sourceText && !translatedText) return;
+
+        setFinalSegments((current) => [
+          ...current,
+          {
+            direction: payload.direction,
+            startMs: payload.startMs ?? undefined,
+            endMs: payload.endMs ?? undefined,
+            sourceText,
+            translatedText,
+            sourceLanguage:
+              payload.sourceLanguage ||
+              (payload.direction === "user_to_remote"
+                ? pairDefinition.userSourceLanguage
+                : pairDefinition.remoteSourceLanguage),
+            targetLanguage:
+              payload.targetLanguage ||
+              (payload.direction === "user_to_remote"
+                ? pairDefinition.userTargetLanguage
+                : pairDefinition.remoteTargetLanguage),
+          },
+        ]);
       },
     );
 
@@ -381,7 +468,7 @@ export function RealtimeInterpreterTab(): ReactElement {
       void levelListener.then((unlisten) => unlisten());
       void textListener.then((unlisten) => unlisten());
     };
-  }, []);
+  }, [pairDefinition]);
 
   useEffect(() => {
     if (!settings || !devices) return;
@@ -424,8 +511,8 @@ export function RealtimeInterpreterTab(): ReactElement {
       setPatch("localPlaybackDeviceId", preferred?.id || "");
     }
 
-    if (current.apiMode === "cloud" && !settings.deviceToken) {
-      setPatch("apiMode", "api");
+    if (current.apiMode !== "cloud") {
+      setPatch("apiMode", "cloud");
     }
 
     if (Object.keys(patch).length === 0) return;
@@ -463,23 +550,22 @@ export function RealtimeInterpreterTab(): ReactElement {
 
   const warnings = useMemo(() => {
     const result = [...(devices?.warnings || [])];
-    if (apiMode === "api" && !apiKey) {
-      result.push("OpenAI API key не указан в разделе «Модели».");
-    }
-    if (apiMode === "cloud" && !hasCloudToken) {
+    if (!hasCloudToken) {
       result.push("Для облачного режима войдите в аккаунт Talkis.");
     }
     if (!interpreterSettings?.headphonesConfirmed) {
-      result.push("Для локального перевода нужны наушники или отдельный output.");
+      result.push(
+        "Для локального перевода нужны наушники или отдельный output.",
+      );
     }
     return result;
-  }, [apiKey, apiMode, devices?.warnings, hasCloudToken, interpreterSettings]);
+  }, [devices?.warnings, hasCloudToken, interpreterSettings]);
 
   const canStart = Boolean(
     interpreterSettings &&
-      selectedVirtualOutput &&
-      interpreterSettings.headphonesConfirmed &&
-      (apiMode === "cloud" ? hasCloudToken : apiKey),
+    selectedVirtualOutput &&
+    interpreterSettings.headphonesConfirmed &&
+    hasCloudToken,
   );
 
   const handleStart = async (): Promise<void> => {
@@ -488,17 +574,22 @@ export function RealtimeInterpreterTab(): ReactElement {
     setActionPending(true);
     setError(null);
     setTestMessage(null);
+    setFinalSegments([]);
+    setLiveText({
+      userToRemote: "",
+      remoteToUser: "",
+    });
     try {
       const nextStatus = await startRealtimeInterpreter({
         realMicDeviceId: interpreterSettings.realMicDeviceId || null,
         virtualMicOutputDeviceId: interpreterSettings.virtualMicOutputDeviceId,
-        localPlaybackDeviceId: interpreterSettings.localPlaybackDeviceId || null,
-        languagePair: "ru_en",
-        apiMode,
-        apiKey: apiMode === "api" ? apiKey : null,
-        deviceToken: apiMode === "cloud" ? settings.deviceToken : null,
-        model: "gpt-realtime-translate",
-        endpoint: "wss://api.openai.com/v1/realtime",
+        localPlaybackDeviceId:
+          interpreterSettings.localPlaybackDeviceId || null,
+        languagePair: interpreterSettings.languagePair,
+        apiMode: "cloud",
+        deviceToken: settings.deviceToken,
+        model: REALTIME_TRANSLATE_MODEL,
+        endpoint: REALTIME_TRANSLATE_ENDPOINT,
         headphonesConfirmed: interpreterSettings.headphonesConfirmed,
       });
       setStatus(nextStatus);
@@ -509,12 +600,42 @@ export function RealtimeInterpreterTab(): ReactElement {
     }
   };
 
+  const saveRealtimeTranslationHistory = async (
+    sessionStatus: RealtimeInterpreterStatus | null,
+  ): Promise<void> => {
+    if (!sessionStatus?.sessionId || finalSegments.length === 0) return;
+
+    const entry: HistoryEntry = {
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      duration: formatDurationSeconds(sessionStatus.startedAt),
+      raw: formatRealtimeRawTranscript(finalSegments),
+      cleaned: formatRealtimeBilingualTranscript(finalSegments),
+      source: "call",
+      fileName: "Перевод звонка",
+      callSessionId: sessionStatus.sessionId,
+      status: "completed",
+      translation: {
+        provider: "talkis-cloud",
+        model: sessionStatus.model || REALTIME_TRANSLATE_MODEL,
+        languagePair: sessionStatus.languagePair,
+        segments: finalSegments,
+      },
+    };
+
+    await addHistoryEntry(entry);
+    await emit(HISTORY_UPDATED_EVENT, entry);
+  };
+
   const handleStop = async (): Promise<void> => {
+    const sessionStatus = status;
     setActionPending(true);
     setError(null);
     try {
       const nextStatus = await stopRealtimeInterpreter();
+      await saveRealtimeTranslationHistory(sessionStatus);
       setStatus(nextStatus);
+      setFinalSegments([]);
     } catch (stopError) {
       setError(errorMessage(stopError));
     } finally {
@@ -592,11 +713,8 @@ export function RealtimeInterpreterTab(): ReactElement {
             }}
           >
             <Metric label="Статус" value={statusLabel(status)} />
-            <Metric label="Языки" value="RU ↔ EN" />
-            <Metric
-              label="Оценка"
-              value={formatCost(status?.estimatedCostUsdPerMinute)}
-            />
+            <Metric label="Языки" value={pairDefinition.label} />
+            <Metric label="Маршрут" value="Talkis Cloud" />
           </div>
         </div>
 
@@ -618,7 +736,7 @@ export function RealtimeInterpreterTab(): ReactElement {
       <div className="card" style={CARD_STYLE}>
         <SettingField
           label="Настоящий микрофон"
-          note="Голос пользователя для RU → EN."
+          note={`Голос пользователя для RU → ${pairDefinition.userTargetLanguage}.`}
         >
           <DeviceSelect
             value={interpreterSettings.realMicDeviceId}
@@ -632,17 +750,49 @@ export function RealtimeInterpreterTab(): ReactElement {
         </SettingField>
 
         <SettingField
+          label="Пара языков"
+          note="Русский остается локальным языком пользователя в v1."
+        >
+          <select
+            value={interpreterSettings.languagePair}
+            onChange={(event) => {
+              void updateInterpreterSettings({
+                languagePair: event.currentTarget
+                  .value as RealtimeInterpreterSettings["languagePair"],
+              });
+            }}
+            disabled={loadPending || status?.active}
+            style={{
+              ...CONTROL_STYLE,
+              width: "100%",
+              opacity: loadPending || status?.active ? 0.72 : 1,
+              cursor: loadPending || status?.active ? "not-allowed" : "pointer",
+            }}
+          >
+            {REALTIME_LANGUAGE_PAIRS.map((pair) => (
+              <option key={pair.id} value={pair.id}>
+                {pair.label}
+              </option>
+            ))}
+          </select>
+        </SettingField>
+
+        <SettingField
           label="Virtual mic output"
           note={`${devices?.virtualDriverName || "Virtual driver"} для приложения звонка.`}
         >
           <DeviceSelect
             value={interpreterSettings.virtualMicOutputDeviceId}
             onChange={(value) => {
-              void updateInterpreterSettings({ virtualMicOutputDeviceId: value });
+              void updateInterpreterSettings({
+                virtualMicOutputDeviceId: value,
+              });
             }}
             devices={devices?.virtualMicOutputs || []}
             emptyLabel={`Установите ${devices?.virtualDriverName || "virtual driver"}`}
-            disabled={loadPending || (devices?.virtualMicOutputs.length || 0) === 0}
+            disabled={
+              loadPending || (devices?.virtualMicOutputs.length || 0) === 0
+            }
           />
         </SettingField>
 
@@ -661,53 +811,33 @@ export function RealtimeInterpreterTab(): ReactElement {
           />
         </SettingField>
 
-        <SettingField label="Режим" note="Источник доступа к Realtime API.">
+        <SettingField
+          label="Доступ"
+          note="V1 работает только через Talkis Cloud."
+        >
           <div
             style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: 3,
-              padding: 3,
-              borderRadius: 10,
-              background: "var(--control-track)",
+              ...CONTROL_STYLE,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 10,
+              width: "100%",
+              background: "var(--control-muted)",
             }}
           >
-            {[
-              { id: "api", label: "API" },
-              { id: "cloud", label: "Облако" },
-            ].map((option) => {
-              const active = apiMode === option.id;
-              const disabled = option.id === "cloud" && !hasCloudToken;
-
-              return (
-                <button
-                  key={option.id}
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => {
-                    void updateInterpreterSettings({
-                      apiMode: option.id as "api" | "cloud",
-                    });
-                  }}
-                  style={{
-                    minHeight: 32,
-                    border: "none",
-                    borderRadius: 8,
-                    background: active ? "var(--dropdown-active)" : "transparent",
-                    color: disabled
-                      ? "var(--text-low)"
-                      : active
-                        ? "var(--text-hi)"
-                        : "var(--text-mid)",
-                    fontSize: 12,
-                    fontWeight: active ? 700 : 600,
-                    cursor: disabled ? "not-allowed" : "pointer",
-                  }}
-                >
-                  {option.label}
-                </button>
-              );
-            })}
+            <span style={{ fontWeight: 700 }}>Cloud proxy</span>
+            <span
+              style={{
+                color: hasCloudToken
+                  ? "var(--success-bright)"
+                  : "var(--text-low)",
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              {hasCloudToken ? "Аккаунт подключен" : "Нужен вход"}
+            </span>
           </div>
         </SettingField>
 
@@ -750,7 +880,9 @@ export function RealtimeInterpreterTab(): ReactElement {
         >
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <Mic size={16} strokeWidth={2} />
-            <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)" }}>
+            <div
+              style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)" }}
+            >
               Проверка и запуск
             </div>
           </div>
@@ -836,7 +968,11 @@ export function RealtimeInterpreterTab(): ReactElement {
                   lineHeight: 1.5,
                 }}
               >
-                <AlertTriangle size={15} strokeWidth={2} style={{ flexShrink: 0 }} />
+                <AlertTriangle
+                  size={15}
+                  strokeWidth={2}
+                  style={{ flexShrink: 0 }}
+                />
                 <span>{error}</span>
               </div>
             )}
@@ -889,7 +1025,7 @@ export function RealtimeInterpreterTab(): ReactElement {
               <div style={{ fontSize: 14, fontWeight: 700 }}>Вы → звонок</div>
             </div>
             <LevelMeter
-              label="RU → EN"
+              label={`RU → ${pairDefinition.userTargetLanguage}`}
               inputLevel={status?.userToRemote.inputLevel || 0}
               outputLevel={status?.userToRemote.outputLevel || 0}
             />
@@ -899,7 +1035,9 @@ export function RealtimeInterpreterTab(): ReactElement {
                 padding: "10px 12px",
                 borderRadius: 8,
                 background: "var(--control-muted)",
-                color: liveText.userToRemote ? "var(--text-hi)" : "var(--text-low)",
+                color: liveText.userToRemote
+                  ? "var(--text-hi)"
+                  : "var(--text-low)",
                 fontSize: 12,
                 lineHeight: 1.5,
               }}
@@ -914,7 +1052,7 @@ export function RealtimeInterpreterTab(): ReactElement {
               <div style={{ fontSize: 14, fontWeight: 700 }}>Звонок → вы</div>
             </div>
             <LevelMeter
-              label="EN → RU"
+              label={`${pairDefinition.remoteSourceLanguage} → RU`}
               inputLevel={status?.remoteToUser.inputLevel || 0}
               outputLevel={status?.remoteToUser.outputLevel || 0}
             />
@@ -924,7 +1062,9 @@ export function RealtimeInterpreterTab(): ReactElement {
                 padding: "10px 12px",
                 borderRadius: 8,
                 background: "var(--control-muted)",
-                color: liveText.remoteToUser ? "var(--text-hi)" : "var(--text-low)",
+                color: liveText.remoteToUser
+                  ? "var(--text-hi)"
+                  : "var(--text-low)",
                 fontSize: 12,
                 lineHeight: 1.5,
               }}
@@ -934,7 +1074,9 @@ export function RealtimeInterpreterTab(): ReactElement {
           </div>
         </div>
 
-        <div style={{ fontSize: 12, color: "var(--text-low)", lineHeight: 1.55 }}>
+        <div
+          style={{ fontSize: 12, color: "var(--text-low)", lineHeight: 1.55 }}
+        >
           Virtual mic: {selectedVirtualOutput?.label || "не выбран"} · Playback:{" "}
           {selectedPlayback?.label || "системный output"}
         </div>

@@ -13,9 +13,11 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
-const DEFAULT_REALTIME_MODEL: &str = "gpt-realtime-translate";
-const ESTIMATED_ONE_DIRECTION_USD_PER_MIN: f32 = 0.034;
-const ESTIMATED_TWO_DIRECTION_USD_PER_MIN: f32 = ESTIMATED_ONE_DIRECTION_USD_PER_MIN * 2.0;
+const DEFAULT_REALTIME_MODEL: &str = "gemini-3.5-live-translate-preview";
+const DEFAULT_REALTIME_ENDPOINT: &str = "wss://proxy.talkis.ru/api/realtime-translate";
+const REALTIME_INPUT_MIME_TYPE: &str = "audio/pcm;rate=16000";
+#[cfg(test)]
+const REALTIME_OUTPUT_MIME_TYPE: &str = "audio/pcm;rate=24000";
 const TEST_TONE_DURATION_MS: u64 = 650;
 
 static STATUS: OnceLock<Mutex<RealtimeInterpreterStatus>> = OnceLock::new();
@@ -68,7 +70,6 @@ pub struct StartRealtimeInterpreterRequest {
     pub language_pair: RealtimeLanguagePair,
     #[serde(default)]
     pub api_mode: RealtimeApiMode,
-    pub api_key: Option<String>,
     pub device_token: Option<String>,
     pub model: Option<String>,
     pub endpoint: Option<String>,
@@ -80,6 +81,9 @@ pub struct StartRealtimeInterpreterRequest {
 #[serde(rename_all = "snake_case")]
 pub enum RealtimeLanguagePair {
     RuEn,
+    RuEs,
+    RuDe,
+    RuZhHans,
 }
 
 impl Default for RealtimeLanguagePair {
@@ -97,7 +101,44 @@ pub enum RealtimeApiMode {
 
 impl Default for RealtimeApiMode {
     fn default() -> Self {
-        Self::Api
+        Self::Cloud
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RealtimeLanguagePairConfig {
+    user_source_language: &'static str,
+    user_target_language: &'static str,
+    remote_source_language: &'static str,
+    remote_target_language: &'static str,
+}
+
+fn language_pair_config(pair: &RealtimeLanguagePair) -> RealtimeLanguagePairConfig {
+    match pair {
+        RealtimeLanguagePair::RuEn => RealtimeLanguagePairConfig {
+            user_source_language: "ru",
+            user_target_language: "en",
+            remote_source_language: "en",
+            remote_target_language: "ru",
+        },
+        RealtimeLanguagePair::RuEs => RealtimeLanguagePairConfig {
+            user_source_language: "ru",
+            user_target_language: "es",
+            remote_source_language: "es",
+            remote_target_language: "ru",
+        },
+        RealtimeLanguagePair::RuDe => RealtimeLanguagePairConfig {
+            user_source_language: "ru",
+            user_target_language: "de",
+            remote_source_language: "de",
+            remote_target_language: "ru",
+        },
+        RealtimeLanguagePair::RuZhHans => RealtimeLanguagePairConfig {
+            user_source_language: "ru",
+            user_target_language: "zh-Hans",
+            remote_source_language: "zh-Hans",
+            remote_target_language: "ru",
+        },
     }
 }
 
@@ -136,12 +177,12 @@ impl RealtimeInterpreterStatus {
             started_at: None,
             language_pair: RealtimeLanguagePair::RuEn,
             model: DEFAULT_REALTIME_MODEL.to_string(),
-            endpoint: None,
+            endpoint: Some(DEFAULT_REALTIME_ENDPOINT.to_string()),
             message: Some("Realtime Interpreter не запущен.".to_string()),
             last_error: None,
             user_to_remote: RealtimeInterpreterDirectionStatus::idle(),
             remote_to_user: RealtimeInterpreterDirectionStatus::idle(),
-            estimated_cost_usd_per_minute: ESTIMATED_TWO_DIRECTION_USD_PER_MIN,
+            estimated_cost_usd_per_minute: 0.0,
             session_restart_at: None,
         }
     }
@@ -166,7 +207,8 @@ impl RealtimeInterpreterStatus {
                 .as_deref()
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
-                .map(ToOwned::to_owned);
+                .map(ToOwned::to_owned)
+                .or_else(|| Some(DEFAULT_REALTIME_ENDPOINT.to_string()));
         }
 
         status
@@ -222,6 +264,12 @@ pub struct RealtimeInterpreterErrorEvent {
 pub struct RealtimeInterpreterPartialTextEvent {
     pub session_id: Option<String>,
     pub direction: RealtimeInterpreterDirection,
+    pub source_text: Option<String>,
+    pub translated_text: Option<String>,
+    pub source_language: Option<String>,
+    pub target_language: Option<String>,
+    pub start_ms: Option<u64>,
+    pub end_ms: Option<u64>,
     pub text: String,
     pub is_final: bool,
 }
@@ -266,18 +314,25 @@ pub async fn start_realtime_interpreter(
     if let Err(message) = validate_start_request(&req, &devices) {
         return fail_start(&app, &req, "validation_failed", message, true);
     }
+    let pair_config = language_pair_config(&req.language_pair);
 
     logger::log_info(
         "REALTIME_INTERPRETER",
         &format!(
-            "Validated start request: platform={}, model={}, language_pair={:?}, virtual_output={}",
+            "Validated cloud realtime start request: platform={}, endpoint={}, model={}, language_pair={:?}, user_route={}->{}, remote_route={}->{}, input_mime={}, virtual_output={}",
             platform_name(),
+            normalized_endpoint(&req),
             req.model
                 .as_deref()
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .unwrap_or(DEFAULT_REALTIME_MODEL),
             req.language_pair,
+            pair_config.user_source_language,
+            pair_config.user_target_language,
+            pair_config.remote_source_language,
+            pair_config.remote_target_language,
+            REALTIME_INPUT_MIME_TYPE,
             req.virtual_mic_output_device_id
         ),
     );
@@ -286,7 +341,7 @@ pub async fn start_realtime_interpreter(
         &app,
         &req,
         "transport_not_enabled",
-        "Realtime Interpreter подготовлен как отдельный модуль, но потоковый транспорт OpenAI WebSocket и platform audio routing ещё не включены в этой сборке.".to_string(),
+        "Cloud Realtime Translator валидирует Talkis Cloud session, но нативный WebSocket/audio routing к Talkis proxy ещё не включён в этой desktop-сборке.".to_string(),
         false,
     )
 }
@@ -365,29 +420,26 @@ fn validate_start_request(
         );
     }
 
-    match req.api_mode {
-        RealtimeApiMode::Api => {
-            if req
-                .api_key
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .is_none()
-            {
-                return Err("Для API-режима укажите OpenAI API key в разделе моделей.".to_string());
-            }
-        }
-        RealtimeApiMode::Cloud => {
-            if req
-                .device_token
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .is_none()
-            {
-                return Err("Для облачного режима войдите в аккаунт Talkis.".to_string());
-            }
-        }
+    if !matches!(req.api_mode, RealtimeApiMode::Cloud) {
+        return Err(
+            "Realtime Translator v1 работает только через Talkis Cloud. API/BYOK режим отключен."
+                .to_string(),
+        );
+    }
+
+    if req
+        .device_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_none()
+    {
+        return Err("Для облачного режима войдите в аккаунт Talkis.".to_string());
+    }
+
+    let endpoint = normalized_endpoint(req);
+    if !endpoint.starts_with("wss://") {
+        return Err("Realtime proxy endpoint должен использовать wss://.".to_string());
     }
 
     let virtual_output = devices
@@ -455,6 +507,15 @@ fn validate_start_request(
     }
 
     Ok(())
+}
+
+fn normalized_endpoint(req: &StartRealtimeInterpreterRequest) -> String {
+    req.endpoint
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(DEFAULT_REALTIME_ENDPOINT)
+        .to_string()
 }
 
 fn discover_realtime_audio_devices() -> RealtimeAudioDevices {
@@ -606,7 +667,7 @@ fn system_audio_sources() -> Vec<RealtimeAudioDevice> {
             is_default: true,
             is_virtual: false,
             driver_hint: Some("WASAPI loopback".to_string()),
-            supported: false,
+            supported: true,
         }],
         "linux" => vec![RealtimeAudioDevice {
             id: "linux-pipewire-monitor".to_string(),
@@ -616,7 +677,7 @@ fn system_audio_sources() -> Vec<RealtimeAudioDevice> {
             is_default: true,
             is_virtual: false,
             driver_hint: Some("PipeWire monitor source".to_string()),
-            supported: false,
+            supported: true,
         }],
         _ => Vec::new(),
     }
@@ -838,10 +899,54 @@ fn platform_name() -> &'static str {
 }
 
 #[cfg(test)]
-fn realtime_append_event(audio_bytes: &[u8]) -> serde_json::Value {
+fn proxy_start_message(
+    session_id: &str,
+    language_pair: RealtimeLanguagePair,
+    platform: &str,
+) -> serde_json::Value {
     json!({
-        "type": "input_audio_buffer.append",
+        "type": "start",
+        "sessionId": session_id,
+        "languagePair": language_pair,
+        "platform": platform,
+    })
+}
+
+#[cfg(test)]
+fn proxy_audio_append_message(
+    direction: RealtimeInterpreterDirection,
+    audio_bytes: &[u8],
+) -> serde_json::Value {
+    json!({
+        "type": "audio.append",
+        "direction": direction,
         "audio": base64::engine::general_purpose::STANDARD.encode(audio_bytes),
+        "mimeType": REALTIME_INPUT_MIME_TYPE,
+    })
+}
+
+#[cfg(test)]
+fn proxy_stop_message() -> serde_json::Value {
+    json!({
+        "type": "stop",
+    })
+}
+
+#[cfg(test)]
+fn gemini_live_translate_setup_payload(target_language_code: &str) -> serde_json::Value {
+    json!({
+        "setup": {
+            "model": format!("models/{}", DEFAULT_REALTIME_MODEL),
+            "generationConfig": {
+                "responseModalities": ["AUDIO"],
+                "inputAudioTranscription": {},
+                "outputAudioTranscription": {},
+                "translationConfig": {
+                    "targetLanguageCode": target_language_code,
+                    "echoTargetLanguage": true,
+                },
+            },
+        },
     })
 }
 
@@ -934,11 +1039,80 @@ mod tests {
     use super::*;
 
     #[test]
-    fn input_audio_append_event_frames_base64_audio() {
-        let event = realtime_append_event(&[0, 1, 2, 3]);
+    fn proxy_start_message_uses_public_desktop_contract() {
+        let event = proxy_start_message("rt-1", RealtimeLanguagePair::RuZhHans, "macos");
 
-        assert_eq!(event["type"], "input_audio_buffer.append");
+        assert_eq!(event["type"], "start");
+        assert_eq!(event["sessionId"], "rt-1");
+        assert_eq!(event["languagePair"], "ru_zh_hans");
+        assert_eq!(event["platform"], "macos");
+    }
+
+    #[test]
+    fn proxy_audio_append_message_frames_base64_pcm_audio() {
+        let event =
+            proxy_audio_append_message(RealtimeInterpreterDirection::RemoteToUser, &[0, 1, 2, 3]);
+
+        assert_eq!(event["type"], "audio.append");
+        assert_eq!(event["direction"], "remote_to_user");
         assert_eq!(event["audio"], "AAECAw==");
+        assert_eq!(event["mimeType"], REALTIME_INPUT_MIME_TYPE);
+        assert_eq!(REALTIME_OUTPUT_MIME_TYPE, "audio/pcm;rate=24000");
+    }
+
+    #[test]
+    fn proxy_stop_message_uses_public_desktop_contract() {
+        let event = proxy_stop_message();
+
+        assert_eq!(event["type"], "stop");
+    }
+
+    #[test]
+    fn gemini_setup_payload_enables_audio_translation_and_transcripts() {
+        let payload = gemini_live_translate_setup_payload("es");
+
+        assert_eq!(
+            payload["setup"]["model"],
+            format!("models/{}", DEFAULT_REALTIME_MODEL)
+        );
+        assert_eq!(
+            payload["setup"]["generationConfig"]["responseModalities"][0],
+            "AUDIO"
+        );
+        assert!(payload["setup"]["generationConfig"]["inputAudioTranscription"].is_object());
+        assert!(payload["setup"]["generationConfig"]["outputAudioTranscription"].is_object());
+        assert_eq!(
+            payload["setup"]["generationConfig"]["translationConfig"]["targetLanguageCode"],
+            "es"
+        );
+        assert_eq!(
+            payload["setup"]["generationConfig"]["translationConfig"]["echoTargetLanguage"],
+            true
+        );
+    }
+
+    #[test]
+    fn language_pair_mapping_covers_supported_top_pairs() {
+        assert_eq!(
+            language_pair_config(&RealtimeLanguagePair::RuEn).user_target_language,
+            "en"
+        );
+        assert_eq!(
+            language_pair_config(&RealtimeLanguagePair::RuEs).user_target_language,
+            "es"
+        );
+        assert_eq!(
+            language_pair_config(&RealtimeLanguagePair::RuDe).user_target_language,
+            "de"
+        );
+        assert_eq!(
+            language_pair_config(&RealtimeLanguagePair::RuZhHans).user_target_language,
+            "zh-Hans"
+        );
+        assert_eq!(
+            language_pair_config(&RealtimeLanguagePair::RuZhHans).remote_target_language,
+            "ru"
+        );
     }
 
     #[test]
@@ -977,7 +1151,44 @@ mod tests {
     }
 
     #[test]
-    fn validation_requires_virtual_output_and_api_key() {
+    fn validation_requires_cloud_token_before_virtual_output() {
+        let devices = RealtimeAudioDevices {
+            platform: "macos".to_string(),
+            virtual_driver_name: "BlackHole".to_string(),
+            real_mics: vec![],
+            virtual_mic_outputs: vec![],
+            local_playback_outputs: vec![],
+            system_audio_sources: vec![RealtimeAudioDevice {
+                id: "macos-coreaudio-system-tap".to_string(),
+                label: "Системный звук macOS".to_string(),
+                kind: RealtimeAudioDeviceKind::SystemAudio,
+                platform: "macos".to_string(),
+                is_default: true,
+                is_virtual: false,
+                driver_hint: None,
+                supported: true,
+            }],
+            warnings: vec![],
+        };
+        let req = StartRealtimeInterpreterRequest {
+            real_mic_device_id: None,
+            virtual_mic_output_device_id: "missing".to_string(),
+            local_playback_device_id: None,
+            language_pair: RealtimeLanguagePair::RuEn,
+            api_mode: RealtimeApiMode::Cloud,
+            device_token: None,
+            model: None,
+            endpoint: None,
+            headphones_confirmed: true,
+        };
+
+        let err = validate_start_request(&req, &devices).unwrap_err();
+
+        assert!(err.contains("войдите в аккаунт Talkis"));
+    }
+
+    #[test]
+    fn validation_rejects_api_mode_for_v1() {
         let devices = RealtimeAudioDevices {
             platform: "macos".to_string(),
             virtual_driver_name: "BlackHole".to_string(),
@@ -1002,8 +1213,7 @@ mod tests {
             local_playback_device_id: None,
             language_pair: RealtimeLanguagePair::RuEn,
             api_mode: RealtimeApiMode::Api,
-            api_key: Some("".to_string()),
-            device_token: None,
+            device_token: Some("device-token".to_string()),
             model: None,
             endpoint: None,
             headphones_confirmed: true,
@@ -1011,7 +1221,7 @@ mod tests {
 
         let err = validate_start_request(&req, &devices).unwrap_err();
 
-        assert!(err.contains("OpenAI API key"));
+        assert!(err.contains("API/BYOK режим отключен"));
     }
 
     #[test]
@@ -1051,9 +1261,8 @@ mod tests {
             virtual_mic_output_device_id: "output-0-blackhole".to_string(),
             local_playback_device_id: Some("output-0-blackhole".to_string()),
             language_pair: RealtimeLanguagePair::RuEn,
-            api_mode: RealtimeApiMode::Api,
-            api_key: Some("sk-test".to_string()),
-            device_token: None,
+            api_mode: RealtimeApiMode::Cloud,
+            device_token: Some("device-token".to_string()),
             model: None,
             endpoint: None,
             headphones_confirmed: true,
