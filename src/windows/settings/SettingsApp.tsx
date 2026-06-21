@@ -2,8 +2,10 @@ import { useState, useEffect } from "react";
 import type { ReactElement } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   Download,
+  ExternalLink,
   FileAudio,
   Home,
   Cpu,
@@ -165,6 +167,8 @@ function SidebarLogo() {
   );
 }
 
+const GITHUB_REPO_URL = "https://github.com/SerTimBerrners-Lee/talkis";
+
 function formatUpdateVersion(version: string): string {
   return version.startsWith("v") ? version : `v${version}`;
 }
@@ -293,16 +297,39 @@ function AppUpdateFooter(): ReactElement | null {
       )}
 
       <div
-        aria-label={`Версия приложения ${version}`}
+        role="link"
+        tabIndex={0}
+        onClick={() => {
+          void openUrl(GITHUB_REPO_URL);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            void openUrl(GITHUB_REPO_URL);
+          }
+        }}
+        aria-label={`Версия приложения ${version}. Открыть проект на GitHub`}
+        title="Проект на GitHub"
         style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 4,
           fontSize: 11,
-          lineHeight: 1.2,
+          lineHeight: 1,
           color: "var(--text-low)",
-          textAlign: "center",
           userSelect: "none",
+          cursor: "pointer",
         }}
       >
-        v{version}
+        <span style={{ display: "inline-flex", alignItems: "center" }}>
+          v{version}
+        </span>
+        <ExternalLink
+          size={10}
+          strokeWidth={2}
+          style={{ display: "block", marginTop: -1 }}
+        />
       </div>
     </div>
   );

@@ -7,7 +7,9 @@ Talkis is a macOS voice-to-text application built with Tauri v2 (Rust backend) a
 All reusable project rules are connected from this root `AGENTS.md`.
 
 - For website or landing-page style work, follow `rules/style.rule.md`.
+- For reusable Talkis-inspired product UI work in this repo or other apps, use `skills/talkis-product-ui-style/`; keep it aligned with `rules/style.rule.md`.
 - For release work, follow `rules/release.rule.md`.
+- Keep `skills/` for reusable Codex skills that may be installed outside this repo.
 - Keep `site/` for actual website files only; do not store agent rules there.
 - Keep `docs/release/` for release review artifacts and templates only; do not store the release workflow rule there.
 
@@ -37,6 +39,8 @@ talkis/
 ├── rules/                   # Agent-facing project rules
 │   ├── style.rule.md        # Website style rule
 │   └── release.rule.md      # Release workflow rule
+├── skills/                  # Reusable Codex skills sourced from this repo
+│   └── talkis-product-ui-style/ # Portable Talkis product UI style skill
 ├── site/                    # Static website files
 ├── talkis-web/              # Cloud platform (Next.js 15)
 │   ├── src/app/              # Pages: landing, auth, dashboard
@@ -253,7 +257,7 @@ Stable principles:
 - Local STT input must be `WAV 16 kHz mono PCM16`; skip ffmpeg when audio already matches that format.
 - Keep ffmpeg for arbitrary files, video, unsupported formats, diarization preparation, and file chunking.
 - Long local Whisper jobs can hallucinate repeated caption-like text on silence. Preserve the no-context local runtime settings and the repetitive-text filters unless a replacement is tested against long silent recordings.
-- macOS call system-audio capture is implemented via Core Audio, and Windows call system-audio capture is implemented via WASAPI loopback. Linux call capture should remain an explicit unsupported placeholder until PipeWire monitor capture is implemented.
+- Call system-audio capture is implemented on all three desktop platforms: macOS via Core Audio (process/system tap), Windows via WASAPI loopback on the default output device (cpal), and Linux via a PipeWire monitor stream. Linux requires a running PipeWire daemon with an active output device; on PipeWire-less (pure PulseAudio) systems capture fails fast with a user-facing error by design.
 - Every audio path needs structured logs with enough evidence to debug runtime behavior: recorder stats, ffmpeg timing, STT endpoint, chunk index/size, and call-capture levels.
 
 ## Release Workflow
@@ -273,3 +277,127 @@ Stable principles:
 5. **Logs location:** `~/.talkis/talkis.log`
 6. **Package manager:** Use `bun` everywhere (not npm/yarn)
 7. **Dev-only features:** Gate behind `import.meta.env.DEV` (e.g., Prompt Preview)
+
+
+<!-- BEGIN BEADS INTEGRATION v:1 profile:full hash:f65d5d33 -->
+## Issue Tracking with bd (beads)
+
+**IMPORTANT**: This project uses **bd (beads)** for ALL issue tracking. Do NOT use markdown TODOs, task lists, or other tracking methods.
+
+### Why bd?
+
+- Dependency-aware: Track blockers and relationships between issues
+- Git-friendly: Dolt-powered version control with native sync
+- Agent-optimized: JSON output, ready work detection, discovered-from links
+- Prevents duplicate tracking systems and confusion
+
+### Quick Start
+
+**Check for ready work:**
+
+```bash
+bd ready --json
+```
+
+**Create new issues:**
+
+```bash
+bd create "Issue title" --description="Detailed context" -t bug|feature|task -p 0-4 --json
+bd create "Issue title" --description="What this issue is about" -p 1 --deps discovered-from:bd-123 --json
+```
+
+**Claim and update:**
+
+```bash
+bd update <id> --claim --json
+bd update bd-42 --priority 1 --json
+```
+
+**Complete work:**
+
+```bash
+bd close bd-42 --reason "Completed" --json
+```
+
+### Issue Types
+
+- `bug` - Something broken
+- `feature` - New functionality
+- `task` - Work item (tests, docs, refactoring)
+- `epic` - Large feature with subtasks
+- `chore` - Maintenance (dependencies, tooling)
+
+### Priorities
+
+- `0` - Critical (security, data loss, broken builds)
+- `1` - High (major features, important bugs)
+- `2` - Medium (default, nice-to-have)
+- `3` - Low (polish, optimization)
+- `4` - Backlog (future ideas)
+
+### Workflow for AI Agents
+
+1. **Check ready work**: `bd ready` shows unblocked issues
+2. **Claim your task atomically**: `bd update <id> --claim`
+3. **Work on it**: Implement, test, document
+4. **Discover new work?** Create linked issue:
+   - `bd create "Found bug" --description="Details about what was found" -p 1 --deps discovered-from:<parent-id>`
+5. **Complete**: `bd close <id> --reason "Done"`
+
+### Quality
+- Use `--acceptance` and `--design` fields when creating issues
+- Use `--validate` to check description completeness
+
+### Lifecycle
+- `bd defer <id>` / `bd supersede <id>` for issue management
+- `bd stale` / `bd orphans` / `bd lint` for hygiene
+- `bd human <id>` to flag for human decisions
+- `bd formula list` / `bd mol pour <name>` for structured workflows
+
+### Auto-Sync
+
+bd automatically syncs via Dolt:
+
+- Each write auto-commits to Dolt history
+- Use `bd dolt push`/`bd dolt pull` for remote sync
+- No manual export/import needed!
+
+### Important Rules
+
+- ✅ Use bd for ALL task tracking
+- ✅ Always use `--json` flag for programmatic use
+- ✅ Link discovered work with `discovered-from` dependencies
+- ✅ Check `bd ready` before asking "what should I work on?"
+- ❌ Do NOT create markdown TODO lists
+- ❌ Do NOT use external issue trackers
+- ❌ Do NOT duplicate tracking systems
+
+For more details, see README.md and docs/QUICKSTART.md.
+
+## Session Completion
+
+**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+
+**MANDATORY WORKFLOW:**
+
+1. **File issues for remaining work** - Create issues for anything that needs follow-up
+2. **Run quality gates** (if code changed) - Tests, linters, builds
+3. **Update issue status** - Close finished work, update in-progress items
+4. **PUSH TO REMOTE** - This is MANDATORY:
+   ```bash
+   git pull --rebase
+   bd dolt push
+   git push
+   git status  # MUST show "up to date with origin"
+   ```
+5. **Clean up** - Clear stashes, prune remote branches
+6. **Verify** - All changes committed AND pushed
+7. **Hand off** - Provide context for next session
+
+**CRITICAL RULES:**
+- Work is NOT complete until `git push` succeeds
+- NEVER stop before pushing - that leaves work stranded locally
+- NEVER say "ready to push when you are" - YOU must push
+- If push fails, resolve and retry until it succeeds
+
+<!-- END BEADS INTEGRATION -->

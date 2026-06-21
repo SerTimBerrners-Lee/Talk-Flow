@@ -3,12 +3,14 @@ import { emit } from "@tauri-apps/api/event";
 
 import { HISTORY_UPDATED_EVENT } from "./hotkeyEvents";
 import { logError, logInfo } from "./logger";
+import { beginProcessing, finishProcessing } from "./processingControl";
 import {
   addHistoryEntry,
-  updateHistoryEntry,
   type AppSettings,
   type HistoryEntry,
 } from "./store";
+
+const CALL_INTERRUPTED_MESSAGE = "Обработка остановлена. Можно запустить повторно.";
 import {
   type FileTranscriptionResult,
   transcribeFilePathOnly,
@@ -264,6 +266,8 @@ interface TranscribeCallCaptureSessionParams {
   micFile?: File | null;
   onStatus?: (status: FileTranscriptionStatus) => void;
   onProgress?: (progress: FileTranscriptionProgress) => void;
+  /** Fires with the new entry id once the "processing" row exists. */
+  onStarted?: (entryId: string) => void;
 }
 
 async function buildCallCaptureHistoryEntry({
@@ -471,11 +475,71 @@ async function buildCallCaptureHistoryEntry({
 export async function transcribeCallCaptureSession(
   params: TranscribeCallCaptureSessionParams,
 ): Promise<HistoryEntry> {
-  const entry = await buildCallCaptureHistoryEntry(params);
+  const id = crypto.randomUUID();
+  const timestamp = new Date().toISOString();
+  const duration = params.startedAt
+    ? Math.max(0, Math.round((Date.now() - params.startedAt) / 1000))
+    : 0;
 
-  await addHistoryEntry(entry);
-  await emit(HISTORY_UPDATED_EVENT, entry);
-  return entry;
+  // Show the call as a live "processing" row (with a stop button) while its
+  // tracks transcribe — call/file STT can take a long time.
+  const baseEntry: HistoryEntry = {
+    id,
+    timestamp,
+    duration,
+    raw: "",
+    cleaned: "",
+    source: "call",
+    fileName: "Созвон",
+    status: "processing",
+    callSessionId: params.session.id,
+    callTracks: params.session.tracks.map((track) => ({
+      kind: track.kind,
+      label: track.label,
+      path: track.path,
+    })),
+  };
+
+  const interruptedEntry = (): HistoryEntry => ({
+    ...baseEntry,
+    status: "interrupted",
+    errorMessage: CALL_INTERRUPTED_MESSAGE,
+  });
+
+  const handle = await beginProcessing(baseEntry, "add");
+  params.onStarted?.(id);
+
+  try {
+    const built = await buildCallCaptureHistoryEntry(params, { id, timestamp, duration });
+
+    // STT via `invoke` can't be aborted mid-flight; if the user stopped while it
+    // ran, discard the late result and mark the row interrupted.
+    if (handle.isCancelled()) {
+      const interrupted = interruptedEntry();
+      await finishProcessing(interrupted);
+      return interrupted;
+    }
+
+    await finishProcessing(built);
+    return built;
+  } catch (error) {
+    if (handle.isCancelled()) {
+      const interrupted = interruptedEntry();
+      await finishProcessing(interrupted);
+      return interrupted;
+    }
+
+    void logError("CALL_CAPTURE", `Call transcription failed: ${errorMessage(error)}`);
+    const failed: HistoryEntry = {
+      ...baseEntry,
+      status: "failed",
+      errorMessage: "Не удалось обработать запись. Попробуйте повторить попытку.",
+    };
+    await finishProcessing(failed);
+    return failed;
+  } finally {
+    handle.finish();
+  }
 }
 
 function sessionFromHistoryEntry(entry: HistoryEntry): CallCaptureSession {
@@ -505,6 +569,7 @@ export async function retryCallCaptureHistoryEntry(
   }
 
   const session = sessionFromHistoryEntry(entry);
+  const handle = await beginProcessing(entry, "update");
 
   try {
     const updatedEntry = await buildCallCaptureHistoryEntry(
@@ -520,10 +585,29 @@ export async function retryCallCaptureHistoryEntry(
       },
     );
 
-    await updateHistoryEntry(updatedEntry);
-    await emit(HISTORY_UPDATED_EVENT, updatedEntry);
+    if (handle.isCancelled()) {
+      const interrupted: HistoryEntry = {
+        ...entry,
+        status: "interrupted",
+        errorMessage: CALL_INTERRUPTED_MESSAGE,
+      };
+      await finishProcessing(interrupted);
+      return interrupted;
+    }
+
+    await finishProcessing(updatedEntry);
     return updatedEntry;
   } catch (error) {
+    if (handle.isCancelled()) {
+      const interrupted: HistoryEntry = {
+        ...entry,
+        status: "interrupted",
+        errorMessage: CALL_INTERRUPTED_MESSAGE,
+      };
+      await finishProcessing(interrupted);
+      return interrupted;
+    }
+
     const userFacingMessage =
       "Не удалось обработать запись. Попробуйте повторить попытку.";
     const failedEntry: HistoryEntry = {
@@ -532,9 +616,10 @@ export async function retryCallCaptureHistoryEntry(
       errorMessage: userFacingMessage,
     };
 
-    await updateHistoryEntry(failedEntry);
-    await emit(HISTORY_UPDATED_EVENT, failedEntry);
+    await finishProcessing(failedEntry);
     void logError("CALL_CAPTURE", `Retry call capture failed: ${errorMessage(error)}`);
     throw new Error(userFacingMessage);
+  } finally {
+    handle.finish();
   }
 }

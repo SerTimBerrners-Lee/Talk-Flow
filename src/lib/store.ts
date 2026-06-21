@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { load } from "@tauri-apps/plugin-store";
 
 import { DEFAULT_WIDGET_SCALE, normalizeWidgetScale } from "./widgetScale";
+import { recordTranscriptionStats } from "./stats";
 
 export interface HistoryEntry {
   id: string;
@@ -18,11 +19,13 @@ export interface HistoryEntry {
     label: string;
     path: string;
   }[];
-  status?: "completed" | "failed";
+  status?: "processing" | "completed" | "failed" | "interrupted";
   errorMessage?: string;
   audioBase64?: string;
   audioMimeType?: string;
   audioFileName?: string;
+  /** Source file path kept for re-processing interrupted/failed file transcriptions. */
+  filePath?: string;
   language?: string;
   style?: AppSettings["style"];
   /** Total processing time in milliseconds (STT + LLM) */
@@ -30,6 +33,7 @@ export interface HistoryEntry {
   mode?: "plain" | "speakers";
   speakers?: Speaker[];
   segments?: SpeakerTranscriptSegment[];
+  translation?: RealtimeTranslationHistory;
 }
 
 export interface Speaker {
@@ -66,8 +70,29 @@ export interface LocalModelSettings {
   lastCheckedAt?: string;
 }
 
-export type RealtimeInterpreterApiMode = "api" | "cloud";
-export type RealtimeInterpreterLanguagePair = "ru_en";
+export type RealtimeInterpreterApiMode = "cloud";
+export type RealtimeInterpreterLanguagePair =
+  | "ru_en"
+  | "ru_es"
+  | "ru_de"
+  | "ru_zh_hans";
+
+export interface RealtimeTranslationSegment {
+  direction: "user_to_remote" | "remote_to_user";
+  startMs?: number;
+  endMs?: number;
+  sourceText: string;
+  translatedText: string;
+  sourceLanguage: string;
+  targetLanguage: string;
+}
+
+export interface RealtimeTranslationHistory {
+  provider: "talkis-cloud";
+  model: string;
+  languagePair: RealtimeInterpreterLanguagePair;
+  segments: RealtimeTranslationSegment[];
+}
 
 export interface RealtimeInterpreterSettings {
   realMicDeviceId: string;
@@ -373,7 +398,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     virtualMicOutputDeviceId: "",
     localPlaybackDeviceId: "",
     languagePair: "ru_en",
-    apiMode: "api",
+    apiMode: "cloud",
     headphonesConfirmed: false,
   },
 };
@@ -424,8 +449,13 @@ function parseRealtimeInterpreterSettings(
       typeof raw.localPlaybackDeviceId === "string"
         ? raw.localPlaybackDeviceId
         : "",
-    languagePair: raw.languagePair === "ru_en" ? "ru_en" : "ru_en",
-    apiMode: raw.apiMode === "cloud" ? "cloud" : "api",
+    languagePair:
+      raw.languagePair === "ru_es" ||
+      raw.languagePair === "ru_de" ||
+      raw.languagePair === "ru_zh_hans"
+        ? raw.languagePair
+        : "ru_en",
+    apiMode: "cloud",
     headphonesConfirmed:
       typeof raw.headphonesConfirmed === "boolean"
         ? raw.headphonesConfirmed
@@ -511,7 +541,9 @@ function normalizeSavedSettings(saved: unknown): Partial<AppSettings> {
         }, {})
       : undefined;
   const normalizedHotkey =
-    typeof raw.hotkey === "string" ? normalizeHotkey(raw.hotkey).normalized : undefined;
+    typeof raw.hotkey === "string"
+      ? normalizeHotkey(raw.hotkey).normalized
+      : undefined;
   const hotkey =
     !isMacPlatform() && normalizedHotkey === DEFAULT_MAC_HOTKEY
       ? DEFAULT_DESKTOP_HOTKEY
@@ -704,6 +736,9 @@ export async function addHistoryEntry(entry: HistoryEntry): Promise<void> {
   const history = await getHistory();
   const updated = pruneHistory([entry, ...history]);
   await writeHistory(updated);
+  // Accumulate words statistics once per transcription; de-dupes by entry id
+  // and never throws, so it cannot affect history persistence.
+  await recordTranscriptionStats(entry);
 }
 
 export async function updateHistoryEntry(entry: HistoryEntry): Promise<void> {
@@ -712,13 +747,43 @@ export async function updateHistoryEntry(entry: HistoryEntry): Promise<void> {
     history.map((item) => (item.id === entry.id ? entry : item)),
   );
   await writeHistory(updated);
+  // Counts a retried entry that only now succeeded; duplicates are ignored.
+  await recordTranscriptionStats(entry);
 }
 
 export async function deleteHistoryEntry(id: string): Promise<void> {
   const history = await getHistory();
-  await writeHistory(
-    history.filter((e) => e.id !== id),
-  );
+  await writeHistory(history.filter((e) => e.id !== id));
+}
+
+/**
+ * Any entry still marked "processing" when the app starts is an orphan — its
+ * in-flight job died with the previous process (crash, quit, freeze). Mark such
+ * entries "interrupted" so the user can re-run them. Idempotent and safe to call
+ * from multiple windows. Returns true when at least one entry was reconciled.
+ */
+export async function reconcileInterruptedProcessing(): Promise<boolean> {
+  const history = await getHistory();
+  let changed = false;
+  const reconciled = history.map((entry) => {
+    if (entry.status !== "processing") {
+      return entry;
+    }
+    changed = true;
+    return {
+      ...entry,
+      status: "interrupted" as const,
+      errorMessage:
+        entry.errorMessage ||
+        "Обработка прервана: приложение было закрыто. Можно запустить повторно.",
+    };
+  });
+
+  if (changed) {
+    await writeHistory(reconciled);
+  }
+
+  return changed;
 }
 
 export async function clearHistory(): Promise<void> {

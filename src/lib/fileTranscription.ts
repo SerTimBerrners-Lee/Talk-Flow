@@ -1,10 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-import { AppSettings } from "./store";
+import { AppSettings, type HistoryEntry } from "./store";
 import { fetchCloudProfile } from "./cloudAuth";
 import { logError, logInfo } from "./logger";
+import { beginProcessing, finishProcessing } from "./processingControl";
 import { formatErrorMessage } from "./utils";
+
+const FILE_INTERRUPTED_MESSAGE = "Обработка остановлена. Можно запустить повторно.";
 
 const PROXY_BASE_URL = "https://proxy.talkis.ru";
 const TRANSCRIPTION_MAX_BYTES = 25 * 1024 * 1024;
@@ -636,5 +639,74 @@ export async function transcribeFilePathOnly({
     };
   } finally {
     unlisten();
+  }
+}
+
+/**
+ * Re-process a file history entry (interrupted or failed) from its stored source
+ * path. Goes through the shared processing lifecycle so it shows as a live row
+ * and can be cancelled. The source file must still exist on disk.
+ */
+export async function retryFileHistoryEntry(
+  entry: HistoryEntry,
+  settings: AppSettings,
+): Promise<HistoryEntry> {
+  if (!entry.filePath) {
+    throw new Error("У этой записи нет сохраненного файла для повторной обработки.");
+  }
+
+  const startedAt = Date.now();
+  const handle = await beginProcessing(entry, "update");
+
+  try {
+    const result = await transcribeFilePathOnly({
+      filePath: entry.filePath,
+      settings,
+      speakerDiarization: settings.fileSpeakerDiarization === true,
+    });
+
+    if (handle.isCancelled()) {
+      const interrupted: HistoryEntry = {
+        ...entry,
+        status: "interrupted",
+        errorMessage: FILE_INTERRUPTED_MESSAGE,
+      };
+      await finishProcessing(interrupted);
+      return interrupted;
+    }
+
+    const updated: HistoryEntry = {
+      ...entry,
+      raw: result.text,
+      cleaned: result.text,
+      status: "completed",
+      errorMessage: undefined,
+      processingTime: Date.now() - startedAt,
+      mode: result.mode,
+      speakers: result.speakers,
+      segments: result.segments,
+    };
+    await finishProcessing(updated);
+    return updated;
+  } catch (error) {
+    if (handle.isCancelled()) {
+      const interrupted: HistoryEntry = {
+        ...entry,
+        status: "interrupted",
+        errorMessage: FILE_INTERRUPTED_MESSAGE,
+      };
+      await finishProcessing(interrupted);
+      return interrupted;
+    }
+
+    const message = formatErrorMessage(error);
+    void logError("WIDGET_FILE", `File retry failed: ${message}`);
+    const failed: HistoryEntry = {
+      ...entry,
+      status: "failed",
+      errorMessage: "Не удалось обработать файл. Попробуйте повторить попытку.",
+    };
+    await finishProcessing(failed);
+    throw new Error(failed.errorMessage);
   }
 }

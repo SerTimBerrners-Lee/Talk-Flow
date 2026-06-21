@@ -3,7 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { disable as disableAutostart, enable as enableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { Check, ChevronDown, Monitor, Moon, Search, Sun, type LucideIcon } from "lucide-react";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { Check, ChevronDown, Mail, Monitor, Moon, Search, Sun, type LucideIcon } from "lucide-react";
 
 import {
   getSettings,
@@ -35,17 +36,18 @@ import {
   SETTINGS_UPDATED_EVENT,
 } from "../../../lib/hotkeyEvents";
 import { logError, logInfo } from "../../../lib/logger";
+import { buildFrontendHotkeyCandidate } from "../../../lib/frontendHotkeyCapture";
 import { LANGUAGES } from "../../../config/languages";
 
 type HotkeyFeedbackTone = "idle" | "success" | "error";
 type StorageFeedbackTone = "idle" | "success" | "error";
-type FrontendHotkeyCaptureEvent = Pick<KeyboardEvent, "altKey" | "ctrlKey" | "key" | "metaKey" | "shiftKey">;
 
 const SETTING_ROW_COLUMNS = "minmax(0, 1fr) 280px";
 const SETTING_ROW_GAP = 16;
 const CONTROL_HEIGHT = 38;
 const CONTROL_RADIUS = 8;
 const CONTROL_FONT_SIZE = 12;
+const SUPPORT_EMAIL = "david.perov60@gmail.com";
 const SETTINGS_CARD_STYLE = {
   display: "grid",
   gap: 10,
@@ -58,49 +60,6 @@ const THEME_OPTIONS: Array<{ id: AppSettings["theme"]; label: string; Icon: Luci
   { id: "light", label: "Светлая", Icon: Sun },
   { id: "dark", label: "Темная", Icon: Moon },
 ];
-
-function hotkeyMainKeyFromKeyboardEvent(event: FrontendHotkeyCaptureEvent): string | null {
-  if (event.key === " ") return "Space";
-
-  const key = event.key.trim();
-  const lower = key.toLowerCase();
-
-  if (!key || lower === "control" || lower === "alt" || lower === "shift" || lower === "meta") {
-    return null;
-  }
-
-  if (lower === "escape") return "Escape";
-  if (lower === "enter") return "Enter";
-  if (lower === "tab") return "Tab";
-  if (lower === "backspace") return "Backspace";
-  if (lower === "delete") return "Delete";
-  if (lower === "insert") return "Insert";
-  if (lower === "home") return "Home";
-  if (lower === "end") return "End";
-  if (lower === "pageup") return "PageUp";
-  if (lower === "pagedown") return "PageDown";
-  if (lower === "arrowup") return "Up";
-  if (lower === "arrowdown") return "Down";
-  if (lower === "arrowleft") return "Left";
-  if (lower === "arrowright") return "Right";
-  if (/^f(?:[1-9]|1[0-2])$/i.test(key)) return key.toUpperCase();
-  if (/^[a-z0-9]$/i.test(key)) return key.toUpperCase();
-
-  return null;
-}
-
-function buildFrontendHotkeyCandidate(event: FrontendHotkeyCaptureEvent): string | null {
-  const parts: string[] = [];
-  if (event.ctrlKey) parts.push("Control");
-  if (event.altKey) parts.push("Alt");
-  if (event.shiftKey) parts.push("Shift");
-  if (event.metaKey) parts.push("Command");
-
-  const mainKey = hotkeyMainKeyFromKeyboardEvent(event);
-  if (mainKey) parts.push(mainKey);
-
-  return parts.length > 0 ? parts.join("+") : null;
-}
 
 export function SettingsTab() {
   const usesNativeHotkeyCapture = isMacPlatform();
@@ -134,6 +93,7 @@ export function SettingsTab() {
   const [defaultTranscriptionStorageDir, setDefaultTranscriptionStorageDir] = useState("");
   const [transcriptionStorageFeedback, setTranscriptionStorageFeedback] = useState("");
   const [transcriptionStorageFeedbackTone, setTranscriptionStorageFeedbackTone] = useState<StorageFeedbackTone>("idle");
+  const [supportFeedback, setSupportFeedback] = useState("");
 
   type MicAvailabilityState = "ready" | "missing-selected" | "permission-needed" | "empty";
 
@@ -535,6 +495,28 @@ export function SettingsTab() {
     }
 
     void startHotkeyCapture();
+  };
+
+  const contactSupport = async (): Promise<void> => {
+    const subject = encodeURIComponent("Talkis — обращение в поддержку");
+    const body = encodeURIComponent(
+      "Опишите проблему или вопрос:\n\n\n",
+    );
+    const mailto = `mailto:${SUPPORT_EMAIL}?subject=${subject}&body=${body}`;
+
+    try {
+      await openUrl(mailto);
+      setSupportFeedback("");
+    } catch (error) {
+      void logError("SETTINGS", `Failed to open support mail: ${error instanceof Error ? error.message : String(error)}`);
+      // Fallback: put the address on the clipboard so support is still reachable.
+      try {
+        await navigator.clipboard.writeText(SUPPORT_EMAIL);
+        setSupportFeedback(`Не удалось открыть почтовый клиент. Адрес скопирован: ${SUPPORT_EMAIL}`);
+      } catch {
+        setSupportFeedback(`Напишите нам на ${SUPPORT_EMAIL}`);
+      }
+    }
   };
 
   const toggleAutostart = async (): Promise<void> => {
@@ -1060,6 +1042,31 @@ export function SettingsTab() {
         {transcriptionStorageFeedback && (
           <div style={{ fontSize: 13, color: transcriptionStorageFeedbackColor, lineHeight: 1.6 }}>
             {transcriptionStorageFeedback}
+          </div>
+        )}
+      </div>
+
+      <div className="card" style={SETTINGS_CARD_STYLE}>
+        <div style={{ display: "grid", gridTemplateColumns: SETTING_ROW_COLUMNS, alignItems: "center", gap: SETTING_ROW_GAP }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-hi)", margin: 0 }}>Поддержка</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => { void contactSupport(); }}
+            className="btn"
+            style={{ minHeight: CONTROL_HEIGHT, width: "100%", justifySelf: "end", justifyContent: "center", gap: 8, padding: "0 10px", borderRadius: CONTROL_RADIUS, fontSize: CONTROL_FONT_SIZE }}
+          >
+            <Mail size={14} strokeWidth={2} />
+            Написать в поддержку
+          </button>
+        </div>
+        <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.65 }}>
+          Откроется почтовый клиент с письмом на {SUPPORT_EMAIL}. Опишите проблему или вопрос – мы поможем.
+        </div>
+        {supportFeedback && (
+          <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>
+            {supportFeedback}
           </div>
         )}
       </div>

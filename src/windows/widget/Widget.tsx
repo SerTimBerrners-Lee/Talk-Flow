@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { emit, listen } from "@tauri-apps/api/event";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
@@ -11,17 +11,25 @@ import {
   HISTORY_CLEARED_EVENT,
   HISTORY_DELETED_EVENT,
   HISTORY_UPDATED_EVENT,
+  PROCESSING_CANCEL_REQUEST_EVENT,
   SETTINGS_UPDATED_EVENT,
   WIDGET_RETRY_PROCESSING_EVENT,
+  type ProcessingCancelRequestPayload,
   type WidgetRetryProcessingPayload,
 } from "../../lib/hotkeyEvents";
 import {
-  addHistoryEntry,
   getHistory,
   getSettings,
+  reconcileInterruptedProcessing,
   setPermissionsPassed,
   type HistoryEntry,
 } from "../../lib/store";
+import {
+  beginProcessing,
+  cancelProcessing,
+  finishProcessing,
+  isAbortError,
+} from "../../lib/processingControl";
 import {
   fileNameFromPath,
   type FileTranscriptionProgress,
@@ -303,6 +311,11 @@ export function Widget() {
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const dragTriggeredRef = useRef(false);
   const callMicRuntimeRef = useRef(createRecordingRuntimeController());
+  // Ids of the entries currently being processed in this window, so a stop
+  // request from the table can reset the matching widget UI immediately (a local
+  // `invoke` keeps running and would otherwise leave the spinner going).
+  const callProcessingIdRef = useRef<string | null>(null);
+  const fileProcessingIdRef = useRef<string | null>(null);
   const callMicPausedForVoiceRef = useRef(false);
   const callSystemAudioPermissionReadyRef = useRef(false);
   const callNoticeTimerRef = useRef<number | null>(null);
@@ -397,6 +410,33 @@ export function Widget() {
 
     return () => {
       mounted = false;
+      void unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, []);
+
+  useEffect(() => {
+    // Recover from a crash/quit mid-processing: orphaned "processing" entries
+    // become "interrupted" so they can be re-run.
+    void reconcileInterruptedProcessing();
+
+    // Allow the history table (Settings window) to stop an in-flight job here.
+    const unlistenPromise = listen<ProcessingCancelRequestPayload>(
+      PROCESSING_CANCEL_REQUEST_EVENT,
+      ({ payload }) => {
+        if (!payload?.entryId) {
+          return;
+        }
+        void cancelProcessing(payload.entryId);
+        // Stop the widget spinner right away for the job it owns.
+        if (payload.entryId === callProcessingIdRef.current) {
+          resetCallProcessingUi();
+        } else if (payload.entryId === fileProcessingIdRef.current) {
+          resetFileProcessingUi();
+        }
+      },
+    );
+
+    return () => {
       void unlistenPromise.then((unlisten) => unlisten());
     };
   }, []);
@@ -510,6 +550,28 @@ export function Widget() {
       fileResetTimerRef.current = null;
       void resetFileDropUi();
     }, 1800);
+  };
+
+  // Immediately drop the widget out of its processing UI when a stop request
+  // arrives for the entry it is working on — without waiting for the (possibly
+  // long-running, non-abortable local) job to settle.
+  const resetCallProcessingUi = (): void => {
+    callProcessingIdRef.current = null;
+    callMicRuntimeRef.current.dispose();
+    callMicPausedForVoiceRef.current = false;
+    setCallSession(null);
+    setCallSettings(null);
+    setCallError("");
+    setCallState("idle");
+    setFileStatus(null);
+    setFileProgress(null);
+  };
+
+  const resetFileProcessingUi = (): void => {
+    fileProcessingIdRef.current = null;
+    setFileStatus(null);
+    setFileProgress(null);
+    closeFileDropUi();
   };
 
   const canAcceptFileDrop = () =>
@@ -664,18 +726,39 @@ export function Widget() {
         startedAt: callStartedAt,
         onStatus: setFileStatus,
         onProgress: setFileProgress,
+        onStarted: (entryId) => {
+          callProcessingIdRef.current = entryId;
+        },
       });
-      callMicRuntimeRef.current.reset();
+
+      // A stop request already reset the UI (and possibly started a new call) —
+      // ignore this now-stale result so we don't clobber the fresh state.
+      if (callProcessingIdRef.current !== entry.id) {
+        return;
+      }
+      callProcessingIdRef.current = null;
+
       callMicPausedForVoiceRef.current = false;
-      setLatestCopyText(getCopyableText(entry));
       setCallSession(null);
       setCallSettings(null);
-      setCallState("success");
-      setFileStatus("done");
       setFileProgress(null);
-      window.setTimeout(() => {
+
+      if (entry.status === "completed") {
+        callMicRuntimeRef.current.reset();
+        setLatestCopyText(getCopyableText(entry));
+        setCallState("success");
+        setFileStatus("done");
+        window.setTimeout(() => {
+          setCallState("idle");
+        }, 1800);
+      } else {
+        // interrupted (user stop) or failed — the entry is already persisted to
+        // history with a retry option; return the widget to idle quietly.
+        callMicRuntimeRef.current.dispose();
+        setCallError("");
         setCallState("idle");
-      }, 1800);
+        setFileStatus(null);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logError("CALL_CAPTURE", `Call capture stop/process failed: ${message}`);
@@ -725,9 +808,24 @@ export function Widget() {
     setFileProgress(null);
     await resizeWidgetForFileDrop(true);
 
+    const settings = await getSettings({ reload: true });
+    const startedAt = Date.now();
+    // Persist a "processing" row up front (keeping the source path for re-runs).
+    const baseEntry: HistoryEntry = {
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      duration: 0,
+      raw: "",
+      cleaned: "",
+      source: "file",
+      fileName,
+      status: "processing",
+      filePath,
+    };
+    const handle = await beginProcessing(baseEntry, "add");
+    fileProcessingIdRef.current = baseEntry.id;
+
     try {
-      const settings = await getSettings({ reload: true });
-      const startedAt = Date.now();
       const transcription = await transcribeFilePathOnly({
         filePath,
         settings,
@@ -735,23 +833,31 @@ export function Widget() {
         onProgress: setFileProgress,
         speakerDiarization: settings.fileSpeakerDiarization === true,
       });
+
+      if (handle.isCancelled()) {
+        // UI was already reset by the stop handler; just record the outcome.
+        await finishProcessing({
+          ...baseEntry,
+          status: "interrupted",
+          errorMessage: "Обработка остановлена. Можно запустить повторно.",
+        });
+        return;
+      }
+      fileProcessingIdRef.current = null;
+
       const entry: HistoryEntry = {
-        id: crypto.randomUUID(),
-        timestamp: new Date().toISOString(),
-        duration: 0,
+        ...baseEntry,
         raw: transcription.text,
         cleaned: transcription.text,
-        source: "file",
-        fileName,
         status: "completed",
+        errorMessage: undefined,
         processingTime: Date.now() - startedAt,
         mode: transcription.mode,
         speakers: transcription.speakers,
         segments: transcription.segments,
       };
 
-      await addHistoryEntry(entry);
-      await emit(HISTORY_UPDATED_EVENT, entry);
+      await finishProcessing(entry);
       setLatestCopyText(getCopyableText(entry));
       setPendingFileResultId(entry.id);
       setFileDropState("success");
@@ -759,15 +865,33 @@ export function Widget() {
       setFileProgress(null);
       scheduleFileDropReset();
     } catch (error) {
+      if (handle.isCancelled() || isAbortError(error)) {
+        // UI was already reset by the stop handler; just record the outcome.
+        await finishProcessing({
+          ...baseEntry,
+          status: "interrupted",
+          errorMessage: "Обработка остановлена. Можно запустить повторно.",
+        });
+        return;
+      }
+      fileProcessingIdRef.current = null;
+
       logError(
         "WIDGET_FILE",
         `File transcription failed: ${error instanceof Error ? error.message : String(error)}`,
       );
+      await finishProcessing({
+        ...baseEntry,
+        status: "failed",
+        errorMessage: toFileTranscriptionErrorMessage(error),
+      });
       setFileDropState("error");
       setFileStatus(null);
       setFileProgress(null);
       setFileDropName(toFileTranscriptionErrorMessage(error));
       scheduleFileDropReset();
+    } finally {
+      handle.finish();
     }
   };
 

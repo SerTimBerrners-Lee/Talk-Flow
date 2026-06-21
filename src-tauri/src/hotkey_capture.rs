@@ -222,16 +222,13 @@ mod macos {
                 let candidate = build_hotkey_string(flags, Some(main_key));
                 {
                     let mut runtime_ref = runtime.borrow_mut();
+                    // Apply immediately on key press for parity with Windows/Linux —
+                    // no "hold then release" step, which users found confusing.
+                    runtime_ref.active = false;
                     runtime_ref.candidate = Some(candidate.clone());
                     runtime_ref.last_preview = Some(candidate.clone());
                 }
-                emit_capture_event(
-                    &app,
-                    &window_label,
-                    "preview",
-                    Some(candidate),
-                    Some("Отпустите комбинацию, чтобы применить.".to_string()),
-                );
+                emit_capture_event(&app, &window_label, "completed", Some(candidate), None);
                 return ptr::null_mut();
             }
 

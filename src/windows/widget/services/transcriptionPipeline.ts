@@ -1,10 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 
-import { addHistoryEntry, AppSettings, HistoryEntry, updateHistoryEntry } from "../../../lib/store";
+import { AppSettings, deleteHistoryEntry, HistoryEntry } from "../../../lib/store";
 import { logError, logInfo } from "../../../lib/logger";
 import { formatErrorMessage } from "../../../lib/utils";
 import { HISTORY_UPDATED_EVENT } from "../../../lib/hotkeyEvents";
+import { beginProcessing, finishProcessing, isAbortError } from "../../../lib/processingControl";
 
 export interface ProcessRecordingBlobParams {
   blob: Blob;
@@ -144,11 +145,13 @@ async function transcribeViaProxy({
   audioMimeType,
   audioFileName,
   settings,
+  signal,
 }: {
   audioBase64: string;
   audioMimeType: string;
   audioFileName: string;
   settings: AppSettings;
+  signal?: AbortSignal;
 }): Promise<{ raw: string; cleaned: string }> {
   logInfo("API", `Sending to proxy, audio_size: ${audioBase64.length} chars`);
 
@@ -171,6 +174,7 @@ async function transcribeViaProxy({
       Authorization: `Bearer ${settings.deviceToken}`,
     },
     body: form,
+    signal,
   });
 
   const body = await resp.text();
@@ -234,15 +238,17 @@ async function transcribeAudio({
   audioMimeType,
   audioFileName,
   settings,
+  signal,
 }: {
   audioBase64: string;
   audioMimeType: string;
   audioFileName: string;
   settings: AppSettings;
+  signal?: AbortSignal;
 }): Promise<{ raw: string; cleaned: string }> {
   // Subscription mode: send to proxy
   if (!settings.useOwnKey && settings.deviceToken?.trim()) {
-    return transcribeViaProxy({ audioBase64, audioMimeType, audioFileName, settings });
+    return transcribeViaProxy({ audioBase64, audioMimeType, audioFileName, settings, signal });
   }
 
   if (!settings.useOwnKey) {
@@ -259,21 +265,6 @@ async function pasteCleanedText(text: string): Promise<void> {
   logInfo("PASTE", "paste_text command finished; target app insertion cannot be confirmed reliably");
 }
 
-async function saveAndEmitHistoryEntry(entry: HistoryEntry, mode: "add" | "update"): Promise<void> {
-  try {
-    if (mode === "add") {
-      await addHistoryEntry(entry);
-    } else {
-      await updateHistoryEntry(entry);
-    }
-
-    logInfo("HISTORY", `History entry ${mode === "add" ? "saved" : "updated"}`);
-    await emit(HISTORY_UPDATED_EVENT, entry);
-  } catch (historyError) {
-    logError("HISTORY", `Failed to persist entry: ${formatErrorMessage(historyError)}`);
-  }
-}
-
 export async function processRecordingBlob({
   blob,
   settings,
@@ -285,6 +276,25 @@ export async function processRecordingBlob({
   const audioMimeType = blob.type || "audio/webm";
   const audioFileName = audioMimeType.includes("wav") ? "recording.wav" : "recording.webm";
 
+  // Persist a "processing" entry up front so the recording shows as a live row
+  // in the history table (with a stop button) and keeps its audio for re-runs.
+  const baseEntry: HistoryEntry = {
+    id: crypto.randomUUID(),
+    timestamp: new Date().toISOString(),
+    duration: durationSeconds,
+    raw: "",
+    cleaned: "",
+    source: "voice",
+    status: "processing",
+    audioBase64: base64Audio,
+    audioMimeType,
+    audioFileName,
+    language: settings.language,
+    style: settings.style || "classic",
+  };
+
+  const handle = await beginProcessing(baseEntry, "add");
+
   try {
     const apiStart = Date.now();
     const result = await transcribeAudio({
@@ -292,29 +302,36 @@ export async function processRecordingBlob({
       audioMimeType,
       audioFileName,
       settings,
+      signal: handle.signal,
     });
+
+    if (handle.isCancelled()) {
+      await finishProcessing(buildInterruptedEntry(baseEntry));
+      return { durationSeconds, hasTranscription: false };
+    }
 
     logInfo("API", `Pipeline result received: raw_type=${typeof result.raw}, cleaned_type=${typeof result.cleaned}`);
     const processingTime = Date.now() - apiStart;
 
     if (!hasRecognizedSpeech(result)) {
-      logInfo("API", "Nothing recognized, skipping history save and paste");
+      logInfo("API", "Nothing recognized, removing placeholder entry, skipping paste");
+      await deleteHistoryEntry(baseEntry.id);
+      await emit(HISTORY_UPDATED_EVENT, baseEntry);
       return { durationSeconds, hasTranscription: false };
     }
 
     logInfo("API", `Transcription complete in ${processingTime}ms: "${result.cleaned}"`);
-    const historyEntry: HistoryEntry = {
-      id: crypto.randomUUID(),
-      timestamp: new Date().toISOString(),
-      duration: durationSeconds,
+    await finishProcessing({
+      ...baseEntry,
       raw: result.raw,
       cleaned: result.cleaned,
-      source: "voice",
       status: "completed",
+      errorMessage: undefined,
       processingTime,
-    };
-
-    await saveAndEmitHistoryEntry(historyEntry, "add");
+      audioBase64: undefined,
+      audioMimeType: undefined,
+      audioFileName: undefined,
+    });
 
     let pasteFailed = false;
     try {
@@ -329,31 +346,37 @@ export async function processRecordingBlob({
       : "Automatic paste command completed without OS-level errors");
     return { durationSeconds, hasTranscription: true };
   } catch (error) {
+    if (handle.isCancelled() || isAbortError(error)) {
+      logInfo("API", "Processing cancelled by user; marking entry interrupted");
+      await finishProcessing(buildInterruptedEntry(baseEntry));
+      return { durationSeconds, hasTranscription: false };
+    }
+
     const rawErrorMessage = error instanceof Error
       ? `${error.name}: ${error.message}${error.stack ? `\n${error.stack}` : ""}`
       : String(error);
     logError("API", `Pipeline raw error: ${rawErrorMessage}`);
 
     const userFacingErrorMessage = toUserFacingErrorMessage(error);
-    const failedEntry: HistoryEntry = {
-      id: crypto.randomUUID(),
-      timestamp: new Date().toISOString(),
-      duration: durationSeconds,
-      raw: "",
-      cleaned: "",
-      source: "voice",
+    await finishProcessing({
+      ...baseEntry,
       status: "failed",
       errorMessage: userFacingErrorMessage,
-      audioBase64: base64Audio,
-      audioMimeType,
-      audioFileName,
-      language: settings.language,
-      style: settings.style || "classic",
-    };
-
-    await saveAndEmitHistoryEntry(failedEntry, "add");
+    });
     throw new Error(userFacingErrorMessage);
+  } finally {
+    handle.finish();
   }
+}
+
+const INTERRUPTED_MESSAGE = "Обработка остановлена. Можно запустить повторно.";
+
+function buildInterruptedEntry(entry: HistoryEntry): HistoryEntry {
+  return {
+    ...entry,
+    status: "interrupted",
+    errorMessage: INTERRUPTED_MESSAGE,
+  };
 }
 
 export async function retryHistoryEntry(
@@ -372,13 +395,24 @@ export async function retryHistoryEntry(
   };
   const shouldPaste = options?.shouldPaste ?? false;
 
+  // Re-runs go through the same lifecycle: shown as "processing" again and
+  // cancellable from the table.
+  const handle = await beginProcessing(entry, "update");
+
   try {
     const result = await transcribeAudio({
       audioBase64: entry.audioBase64,
       audioMimeType: entry.audioMimeType || "audio/webm",
       audioFileName: entry.audioFileName || "recording.webm",
       settings: retrySettings,
+      signal: handle.signal,
     });
+
+    if (handle.isCancelled()) {
+      const interrupted = buildInterruptedEntry(entry);
+      await finishProcessing(interrupted);
+      return { hasTranscription: false, updatedEntry: interrupted };
+    }
 
     if (!hasRecognizedSpeech(result)) {
       throw new Error("Речь не распознана. Попробуйте отправить запись еще раз.");
@@ -395,7 +429,7 @@ export async function retryHistoryEntry(
       audioFileName: undefined,
     };
 
-    await saveAndEmitHistoryEntry(updatedEntry, "update");
+    await finishProcessing(updatedEntry);
 
     if (shouldPaste) {
       try {
@@ -410,6 +444,12 @@ export async function retryHistoryEntry(
       updatedEntry,
     };
   } catch (error) {
+    if (handle.isCancelled() || isAbortError(error)) {
+      const interrupted = buildInterruptedEntry(entry);
+      await finishProcessing(interrupted);
+      return { hasTranscription: false, updatedEntry: interrupted };
+    }
+
     const userFacingErrorMessage = toUserFacingErrorMessage(error);
     const failedEntry: HistoryEntry = {
       ...entry,
@@ -417,7 +457,9 @@ export async function retryHistoryEntry(
       errorMessage: userFacingErrorMessage,
     };
 
-    await saveAndEmitHistoryEntry(failedEntry, "update");
+    await finishProcessing(failedEntry);
     throw new Error(userFacingErrorMessage);
+  } finally {
+    handle.finish();
   }
 }

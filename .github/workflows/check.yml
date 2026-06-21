@@ -1,0 +1,102 @@
+name: CI
+
+# Compile-check the full codebase — including the per-OS `#[cfg(target_os = ...)]`
+# branches in call_capture.rs / realtime_interpreter.rs that `cargo check` on a single
+# host can never reach. Runs on every push and PR so platform-gated Rust is validated
+# without waiting for a `v*` release tag.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust-check:
+    name: cargo check (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos
+            runner: macos-latest
+          - platform: windows
+            runner: windows-latest
+          - platform: linux
+            runner: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux Tauri dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            libxdo-dev \
+            libasound2-dev \
+            libpipewire-0.3-dev \
+            librsvg2-dev \
+            patchelf \
+            clang \
+            libclang-dev \
+            cmake
+
+      - name: Cache Rust build output
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/git
+            ~/.cargo/registry
+            src-tauri/target
+          key: ${{ runner.os }}-cargo-check-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-check-
+            ${{ runner.os }}-cargo-
+
+      - name: cargo check
+        run: cargo check --manifest-path src-tauri/Cargo.toml
+
+  frontend-check:
+    name: tsc + hotkey smoke
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.13
+
+      - name: Cache Bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check version sync
+        run: bun run check:versions
+
+      - name: TypeScript type check
+        run: bunx tsc --noEmit
+
+      - name: Hotkey FSM smoke test
+        run: bun run smoke:hotkey

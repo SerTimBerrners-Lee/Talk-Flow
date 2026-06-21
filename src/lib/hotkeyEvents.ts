@@ -8,6 +8,7 @@ export const NATIVE_HOTKEY_CAPTURE_EVENT = "native-hotkey-capture";
 export const HOTKEY_CAPTURE_STATE_EVENT = "hotkey-capture-state";
 export const SETTINGS_NAVIGATE_EVENT = "settings-navigate";
 export const WIDGET_RETRY_PROCESSING_EVENT = "widget-retry-processing";
+export const PROCESSING_CANCEL_REQUEST_EVENT = "processing-cancel-request";
 
 export interface HotkeyChangeRequestPayload {
   hotkey: string;
@@ -39,4 +40,8 @@ export interface WidgetRetryProcessingPayload {
   active: boolean;
   source: "voice" | "call";
   entryId?: string;
+}
+
+export interface ProcessingCancelRequestPayload {
+  entryId: string;
 }

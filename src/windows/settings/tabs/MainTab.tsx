@@ -17,21 +17,28 @@ import {
   AlertCircle,
   Check,
   Copy,
+  HelpCircle,
   Loader2,
   Pencil,
   RotateCcw,
+  Square,
   Trash2,
 } from "lucide-react";
 import {
   HISTORY_CLEARED_EVENT,
   HISTORY_DELETED_EVENT,
   HISTORY_UPDATED_EVENT,
+  PROCESSING_CANCEL_REQUEST_EVENT,
   SETTINGS_UPDATED_EVENT,
   WIDGET_RETRY_PROCESSING_EVENT,
+  type ProcessingCancelRequestPayload,
   type WidgetRetryProcessingPayload,
 } from "../../../lib/hotkeyEvents";
 import { retryCallCaptureHistoryEntry } from "../../../lib/callCapture";
+import { retryFileHistoryEntry } from "../../../lib/fileTranscription";
+import { cancelProcessing } from "../../../lib/processingControl";
 import { logError } from "../../../lib/logger";
+import { TranscriptionStatsPanel } from "../../../components/TranscriptionStatsPanel";
 import { retryHistoryEntry } from "../../widget/services/transcriptionPipeline";
 
 interface MainTabProps {
@@ -267,6 +274,7 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
   );
   const [isClearArmed, setIsClearArmed] = useState(false);
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>("all");
+  const [hintHelpOpen, setHintHelpOpen] = useState(false);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
   const [editingSpeakerEntryId, setEditingSpeakerEntryId] = useState<
     string | null
@@ -298,9 +306,20 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
       void loadHistory();
     });
 
+    // Cancel a retry that is running in this (Settings) window.
+    const unlistenCancel = listen<ProcessingCancelRequestPayload>(
+      PROCESSING_CANCEL_REQUEST_EVENT,
+      ({ payload }) => {
+        if (payload?.entryId) {
+          void cancelProcessing(payload.entryId);
+        }
+      },
+    );
+
     return () => {
       unlistenHistory.then((unlisten) => unlisten());
       unlistenSettings.then((unlisten) => unlisten());
+      unlistenCancel.then((unlisten) => unlisten());
     };
   }, []);
 
@@ -422,6 +441,8 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
       const settings = await getSettings();
       if (source === "call") {
         await retryCallCaptureHistoryEntry(entry, settings);
+      } else if (source === "file") {
+        await retryFileHistoryEntry(entry, settings);
       } else {
         await retryHistoryEntry(entry, settings, { shouldPaste: false });
       }
@@ -458,6 +479,28 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
       }
       setRetryingId((current) => (current === entry.id ? null : current));
     }
+  };
+
+  const cancelEntry = async (id: string): Promise<void> => {
+    // Flip the row instantly so the stop button changes on the first click — the
+    // authoritative interrupted state is persisted by cancelProcessing.
+    setHistory((current) =>
+      current.map((item) =>
+        item.id === id && item.status === "processing"
+          ? {
+              ...item,
+              status: "interrupted",
+              errorMessage: "Обработка остановлена. Можно запустить повторно.",
+            }
+          : item,
+      ),
+    );
+
+    // Broadcast a stop request: the widget cancels fresh recordings, this window
+    // cancels in-window retries. Whichever process owns the job aborts it.
+    await emit<ProcessingCancelRequestPayload>(PROCESSING_CANCEL_REQUEST_EVENT, {
+      entryId: id,
+    });
   };
 
   const filteredHistory = useMemo<HistoryEntry[]>(() => {
@@ -511,21 +554,47 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
           }}
         >
           <div style={{ display: "grid", gap: 6, maxWidth: 560 }}>
-            <div
-              style={{ fontSize: 16, fontWeight: 700, color: "var(--text-hi)" }}
-            >
-              Как начать запись
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span
+                style={{ fontSize: 16, fontWeight: 700, color: "var(--text-hi)" }}
+              >
+                Как начать запись
+              </span>
+              <button
+                type="button"
+                onClick={() => setHintHelpOpen((value) => !value)}
+                aria-expanded={hintHelpOpen}
+                aria-label="Как это работает"
+                title="Как это работает"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: 20,
+                  height: 20,
+                  padding: 0,
+                  border: "none",
+                  background: "none",
+                  cursor: "pointer",
+                  flexShrink: 0,
+                  color: hintHelpOpen ? "var(--text-hi)" : "var(--text-low)",
+                }}
+              >
+                <HelpCircle size={16} strokeWidth={2} />
+              </button>
             </div>
-            <div
-              style={{
-                fontSize: 14,
-                color: "var(--text-mid)",
-                lineHeight: 1.7,
-              }}
-            >
-              Удерживайте горячую клавишу, говорите и отпустите ее, когда
-              закончите. После обработки текст вставится автоматически.
-            </div>
+            {hintHelpOpen && (
+              <div
+                style={{
+                  fontSize: 14,
+                  color: "var(--text-mid)",
+                  lineHeight: 1.7,
+                }}
+              >
+                Удерживайте горячую клавишу, говорите и отпустите ее, когда
+                закончите. После обработки текст вставится автоматически.
+              </div>
+            )}
           </div>
 
           <div
@@ -547,6 +616,8 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
           </div>
         </div>
       </section>
+
+      <TranscriptionStatsPanel />
 
       <section style={{ display: "grid", gap: 14 }}>
         <div
@@ -811,7 +882,31 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                                     gap: 8,
                                   }}
                                 >
-                                  {item.status === "failed" ? (
+                                  {item.status === "processing" ? (
+                                    <div
+                                      style={{
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        gap: 8,
+                                        padding: "6px 10px",
+                                        borderRadius: 999,
+                                        background: "var(--control-muted)",
+                                        border: "1px solid var(--border)",
+                                        color: "var(--text-mid)",
+                                        fontSize: 12,
+                                        lineHeight: 1.4,
+                                        width: "fit-content",
+                                      }}
+                                    >
+                                      <Loader2
+                                        className="loading-soft-icon"
+                                        size={13}
+                                        strokeWidth={2}
+                                      />
+                                      <span>Идёт обработка…</span>
+                                    </div>
+                                  ) : item.status === "failed" ||
+                                    item.status === "interrupted" ? (
                                     <>
                                       <div
                                         style={{
@@ -833,7 +928,11 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                                           size={13}
                                           strokeWidth={2}
                                         />
-                                        <span>Обработка не завершилась</span>
+                                        <span>
+                                          {item.status === "interrupted"
+                                            ? "Обработка прервана"
+                                            : "Обработка не завершилась"}
+                                        </span>
                                       </div>
                                       <div
                                         style={{
@@ -877,10 +976,35 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                                     flexShrink: 0,
                                   }}
                                 >
-                                  {item.status === "failed" &&
-                                  (source === "voice" ||
-                                    (source === "call" &&
-                                      Boolean(item.callTracks?.length))) ? (
+                                  {item.status === "processing" ? (
+                                    <button
+                                      onClick={() => cancelEntry(item.id)}
+                                      className="btn btn-danger"
+                                      style={{
+                                        width: 32,
+                                        minWidth: 32,
+                                        height: 32,
+                                        minHeight: 32,
+                                        padding: 0,
+                                        flexShrink: 0,
+                                        borderRadius: 8,
+                                      }}
+                                      title="Остановить обработку"
+                                    >
+                                      <Square
+                                        size={11}
+                                        strokeWidth={2}
+                                        fill="currentColor"
+                                      />
+                                    </button>
+                                  ) : (item.status === "failed" ||
+                                      item.status === "interrupted") &&
+                                    ((source === "voice" &&
+                                      Boolean(item.audioBase64)) ||
+                                      (source === "call" &&
+                                        Boolean(item.callTracks?.length)) ||
+                                      (source === "file" &&
+                                        Boolean(item.filePath))) ? (
                                     <button
                                       onClick={() => retryEntry(item)}
                                       className="btn"
@@ -894,7 +1018,7 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                                         flexShrink: 0,
                                         borderRadius: 8,
                                       }}
-                                      title="Отправить повторно"
+                                      title="Обработать заново"
                                     >
                                       {retryingId === item.id ? (
                                         <Loader2
@@ -935,7 +1059,8 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                                       )}
                                     </button>
                                   )}
-                                  {item.status !== "failed" &&
+                                  {(!item.status ||
+                                    item.status === "completed") &&
                                     (source === "file" ||
                                       source === "call") && (
                                       <button
@@ -959,22 +1084,24 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                                         <Pencil size={12} strokeWidth={2} />
                                       </button>
                                     )}
-                                  <button
-                                    onClick={() => deleteEntry(item.id)}
-                                    className="btn btn-danger"
-                                    style={{
-                                      width: 32,
-                                      minWidth: 32,
-                                      height: 32,
-                                      minHeight: 32,
-                                      padding: 0,
-                                      flexShrink: 0,
-                                      borderRadius: 8,
-                                    }}
-                                    title="Удалить"
-                                  >
-                                    <Trash2 size={12} strokeWidth={2} />
-                                  </button>
+                                  {item.status !== "processing" && (
+                                    <button
+                                      onClick={() => deleteEntry(item.id)}
+                                      className="btn btn-danger"
+                                      style={{
+                                        width: 32,
+                                        minWidth: 32,
+                                        height: 32,
+                                        minHeight: 32,
+                                        padding: 0,
+                                        flexShrink: 0,
+                                        borderRadius: 8,
+                                      }}
+                                      title="Удалить"
+                                    >
+                                      <Trash2 size={12} strokeWidth={2} />
+                                    </button>
+                                  )}
                                 </div>
                               </div>
                             </td>
