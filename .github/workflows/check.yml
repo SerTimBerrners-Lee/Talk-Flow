@@ -29,7 +29,7 @@ jobs:
           - platform: windows
             runner: windows-latest
           - platform: linux
-            runner: ubuntu-22.04
+            runner: ubuntu-24.04
 
     steps:
       - name: Checkout repository
@@ -53,6 +53,22 @@ jobs:
             clang \
             libclang-dev \
             cmake
+
+      - name: Create sidecar placeholders
+        # tauri-build resolves the externalBin entries from tauri.conf.json and on
+        # Windows hard-errors if a `binaries/<name>-<target-triple>(.exe)` file is
+        # missing. `cargo check` does not bundle, so empty placeholders are enough to
+        # satisfy the existence check without downloading the real ffmpeg/STT sidecars.
+        shell: bash
+        run: |
+          TRIPLE=$(rustc -vV | sed -n 's/^host: //p')
+          EXT=""
+          if [ "$RUNNER_OS" = "Windows" ]; then EXT=".exe"; fi
+          mkdir -p src-tauri/binaries
+          for name in talkis-ffmpeg talkis-stt talkis-stt-nvidia talkis-stt-qwen talkis-diarize; do
+            : > "src-tauri/binaries/${name}-${TRIPLE}${EXT}"
+          done
+          ls -la src-tauri/binaries
 
       - name: Cache Rust build output
         uses: actions/cache@v4

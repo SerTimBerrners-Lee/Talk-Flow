@@ -30,7 +30,7 @@ jobs:
             release_script: build:release:windows
             updater_platform: windows-x86_64
           - platform: linux
-            runner: ubuntu-22.04
+            runner: ubuntu-24.04
             release_script: build:release:linux
             updater_platform: linux-x86_64
 
