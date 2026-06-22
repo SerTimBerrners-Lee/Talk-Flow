@@ -154,8 +154,18 @@ struct MacosAudioWriterState {
 }
 
 #[cfg(target_os = "windows")]
+/// Wraps a cpal `Stream`, which cpal marks `!Send` for cross-platform uniformity.
+/// The WASAPI backend runs its audio work on a dedicated thread; the `Stream` itself
+/// is a control handle that is sound to move and drop across threads. Access is
+/// additionally serialized through the global `SESSIONS` mutex.
+struct SendStream(cpal::Stream);
+#[cfg(target_os = "windows")]
+// SAFETY: see the SendStream doc comment above.
+unsafe impl Send for SendStream {}
+
+#[cfg(target_os = "windows")]
 struct WindowsCallCaptureState {
-    stream: Option<cpal::Stream>,
+    stream: Option<SendStream>,
     writer: Arc<Mutex<Option<SystemAudioWriter<BufWriter<File>>>>>,
     device_name: String,
     source_sample_rate: u32,
@@ -1447,9 +1457,8 @@ fn run_linux_pipewire_capture(
         .map_err(|err| linux_pipewire_error("Не удалось подготовить PipeWire audio format", err))?
         .0
         .into_inner();
-        let mut params = [spa::pod::Pod::from_bytes(&values).map_err(|err| {
-            linux_pipewire_error("Не удалось прочитать PipeWire audio format", err)
-        })?];
+        let mut params = [spa::pod::Pod::from_bytes(&values)
+            .ok_or_else(|| "Не удалось прочитать PipeWire audio format".to_string())?];
 
         stream
             .connect(
@@ -1767,7 +1776,7 @@ fn start_windows_system_audio_capture(
     );
 
     Ok(Some(WindowsCallCaptureState {
-        stream: Some(stream),
+        stream: Some(SendStream(stream)),
         writer,
         device_name,
         source_sample_rate,
