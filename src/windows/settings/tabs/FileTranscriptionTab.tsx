@@ -25,6 +25,8 @@ import {
 } from "../../../lib/store";
 import { HISTORY_UPDATED_EVENT } from "../../../lib/hotkeyEvents";
 import { formatErrorMessage } from "../../../lib/utils";
+import { transcriptToText } from "../../../lib/summarize";
+import { SummaryPanel } from "../../../components/SummaryPanel";
 import {
   canUseCloudSpeakerDiarization,
   fileNameFromPath,
@@ -1267,6 +1269,13 @@ export function FileTranscriptionTab({
             )}
           </div>
         </div>
+
+        {resultEntry && (
+          <SummaryPanel
+            key={resultEntry.id}
+            text={transcriptToText(resultEntry)}
+          />
+        )}
 
         {resultEntry ? (
           resultEntry.mode === "speakers" && resultEntry.segments?.length ? (

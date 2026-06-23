@@ -70,6 +70,27 @@ export interface LocalModelSettings {
   lastCheckedAt?: string;
 }
 
+/** Kind of text processing a prompt performs. */
+export type PromptKind = "cleanup" | "summary";
+
+/**
+ * A reusable prompt preset. Built-in presets ship with the app; user presets
+ * are stored in settings. Both are merged at runtime via {@link getAllPrompts}.
+ */
+export interface PromptPreset {
+  id: string;
+  name: string;
+  kind: PromptKind;
+  /** Instruction applied to the transcript text. */
+  prompt: string;
+  /** Built-in presets cannot be deleted (only duplicated). */
+  builtin?: boolean;
+  /** Optional sampling temperature for this preset. */
+  temperature?: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export type RealtimeInterpreterApiMode = "cloud";
 export type RealtimeInterpreterLanguagePair =
   | "ru_en"
@@ -132,6 +153,12 @@ export interface AppSettings {
   language: string;
   doubleTapTimeout: number;
   style: "classic" | "business" | "tech";
+  /** User-defined prompt presets (built-in presets are merged in at runtime). */
+  prompts: PromptPreset[];
+  /** Id of the cleanup preset that drives transcription text style. */
+  selectedCleanupPromptId: string;
+  /** Id of the summary preset offered by default in the summary panel. */
+  defaultSummaryPromptId: string;
   micId: string;
   /** Custom Whisper-compatible endpoint URL (leave empty for OpenAI) */
   whisperEndpoint: string;
@@ -369,6 +396,73 @@ export function normalizeHotkey(hotkey: string): {
   };
 }
 
+export const DEFAULT_CLEANUP_PROMPT_ID = "classic";
+export const DEFAULT_SUMMARY_PROMPT_ID = "summary-short";
+
+/**
+ * Built-in prompt presets shipped with the app. Cleanup ids match the legacy
+ * `style` values (classic/business/tech) so migration is a straight mapping.
+ * These are merged with user presets at runtime and never written to storage.
+ */
+export const BUILTIN_PROMPTS: PromptPreset[] = [
+  {
+    id: "classic",
+    name: "Классический",
+    kind: "cleanup",
+    builtin: true,
+    temperature: 0,
+    prompt:
+      "Исправь ошибки и пунктуацию, убери словесный мусор. Сохрани текст максимально близким к оригиналу. Не добавляй новых фактов.",
+  },
+  {
+    id: "business",
+    name: "Деловой",
+    kind: "cleanup",
+    builtin: true,
+    temperature: 0.1,
+    prompt:
+      "Сделай речь чище и формальнее, сгладь явные запинки. Подходит для писем, задач и рабочих переписок. Не добавляй новых фактов.",
+  },
+  {
+    id: "tech",
+    name: "Разработка",
+    kind: "cleanup",
+    builtin: true,
+    temperature: 0.15,
+    prompt:
+      "Обрабатывай текст с упором на терминологию и код: команды, пути, API и фразы вроде «консоль лог» превращай в канонический код.",
+  },
+  {
+    id: "summary-short",
+    name: "Краткое саммари",
+    kind: "summary",
+    builtin: true,
+    temperature: 0.3,
+    prompt:
+      "Сделай краткое саммари разговора на русском: 3–6 предложений о сути, без воды. Не выдумывай детали, которых нет в тексте.",
+  },
+  {
+    id: "summary-bullets",
+    name: "Саммари по пунктам",
+    kind: "summary",
+    builtin: true,
+    temperature: 0.3,
+    prompt:
+      "Сделай структурированное саммари разговора на русском: основные темы, ключевые решения и важные детали. Используй маркированные списки. Не добавляй то, чего нет в тексте.",
+  },
+  {
+    id: "summary-actions",
+    name: "Задачи и решения",
+    kind: "summary",
+    builtin: true,
+    temperature: 0.2,
+    prompt:
+      "Из разговора выдели на русском три раздела: 1) Принятые решения; 2) Задачи и поручения (кто — что — срок, если есть); 3) Открытые вопросы. Если раздел пустой — пропусти его.",
+  },
+];
+
+const BUILTIN_PROMPT_ID_SET = new Set(BUILTIN_PROMPTS.map((preset) => preset.id));
+
 const DEFAULT_SETTINGS: AppSettings = {
   apiKey: "",
   apiAdapters: {},
@@ -387,6 +481,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   language: "ru",
   doubleTapTimeout: 400,
   style: "classic",
+  prompts: [],
+  selectedCleanupPromptId: DEFAULT_CLEANUP_PROMPT_ID,
+  defaultSummaryPromptId: DEFAULT_SUMMARY_PROMPT_ID,
   micId: "",
   whisperEndpoint: "",
   llmEndpoint: "",
@@ -409,6 +506,52 @@ function parseStyle(value: unknown): AppSettings["style"] | undefined {
   }
 
   return undefined;
+}
+
+function parsePromptKind(value: unknown): PromptKind | undefined {
+  return value === "cleanup" || value === "summary" ? value : undefined;
+}
+
+/**
+ * Parse stored user prompt presets. Built-in ids are reserved and merged at
+ * runtime, so any stored preset reusing a built-in id is dropped.
+ */
+function parsePrompts(value: unknown): PromptPreset[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const presets: PromptPreset[] = [];
+
+  for (const item of value) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+
+    const raw = item as Record<string, unknown>;
+    const id = typeof raw.id === "string" ? raw.id.trim() : "";
+    const name = typeof raw.name === "string" ? raw.name.trim() : "";
+    const kind = parsePromptKind(raw.kind);
+    const prompt = typeof raw.prompt === "string" ? raw.prompt : "";
+
+    if (!id || !name || !kind || BUILTIN_PROMPT_ID_SET.has(id)) {
+      continue;
+    }
+
+    presets.push({
+      id,
+      name,
+      kind,
+      prompt,
+      builtin: false,
+      temperature:
+        typeof raw.temperature === "number" ? raw.temperature : undefined,
+      createdAt: typeof raw.createdAt === "string" ? raw.createdAt : undefined,
+      updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : undefined,
+    });
+  }
+
+  return presets;
 }
 
 function parseTheme(value: unknown): ThemePreference | undefined {
@@ -582,6 +725,19 @@ function normalizeSavedSettings(saved: unknown): Partial<AppSettings> {
         ? raw.doubleTapTimeout
         : undefined,
     style: parseStyle(raw.style),
+    prompts: parsePrompts(raw.prompts),
+    selectedCleanupPromptId:
+      typeof raw.selectedCleanupPromptId === "string" &&
+      raw.selectedCleanupPromptId.trim()
+        ? raw.selectedCleanupPromptId.trim()
+        : // Migration: fall back to the legacy `style` value, whose ids match
+          // the built-in cleanup presets one-to-one.
+          parseStyle(raw.style),
+    defaultSummaryPromptId:
+      typeof raw.defaultSummaryPromptId === "string" &&
+      raw.defaultSummaryPromptId.trim()
+        ? raw.defaultSummaryPromptId.trim()
+        : undefined,
     micId: typeof raw.micId === "string" ? raw.micId : undefined,
     whisperEndpoint:
       typeof raw.whisperEndpoint === "string" ? raw.whisperEndpoint : undefined,
@@ -721,6 +877,122 @@ export async function saveSettings(
 
   await store.set("settings", nextSettings);
   await store.save();
+}
+
+export function makePromptId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `prompt-${crypto.randomUUID()}`;
+  }
+
+  return `prompt-${Date.now().toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
+}
+
+/** Built-in presets merged with the user's stored presets. */
+export function getAllPrompts(
+  settings: Pick<AppSettings, "prompts">,
+): PromptPreset[] {
+  return [...BUILTIN_PROMPTS, ...settings.prompts];
+}
+
+export function listPromptsByKind(
+  settings: Pick<AppSettings, "prompts">,
+  kind: PromptKind,
+): PromptPreset[] {
+  return getAllPrompts(settings).filter((preset) => preset.kind === kind);
+}
+
+export function findPrompt(
+  settings: Pick<AppSettings, "prompts">,
+  id: string,
+): PromptPreset | undefined {
+  return getAllPrompts(settings).find((preset) => preset.id === id);
+}
+
+export function getSelectedCleanupPrompt(settings: AppSettings): PromptPreset {
+  return (
+    findPrompt(settings, settings.selectedCleanupPromptId) ??
+    BUILTIN_PROMPTS.find((preset) => preset.id === DEFAULT_CLEANUP_PROMPT_ID)!
+  );
+}
+
+export function getDefaultSummaryPrompt(settings: AppSettings): PromptPreset {
+  return (
+    findPrompt(settings, settings.defaultSummaryPromptId) ??
+    BUILTIN_PROMPTS.find((preset) => preset.id === DEFAULT_SUMMARY_PROMPT_ID)!
+  );
+}
+
+export interface PromptPresetInput {
+  id?: string;
+  name: string;
+  kind: PromptKind;
+  prompt: string;
+  temperature?: number;
+}
+
+/** Create or update a user prompt preset. Built-in presets are immutable. */
+export async function upsertPrompt(
+  input: PromptPresetInput,
+): Promise<PromptPreset> {
+  const name = input.name.trim();
+  const prompt = input.prompt.trim();
+
+  if (!name) {
+    throw new Error("Название промпта не может быть пустым");
+  }
+  if (!prompt) {
+    throw new Error("Текст промпта не может быть пустым");
+  }
+
+  const id = input.id?.trim() || makePromptId();
+  if (BUILTIN_PROMPT_ID_SET.has(id)) {
+    throw new Error("Встроенный промпт нельзя изменить — создайте копию");
+  }
+
+  const now = new Date().toISOString();
+  const current = await getSettings({ reload: true });
+  const existing = current.prompts.find((preset) => preset.id === id);
+  const saved: PromptPreset = {
+    id,
+    name,
+    kind: input.kind,
+    prompt,
+    builtin: false,
+    temperature: input.temperature,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  };
+  const prompts = existing
+    ? current.prompts.map((preset) => (preset.id === id ? saved : preset))
+    : [...current.prompts, saved];
+
+  await saveSettings({ prompts });
+  return saved;
+}
+
+/** Delete a user prompt preset and reset references that pointed at it. */
+export async function deletePrompt(id: string): Promise<void> {
+  if (BUILTIN_PROMPT_ID_SET.has(id)) {
+    throw new Error("Встроенный промпт нельзя удалить");
+  }
+
+  const current = await getSettings({ reload: true });
+  const prompts = current.prompts.filter((preset) => preset.id !== id);
+  if (prompts.length === current.prompts.length) {
+    return;
+  }
+
+  const patch: Partial<AppSettings> = { prompts };
+  if (current.selectedCleanupPromptId === id) {
+    patch.selectedCleanupPromptId = DEFAULT_CLEANUP_PROMPT_ID;
+  }
+  if (current.defaultSummaryPromptId === id) {
+    patch.defaultSummaryPromptId = DEFAULT_SUMMARY_PROMPT_ID;
+  }
+
+  await saveSettings(patch);
 }
 
 export async function getHistory(): Promise<HistoryEntry[]> {
