@@ -7,7 +7,8 @@ import {
   type AppSettings,
 } from "../lib/store";
 import {
-  summarizeWithCloud,
+  summarizeTranscript,
+  resolveSummaryBackend,
   willUseMapReduce,
   type SummarizeProgress,
 } from "../lib/summarize";
@@ -44,8 +45,8 @@ export function SummaryPanel({ text }: { text: string }) {
   const prompts = settings ? listPromptsByKind(settings, "summary") : [];
   const selected =
     prompts.find((preset) => preset.id === promptId) ?? prompts[0];
-  const hasCloud = Boolean(settings?.deviceToken?.trim());
-  const canRun = Boolean(settings && selected && text.trim() && hasCloud);
+  const backend = settings ? resolveSummaryBackend(settings) : null;
+  const canRun = Boolean(settings && selected && text.trim() && backend);
 
   const run = async (): Promise<void> => {
     if (!settings || !selected) return;
@@ -60,7 +61,7 @@ export function SummaryPanel({ text }: { text: string }) {
     setProgress(null);
 
     try {
-      const result = await summarizeWithCloud({
+      const result = await summarizeTranscript({
         text,
         prompt: selected,
         settings,
@@ -162,10 +163,16 @@ export function SummaryPanel({ text }: { text: string }) {
         </button>
       </div>
 
-      {!hasCloud && (
+      {!backend && (
         <div style={{ fontSize: 12, color: "var(--text-mid)", lineHeight: 1.5 }}>
-          Для summary нужен вход в Talkis Cloud (вкладка «Модели»). Локальные и
-          API-модели для summary добавим следующими шагами.
+          Для summary нужен вход в Talkis Cloud или указанная текстовая модель
+          (вкладка «Модели»). Встроенную локальную модель добавим следующими
+          шагами.
+        </div>
+      )}
+      {backend && backend.kind !== "cloud" && (
+        <div style={{ fontSize: 12, color: "var(--text-low)", lineHeight: 1.5 }}>
+          Модель: {backend.label}
         </div>
       )}
 

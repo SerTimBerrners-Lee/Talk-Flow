@@ -1467,6 +1467,162 @@ fn resolve_whisper_models_url(whisper_url: &str) -> String {
     format!("{}/v1/models", whisper_url.trim_end_matches('/'))
 }
 
+/// Resolve a user/runtime endpoint to an OpenAI-compatible chat-completions URL.
+/// Empty endpoint falls back to OpenAI. Accepts a base, a `/v1` base, or a full
+/// `/chat/completions` URL.
+fn resolve_chat_completions_url(endpoint: Option<&str>) -> String {
+    endpoint
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            let base = value.trim_end_matches('/');
+            if base.ends_with("/chat/completions") {
+                base.to_string()
+            } else if base.ends_with("/v1") {
+                format!("{}/chat/completions", base)
+            } else {
+                format!("{}/v1/chat/completions", base)
+            }
+        })
+        .unwrap_or_else(|| "https://api.openai.com/v1/chat/completions".to_string())
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ProcessTextRequest {
+    pub text: String,
+    pub prompt: String,
+    #[serde(default)]
+    pub temperature: Option<f64>,
+    /// OpenAI-compatible endpoint (cloud / local runtime / custom). Empty = OpenAI.
+    #[serde(default)]
+    pub endpoint: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub api_key: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct ProcessTextResponse {
+    pub result: String,
+}
+
+/// Run an explicit, user-initiated text-processing prompt (e.g. summary) against
+/// any OpenAI-compatible chat endpoint: Talkis Cloud-compatible, a bundled local
+/// runtime (127.0.0.1), or a user-provided endpoint. This is a deliberate user
+/// action, not the automatic transcription cleanup that stays disabled by policy.
+#[tauri::command]
+pub async fn process_text(req: ProcessTextRequest) -> Result<ProcessTextResponse, String> {
+    let text = req.text.trim();
+    let prompt = req.prompt.trim();
+
+    if text.is_empty() {
+        return Err("Нет текста для обработки".to_string());
+    }
+    if prompt.is_empty() {
+        return Err("Промпт пустой".to_string());
+    }
+
+    let url = resolve_chat_completions_url(req.endpoint.as_deref());
+    let is_local = is_likely_local_url(&url);
+    let model = req
+        .model
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("gpt-4o-mini")
+        .to_string();
+    let api_key = req
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    if api_key.is_none() && !is_local {
+        return Err("Не указан API-ключ для текстовой модели".to_string());
+    }
+
+    logger::log_info(
+        "LLM",
+        &format!(
+            "process_text -> {} (model={}, local={}, chars={})",
+            url,
+            model,
+            is_local,
+            text.len()
+        ),
+    );
+
+    let payload = serde_json::json!({
+        "model": model,
+        "messages": [
+            { "role": "system", "content": prompt },
+            { "role": "user", "content": text },
+        ],
+        "temperature": req.temperature.unwrap_or(0.3),
+        "stream": false,
+    });
+
+    let client = if is_local {
+        long_http_client()
+    } else {
+        http_client()
+    };
+    let mut request = client.post(&url).json(&payload);
+    if let Some(key) = api_key {
+        request = request.bearer_auth(key);
+    }
+
+    let response = request
+        .send()
+        .await
+        .map_err(|err| format!("Запрос к текстовой модели не удался: {}", err))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|err| format!("Не удалось прочитать ответ модели: {}", err))?;
+
+    if !status.is_success() {
+        let snippet: String = body.chars().take(500).collect();
+        return Err(format!("Ошибка модели ({}): {}", status, snippet));
+    }
+
+    #[derive(Deserialize)]
+    struct ChatMessage {
+        content: Option<String>,
+    }
+    #[derive(Deserialize)]
+    struct ChatChoice {
+        message: Option<ChatMessage>,
+    }
+    #[derive(Deserialize)]
+    struct ChatResponse {
+        choices: Option<Vec<ChatChoice>>,
+    }
+
+    let parsed = serde_json::from_str::<ChatResponse>(&body)
+        .map_err(|err| format!("Модель вернула некорректный ответ: {}", err))?;
+    let result = parsed
+        .choices
+        .and_then(|mut choices| {
+            if choices.is_empty() {
+                None
+            } else {
+                Some(choices.remove(0))
+            }
+        })
+        .and_then(|choice| choice.message)
+        .and_then(|message| message.content)
+        .unwrap_or_default();
+
+    if result.trim().is_empty() {
+        return Err("Модель вернула пустой ответ".to_string());
+    }
+
+    Ok(ProcessTextResponse { result })
+}
+
 fn percent_encode_path_segment(value: &str) -> String {
     let mut encoded = String::with_capacity(value.len());
 

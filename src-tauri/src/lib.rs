@@ -116,6 +116,7 @@ pub fn run() {
             ai::transcribe_and_clean,
             ai::transcribe_only,
             ai::transcribe_file_path,
+            ai::process_text,
             history_storage::read_history_file,
             history_storage::write_history_file,
             history_storage::get_default_transcription_storage_dir,
