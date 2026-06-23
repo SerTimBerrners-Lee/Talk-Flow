@@ -1048,6 +1048,65 @@ function PromptLibrary({
   );
 }
 
+/**
+ * Text (LLM) model used for summary / text processing in API mode: a custom
+ * OpenAI-compatible endpoint, key and model. Empty endpoint = OpenAI with the
+ * user's own key. Local mode uses the bundled runtime instead (Phase 3).
+ */
+function TextModelCard({
+  settings,
+  update,
+}: {
+  settings: AppSettings;
+  update: (patch: Partial<AppSettings>) => void;
+}) {
+  return (
+    <div className="card" style={{ padding: 16, display: "grid", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <Sparkles size={16} strokeWidth={1.9} />
+        <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)" }}>
+          Текстовая модель (для summary)
+        </div>
+      </div>
+      <div style={{ fontSize: 12.5, color: "var(--text-mid)", lineHeight: 1.6 }}>
+        OpenAI-совместимый endpoint для summary и обработки текста. Оставьте
+        endpoint пустым, чтобы использовать OpenAI с вашим API-ключом.
+      </div>
+      <div style={{ display: "grid", gap: 6 }}>
+        <div className="label">Endpoint</div>
+        <input
+          value={settings.llmEndpoint}
+          onChange={(e) => update({ llmEndpoint: e.target.value })}
+          placeholder="https://api.openai.com/v1  ·  http://127.0.0.1:2455/v1"
+          spellCheck={false}
+          style={PROMPT_FIELD_STYLE}
+        />
+      </div>
+      <div style={{ display: "grid", gap: 6 }}>
+        <div className="label">Модель</div>
+        <input
+          value={settings.llmModel}
+          onChange={(e) => update({ llmModel: e.target.value })}
+          placeholder="gpt-4o-mini"
+          spellCheck={false}
+          style={PROMPT_FIELD_STYLE}
+        />
+      </div>
+      <div style={{ display: "grid", gap: 6 }}>
+        <div className="label">API-ключ</div>
+        <input
+          type="password"
+          value={settings.llmApiKey}
+          onChange={(e) => update({ llmApiKey: e.target.value })}
+          placeholder="Необязательно для локального endpoint"
+          spellCheck={false}
+          style={PROMPT_FIELD_STYLE}
+        />
+      </div>
+    </div>
+  );
+}
+
 export function SettingsTabs({ type }: SettingsTabsProps) {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [promptPreview, setPromptPreview] = useState<PromptPreview | null>(null);
@@ -2523,6 +2582,8 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
               </div>
             </div>
           )}
+
+          {isApiMode && <TextModelCard settings={settings} update={update} />}
 
           {isLocalMode && (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
