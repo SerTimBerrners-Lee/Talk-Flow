@@ -42,6 +42,7 @@ import { CloudProfile, fetchCloudProfile, getAuthLoginUrl, cloudLogout, handleAu
 import { logInfo } from "../../../lib/logger";
 
 import { TRANSCRIPTION_STYLE_OPTIONS } from "../../../lib/transcriptionPrompts";
+import { LocalLlmModels } from "../../../components/LocalLlmModels";
 import { SETTINGS_UPDATED_EVENT } from "../../../lib/hotkeyEvents";
 import assemblyAiAvatar from "../../../assets/adapters/assemblyai.png";
 import cartesiaAvatar from "../../../assets/adapters/cartesia.png";
@@ -2587,6 +2588,8 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
 
           {isLocalMode && (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <LocalLlmModels settings={settings} update={update} />
+
               <div>
                 <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)", marginBottom: 4 }}>
                   Локальные модели
