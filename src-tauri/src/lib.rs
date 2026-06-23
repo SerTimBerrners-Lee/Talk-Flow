@@ -3,6 +3,7 @@ mod call_capture;
 mod commands;
 mod history_storage;
 mod hotkey_capture;
+mod llm_runtime;
 mod local_stt;
 mod logger;
 mod media;
@@ -141,6 +142,12 @@ pub fn run() {
             ai::install_stt_model,
             ai::delete_stt_model,
             local_stt::get_local_stt_default_models_dir,
+            llm_runtime::list_local_llm_models,
+            llm_runtime::download_local_llm_model,
+            llm_runtime::delete_local_llm_model,
+            llm_runtime::start_local_llm,
+            llm_runtime::stop_local_llm,
+            llm_runtime::get_local_llm_status,
             logger::log_event,
             logger::get_log_path_cmd,
             logger::clear_logs,
