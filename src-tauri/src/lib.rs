@@ -22,8 +22,41 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_deep_link::DeepLinkExt;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Bring the already-running instance to front when a second launch is blocked
+/// by the single-instance plugin (Windows/Linux only).
+#[cfg(any(windows, target_os = "linux"))]
+fn focus_existing_instance(app: &tauri::AppHandle) {
+    use tauri::Manager;
+
+    if let Some(win) = app.get_webview_window("settings") {
+        let _ = win.unminimize();
+        let _ = win.show();
+        let _ = win.set_focus();
+        return;
+    }
+
+    if let Some(win) = app.get_webview_window("widget") {
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
+}
+
 pub fn run() {
-    tauri::Builder::default()
+    #[allow(unused_mut)]
+    let mut builder = tauri::Builder::default();
+
+    // The single-instance plugin must be registered first. macOS enforces one
+    // app instance natively (so the duplicate-widget bug never happens there);
+    // on Windows/Linux a second launch — autostart, deep link, or re-open —
+    // would otherwise start another process with its own floating widget.
+    #[cfg(any(windows, target_os = "linux"))]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(
+            |app, _argv, _cwd| focus_existing_instance(app),
+        ));
+    }
+
+    builder
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())

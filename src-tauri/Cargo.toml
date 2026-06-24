@@ -54,6 +54,11 @@ objc2-foundation = "0.3"
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-autostart = "2.5.1"
 
+# macOS enforces a single app instance natively; Windows/Linux need this plugin
+# so a second launch focuses the running app instead of spawning another widget.
+[target.'cfg(any(windows, target_os = "linux"))'.dependencies]
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 pipewire = "0.10.0"
 webkit2gtk = { version = "2.0.2", features = ["v2_8"] }
