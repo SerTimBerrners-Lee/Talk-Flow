@@ -10,7 +10,9 @@ pub const NOTICE_HEIGHT: f64 = 52.0;
 /// Must match NOTICE_WIDGET_GAP in src/windows/widget/widgetConstants.ts (logical pixels).
 pub const NOTICE_GAP: f64 = 2.0;
 /// Must match CALL_STACK_WIDGET_WIDTH/HEIGHT in src/windows/widget/widgetConstants.ts.
-pub const WIDGET_WIDTH: f64 = 109.0;
+/// Width includes WIDGET_WIDTH_SAFETY_PX (5) so the pill is never clipped on the
+/// right under Windows DPI rounding: 91 (idle) + 1 (gap) + 22 (call bubble).
+pub const WIDGET_WIDTH: f64 = 114.0;
 pub const WIDGET_HEIGHT: f64 = 34.0;
 const WIDGET_EXPANDED_OFFSET_RATIO: f64 = 0.20;
 

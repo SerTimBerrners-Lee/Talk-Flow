@@ -14,7 +14,14 @@ export const WIDGET_SHELL_HEIGHT = 22;
 export const IDLE_HOVER_SCALE = 1;
 export const ACTIVE_WIDGET_SHELL_WIDTH = WIDGET_SHELL_WIDTH * IDLE_HOVER_SCALE;
 export const ACTIVE_WIDGET_SHELL_HEIGHT = WIDGET_SHELL_HEIGHT * IDLE_HOVER_SCALE;
-export const IDLE_HOVER_WIDGET_WIDTH = ACTIVE_WIDGET_SHELL_WIDTH + 12;
+/**
+ * Extra horizontal slack so the pill is never clipped on the right. Windows DPI
+ * rounding could shave a couple of pixels off the right edge (macOS never did);
+ * the widget window is transparent, so this reads as invisible padding.
+ */
+export const WIDGET_WIDTH_SAFETY_PX = 5;
+export const IDLE_HOVER_WIDGET_WIDTH =
+  ACTIVE_WIDGET_SHELL_WIDTH + 12 + WIDGET_WIDTH_SAFETY_PX;
 export const IDLE_HOVER_WIDGET_HEIGHT = ACTIVE_WIDGET_SHELL_HEIGHT + 12;
 export const IDLE_WIDGET_WIDTH = IDLE_HOVER_WIDGET_WIDTH;
 export const IDLE_WIDGET_HEIGHT = IDLE_HOVER_WIDGET_HEIGHT;
