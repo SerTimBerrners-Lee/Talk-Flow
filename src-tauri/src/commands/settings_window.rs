@@ -37,6 +37,15 @@ fn create_settings_window(app: &AppHandle, url: &str) -> Result<tauri::WebviewWi
         builder = builder.transparent(true);
     }
 
+    // Windows draws a square drop-shadow around the (square, undecorated) window,
+    // which shows up as lit corners behind the rounded content. macOS clips the
+    // shadow to the content alpha, so the rounded look stays clean there — keep
+    // the shadow only on macOS. (The floating widget already uses shadow: false.)
+    #[cfg(not(target_os = "macos"))]
+    {
+        builder = builder.shadow(false);
+    }
+
     let win = builder.build().map_err(|e| e.to_string())?;
     media_permissions::allow_microphone_requests(&win);
 
