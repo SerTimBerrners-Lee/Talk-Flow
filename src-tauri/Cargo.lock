@@ -321,7 +321,7 @@ dependencies = [
  "quote",
  "regex",
  "rustc-hash",
- "shlex",
+ "shlex 1.3.0",
  "syn 2.0.117",
 ]
 
@@ -528,14 +528,14 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.56"
+version = "1.2.65"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aebf35691d1bfb0ac386a69bac2fde4dd276fb618cf8bf4f5318fe285e821bb2"
+checksum = "e228eec9be7c17ccb640b59b36a5cd805ea2a564a4c5e162c2f659fea30d3b96"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
  "libc",
- "shlex",
+ "shlex 2.0.1",
 ]
 
 [[package]]
@@ -1384,6 +1384,15 @@ name = "find-msvc-tools"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
+
+[[package]]
+name = "find_cuda_helper"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9f9e65c593dd01ac77daad909ea4ad17f0d6d1776193fc8ea766356177abdad"
+dependencies = [
+ "glob",
+]
 
 [[package]]
 name = "fixedbitset"
@@ -2628,6 +2637,34 @@ name = "litemap"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6373607a59f0be73a39b6fe456b8192fcc3585f602af20751600e974dd455e77"
+
+[[package]]
+name = "llama-cpp-2"
+version = "0.1.150"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e82ec86fd73aaa7d8f4898cc4693410c217431506ba3237ea5c856127f49d84d"
+dependencies = [
+ "encoding_rs",
+ "enumflags2",
+ "llama-cpp-sys-2",
+ "thiserror 2.0.18",
+ "tracing",
+ "tracing-core",
+]
+
+[[package]]
+name = "llama-cpp-sys-2"
+version = "0.1.150"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f67dab3ed2b68e4fc4a42471eac73e128ed2ee97bd10de66ddcc609dd5d838a0"
+dependencies = [
+ "bindgen",
+ "cc",
+ "cmake",
+ "find_cuda_helper",
+ "glob",
+ "walkdir",
+]
 
 [[package]]
 name = "lock_api"
@@ -4639,6 +4676,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
+name = "shlex"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
+
+[[package]]
 name = "sigchld"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4937,6 +4980,7 @@ dependencies = [
  "hex",
  "hound",
  "include_dir",
+ "llama-cpp-2",
  "objc2 0.6.4",
  "objc2-app-kit",
  "objc2-core-audio",
@@ -5881,6 +5925,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db97caf9d906fbde555dd62fa95ddba9eecfd14cb388e4f491a66d74cd5fb79a"
 dependencies = [
  "once_cell",
+ "valuable",
 ]
 
 [[package]]
@@ -6070,6 +6115,12 @@ dependencies = [
  "serde_core",
  "wasm-bindgen",
 ]
+
+[[package]]
+name = "valuable"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 
 [[package]]
 name = "vcpkg"

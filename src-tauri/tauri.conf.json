@@ -45,7 +45,8 @@
       "binaries/talkis-stt",
       "binaries/talkis-stt-nvidia",
       "binaries/talkis-stt-qwen",
-      "binaries/talkis-diarize"
+      "binaries/talkis-diarize",
+      "binaries/talkis-llm"
     ],
     "icon": [
       "icons/32x32.png",

@@ -41,8 +41,13 @@ tauri-plugin-shell = "2.3.2"
 whisper-rs = "0.16.0"
 hound = "3.5.1"
 tauri-plugin-dialog = "2"
+# Local LLM runtime engine (talkis-llm sidecar) — llama.cpp bindings, compiled
+# and bundled with the app like whisper-rs. Metal acceleration added on macOS.
+llama-cpp-2 = { version = "0.1.150", default-features = false, features = ["openmp", "sampler"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# Adds Metal GPU acceleration to the bundled local LLM runtime on macOS.
+llama-cpp-2 = { version = "0.1.150", default-features = false, features = ["metal"] }
 block2 = "0.6"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSView", "NSWindow", "NSEvent", "block2"] }

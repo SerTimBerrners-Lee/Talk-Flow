@@ -153,7 +153,7 @@ ensureLinuxBuildDependencies(targetTriple);
 
 const extension = targetTriple.includes("windows") ? ".exe" : "";
 const profile = process.env.TALKIS_STT_RELEASE === "1" ? "release" : "debug";
-const sidecars = ["talkis-stt", "talkis-stt-nvidia", "talkis-stt-qwen", "talkis-diarize"];
+const sidecars = ["talkis-stt", "talkis-stt-nvidia", "talkis-stt-qwen", "talkis-diarize", "talkis-llm"];
 const cargoArgs = ["build", "--manifest-path", join(tauriDir, "Cargo.toml")];
 
 for (const sidecar of sidecars) {

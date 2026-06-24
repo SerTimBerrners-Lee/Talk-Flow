@@ -65,7 +65,7 @@ jobs:
           EXT=""
           if [ "$RUNNER_OS" = "Windows" ]; then EXT=".exe"; fi
           mkdir -p src-tauri/binaries
-          for name in talkis-ffmpeg talkis-stt talkis-stt-nvidia talkis-stt-qwen talkis-diarize; do
+          for name in talkis-ffmpeg talkis-stt talkis-stt-nvidia talkis-stt-qwen talkis-diarize talkis-llm; do
             : > "src-tauri/binaries/${name}-${TRIPLE}${EXT}"
           done
           ls -la src-tauri/binaries
