@@ -377,87 +377,115 @@ export function LocalLlmModels({
                   style={{
                     display: "flex",
                     alignItems: "center",
-                    gap: 8,
+                    justifyContent: "space-between",
+                    gap: 10,
                     flexWrap: "wrap",
-                    justifyContent: "flex-end",
                   }}
                 >
-                  {!model.downloaded ? (
-                    <>
-                      <button
-                        onClick={() => void download(model)}
-                        disabled={isDownloading}
-                        style={{
-                          ...ACTION_BUTTON_BASE,
-                          background: "var(--accent)",
-                          color: "var(--accent-contrast)",
-                          opacity: isDownloading ? 0.85 : 1,
-                        }}
-                      >
-                        {isDownloading ? (
-                          <Loader2
-                            size={14}
-                            strokeWidth={2.2}
-                            style={{ animation: "spin 1s linear infinite" }}
-                          />
-                        ) : (
-                          <Download size={14} strokeWidth={2.2} />
-                        )}
-                        {isDownloading
-                          ? `Загрузка${prog?.percent != null ? ` ${prog.percent}%` : ""}`
-                          : "Скачать"}
-                      </button>
-                      {isDownloading && (
+                  {isActive && (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        color: "var(--success)",
+                        fontSize: 12,
+                        fontWeight: 600,
+                      }}
+                    >
+                      <Check size={15} strokeWidth={2.5} />
+                      Выбрана
+                    </div>
+                  )}
+
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      flexWrap: "wrap",
+                      marginLeft: "auto",
+                    }}
+                  >
+                    {!model.downloaded ? (
+                      <>
                         <button
-                          onClick={() => void cancelDownload(model)}
+                          onClick={() => void download(model)}
+                          disabled={isDownloading}
+                          style={{
+                            ...ACTION_BUTTON_BASE,
+                            background: "var(--accent)",
+                            color: "var(--accent-contrast)",
+                            opacity: isDownloading ? 0.85 : 1,
+                          }}
+                        >
+                          {isDownloading ? (
+                            <Loader2
+                              size={14}
+                              strokeWidth={2.2}
+                              style={{ animation: "spin 1s linear infinite" }}
+                            />
+                          ) : (
+                            <Download size={14} strokeWidth={2.2} />
+                          )}
+                          {isDownloading
+                            ? `Загрузка${prog?.percent != null ? ` ${prog.percent}%` : ""}`
+                            : "Скачать"}
+                        </button>
+                        {isDownloading && (
+                          <button
+                            onClick={() => void cancelDownload(model)}
+                            style={{
+                              ...ACTION_BUTTON_BASE,
+                              background: "var(--control-muted)",
+                              color: "var(--text-hi)",
+                            }}
+                          >
+                            <X size={14} strokeWidth={2.2} />
+                            Отмена
+                          </button>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        {!isActive && (
+                          <button
+                            onClick={() => void useForSummary(model)}
+                            disabled={isBusy}
+                            style={{
+                              ...ACTION_BUTTON_BASE,
+                              background: "var(--control-muted)",
+                              color: "var(--text-hi)",
+                              opacity: isBusy ? 0.7 : 1,
+                            }}
+                          >
+                            {isBusy ? (
+                              <Loader2
+                                size={14}
+                                strokeWidth={2.2}
+                                style={{ animation: "spin 1s linear infinite" }}
+                              />
+                            ) : (
+                              <Check size={14} strokeWidth={2.5} />
+                            )}
+                            Выбрать
+                          </button>
+                        )}
+                        <button
+                          onClick={() => void remove(model)}
+                          disabled={isBusy}
                           style={{
                             ...ACTION_BUTTON_BASE,
                             background: "var(--control-muted)",
-                            color: "var(--text-hi)",
+                            color: "var(--danger)",
                           }}
                         >
-                          <X size={14} strokeWidth={2.2} />
-                          Отмена
+                          <Trash2 size={14} strokeWidth={2.2} />
+                          Удалить
                         </button>
-                      )}
-                    </>
-                  ) : (
-                    <>
-                      <button
-                        onClick={() => void useForSummary(model)}
-                        disabled={isBusy}
-                        style={{
-                          ...ACTION_BUTTON_BASE,
-                          background: isActive ? "var(--control-muted)" : "var(--accent)",
-                          color: isActive ? "var(--text-hi)" : "var(--accent-contrast)",
-                          opacity: isBusy ? 0.7 : 1,
-                        }}
-                      >
-                        {isBusy ? (
-                          <Loader2
-                            size={14}
-                            strokeWidth={2.2}
-                            style={{ animation: "spin 1s linear infinite" }}
-                          />
-                        ) : (
-                          <Check size={14} strokeWidth={2.4} />
-                        )}
-                        {isActive ? "Используется" : "Для summary"}
-                      </button>
-                      <button
-                        onClick={() => void remove(model)}
-                        disabled={isBusy}
-                        style={{
-                          ...ACTION_BUTTON_BASE,
-                          background: "var(--control-muted)",
-                          color: "var(--danger)",
-                        }}
-                      >
-                        <Trash2 size={14} strokeWidth={2.2} />
-                        Удалить
-                      </button>
-                    </>
-                  )}
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
