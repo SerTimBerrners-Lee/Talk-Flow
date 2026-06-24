@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Check, Download, Loader2, Trash2, X } from "lucide-react";
+import { Check, Download, HardDrive, Loader2, MemoryStick, Trash2, X } from "lucide-react";
 
 import { AppSettings } from "../lib/store";
+import qwenAvatar from "../assets/adapters/qwen.png";
 
 interface LocalLlmModel {
   id: string;
@@ -213,12 +214,15 @@ export function LocalLlmModels({
                     alignItems: "center",
                     justifyContent: "center",
                     flexShrink: 0,
-                    color: "var(--text-hi)",
-                    fontSize: 13,
-                    fontWeight: 800,
+                    overflow: "hidden",
                   }}
                 >
-                  {model.label.charAt(0)}
+                  <img
+                    src={qwenAvatar}
+                    alt=""
+                    aria-hidden="true"
+                    style={{ width: "100%", height: "100%", display: "block", objectFit: "cover" }}
+                  />
                 </div>
 
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -257,8 +261,35 @@ export function LocalLlmModels({
                       {statusLabel}
                     </div>
                   </div>
-                  <div style={{ fontSize: 12, lineHeight: 1.45, color: "var(--text-mid)" }}>
-                    {model.size_label} · ОЗУ ≥ {model.min_ram_gb} ГБ
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 14,
+                      marginTop: 7,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <div
+                      title={`Размер на диске: ${model.size_label}`}
+                      aria-label={`Размер на диске: ${model.size_label}`}
+                      style={{ display: "flex", alignItems: "center", gap: 6 }}
+                    >
+                      <HardDrive size={14} strokeWidth={1.9} color="var(--text-hi)" />
+                      <span style={{ fontSize: 12, fontWeight: 650, color: "var(--text-hi)", lineHeight: 1 }}>
+                        {model.size_label}
+                      </span>
+                    </div>
+                    <div
+                      title={`Требуется ОЗУ: от ${model.min_ram_gb} ГБ`}
+                      aria-label={`Требуется ОЗУ: от ${model.min_ram_gb} ГБ`}
+                      style={{ display: "flex", alignItems: "center", gap: 6 }}
+                    >
+                      <MemoryStick size={14} strokeWidth={1.9} color="var(--text-hi)" />
+                      <span style={{ fontSize: 12, fontWeight: 650, color: "var(--text-hi)", lineHeight: 1 }}>
+                        ≥ {model.min_ram_gb} ГБ
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
