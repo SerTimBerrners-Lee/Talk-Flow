@@ -32,6 +32,7 @@ import {
   setPermissionsPassed,
   getHistory,
   getSettings,
+  isMacPlatform,
   HistoryEntry,
   type ThemePreference,
 } from "../../lib/store";
@@ -442,7 +443,7 @@ export function SettingsApp() {
   }
 
   return (
-    <div className="app-root">
+    <div className={isMacPlatform() ? "app-root" : "app-root native-frame"}>
       <div
         style={{
           display: "flex",
@@ -452,7 +453,8 @@ export function SettingsApp() {
           zIndex: 1,
         }}
       >
-        <TitleBar />
+        {/* Windows/Linux use the native title bar + system window controls. */}
+        {isMacPlatform() && <TitleBar />}
 
         <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
           <aside

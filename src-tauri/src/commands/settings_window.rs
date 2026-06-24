@@ -21,29 +21,24 @@ fn show_and_focus_window(win: &tauri::WebviewWindow) {
 
 fn create_settings_window(app: &AppHandle, url: &str) -> Result<tauri::WebviewWindow, String> {
     let mut builder = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App(url.into()))
-        .title("Talkis — Settings")
+        .title("Talkis")
         .inner_size(920.0, 680.0)
         .min_inner_size(820.0, 560.0)
-        .decorations(false)
         .center();
 
-    #[cfg(target_os = "linux")]
+    // macOS keeps the custom decoration-less, transparent, rounded shell with the
+    // in-app traffic-light title bar.
+    #[cfg(target_os = "macos")]
     {
-        builder = builder.transparent(false);
+        builder = builder.decorations(false).transparent(true);
     }
 
-    #[cfg(not(target_os = "linux"))]
-    {
-        builder = builder.transparent(true);
-    }
-
-    // Windows draws a square drop-shadow around the (square, undecorated) window,
-    // which shows up as lit corners behind the rounded content. macOS clips the
-    // shadow to the content alpha, so the rounded look stays clean there — keep
-    // the shadow only on macOS. (The floating widget already uses shadow: false.)
+    // Windows & Linux use a standard rectangular window with the native title bar
+    // and system minimize / maximize / close controls (the custom rounded shell
+    // showed lit square corners on those platforms).
     #[cfg(not(target_os = "macos"))]
     {
-        builder = builder.shadow(false);
+        builder = builder.decorations(true).transparent(false);
     }
 
     let win = builder.build().map_err(|e| e.to_string())?;

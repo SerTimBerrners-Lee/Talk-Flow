@@ -175,6 +175,13 @@ select {
   contain: paint;
 }
 
+/* Windows/Linux render a standard rectangular, opaque, native-decorated window,
+   so the shell fills it with square corners (no transparent rounded mask). */
+.app-root.native-frame {
+  border-radius: 0;
+  clip-path: none;
+}
+
 .app-root > * {
   border-radius: inherit;
 }
