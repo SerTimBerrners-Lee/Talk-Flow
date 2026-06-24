@@ -9,7 +9,6 @@ import {
   Check,
   Cloud,
   Code,
-  Copy,
   Crown,
   Download,
   Gauge,
@@ -21,9 +20,9 @@ import {
   Plus,
   Server,
   Sparkles,
-  Star,
   Target,
   Trash2,
+  Type,
   User,
   X,
   Zap,
@@ -37,7 +36,6 @@ import {
   listPromptsByKind,
   upsertPrompt,
   deletePrompt,
-  type PromptPreset,
 } from "../../../lib/store";
 import { CloudProfile, fetchCloudProfile, getAuthLoginUrl, cloudLogout, handleAuthToken, generateExchangeCode, getAuthLoginUrlWithCode, pollForToken, getCachedCloudProfile, subscribeCloudProfile } from "../../../lib/cloudAuth";
 import { logInfo } from "../../../lib/logger";
@@ -705,26 +703,21 @@ function PromptLibrary({
 
   const summaryPrompts = listPromptsByKind(settings, "summary");
   const defaultId = settings.defaultSummaryPromptId;
+  const selectedPreset = summaryPrompts.find((preset) => preset.id === defaultId);
+  const selectedIsCustom = selectedPreset ? !selectedPreset.builtin : false;
 
   const startNew = () => {
     setError(null);
     setEditor({ name: "", prompt: "" });
   };
-  const startEdit = (preset: PromptPreset) => {
+  const startEditSelected = () => {
+    if (!selectedPreset) return;
     setError(null);
     setEditor({
-      id: preset.id,
-      name: preset.name,
-      prompt: preset.prompt,
-      temperature: preset.temperature,
-    });
-  };
-  const startDuplicate = (preset: PromptPreset) => {
-    setError(null);
-    setEditor({
-      name: `${preset.name} (копия)`,
-      prompt: preset.prompt,
-      temperature: preset.temperature,
+      id: selectedPreset.id,
+      name: selectedPreset.name,
+      prompt: selectedPreset.prompt,
+      temperature: selectedPreset.temperature,
     });
   };
 
@@ -741,9 +734,7 @@ function PromptLibrary({
         temperature: editor.temperature,
       });
       await onReload();
-      if (!editor.id && !defaultId) {
-        update({ defaultSummaryPromptId: saved.id });
-      }
+      update({ defaultSummaryPromptId: saved.id });
       setEditor(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -752,11 +743,12 @@ function PromptLibrary({
     }
   };
 
-  const handleDelete = async (preset: PromptPreset) => {
-    setBusyId(preset.id);
+  const handleDeleteSelected = async () => {
+    if (!selectedPreset || selectedPreset.builtin) return;
+    setBusyId(selectedPreset.id);
     setError(null);
     try {
-      await deletePrompt(preset.id);
+      await deletePrompt(selectedPreset.id);
       await onReload();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -765,296 +757,181 @@ function PromptLibrary({
     }
   };
 
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 12,
-        }}
-      >
-        <div style={{ display: "grid", gap: 4 }}>
-          <div
+  if (editor) {
+    return (
+      <div className="card" style={{ padding: 16, display: "grid", gap: 12 }}>
+        <div style={{ display: "grid", gap: 6 }}>
+          <div className="label">Название</div>
+          <input
+            value={editor.name}
+            onChange={(e) => setEditor({ ...editor, name: e.target.value })}
+            placeholder="Например: Протокол встречи"
+            maxLength={80}
+            style={PROMPT_FIELD_STYLE}
+          />
+        </div>
+        <div style={{ display: "grid", gap: 6 }}>
+          <div className="label">Промпт</div>
+          <textarea
+            value={editor.prompt}
+            onChange={(e) => setEditor({ ...editor, prompt: e.target.value })}
+            placeholder="Опиши, какое summary нужно сделать по тексту разговора"
+            rows={6}
+            style={{ ...PROMPT_FIELD_STYLE, resize: "vertical", minHeight: 120 }}
+          />
+        </div>
+        {error && (
+          <div style={{ fontSize: 12, color: "var(--danger)", lineHeight: 1.5 }}>
+            {error}
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button
+            onClick={() => {
+              setEditor(null);
+              setError(null);
+            }}
+            disabled={saving}
             style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              fontSize: 17,
-              fontWeight: 700,
-              color: "var(--text-hi)",
+              padding: "9px 16px",
+              borderRadius: 10,
+              border: "1px solid var(--border)",
+              background: "transparent",
+              color: "var(--text-mid)",
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: "pointer",
+              fontFamily: "var(--font-main)",
             }}
           >
-            <Sparkles size={18} strokeWidth={1.9} />
-            Промпты для summary
-          </div>
-          <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>
-            Готовые и свои промпты для пересказа разговора. Промпт по умолчанию
-            предлагается на экране результата.
-          </div>
+            Отмена
+          </button>
+          <button
+            onClick={() => void handleSave()}
+            disabled={saving}
+            style={{
+              padding: "9px 18px",
+              borderRadius: 10,
+              border: "none",
+              background: "var(--accent)",
+              color: "var(--accent-contrast)",
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: saving ? "default" : "pointer",
+              opacity: saving ? 0.6 : 1,
+              fontFamily: "var(--font-main)",
+            }}
+          >
+            {saving ? "Сохраняем" : "Сохранить"}
+          </button>
         </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>
+        Выберите промпт для summary. Он предлагается по умолчанию на экране
+        результата транскрибации.
+      </div>
+
+      {summaryPrompts.map((preset) => {
+        const active = preset.id === defaultId;
+
+        return (
+          <OptionCard
+            key={preset.id}
+            active={active}
+            icon={<MessageSquare size={20} strokeWidth={active ? 2.4 : 1.8} />}
+            title={preset.name}
+            description={preset.prompt}
+            onClick={() => update({ defaultSummaryPromptId: preset.id })}
+          />
+        );
+      })}
+
+      {error && (
+        <div style={{ fontSize: 12, color: "var(--danger)", lineHeight: 1.5 }}>
+          {error}
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <button
-          onClick={editor ? undefined : startNew}
-          disabled={Boolean(editor)}
+          onClick={startNew}
           style={{
+            flex: 1,
+            minWidth: 160,
             display: "flex",
             alignItems: "center",
-            gap: 6,
-            padding: "9px 14px",
+            justifyContent: "center",
+            gap: 7,
+            padding: "11px 0",
             borderRadius: 10,
-            border: "1px solid var(--border)",
-            background: "var(--control-bg)",
+            border: "1px dashed var(--border-strong)",
+            background: "transparent",
             color: "var(--text-hi)",
             fontSize: 13,
             fontWeight: 600,
-            cursor: editor ? "default" : "pointer",
-            opacity: editor ? 0.5 : 1,
-            whiteSpace: "nowrap",
+            cursor: "pointer",
             fontFamily: "var(--font-main)",
           }}
         >
-          <Plus size={15} strokeWidth={2} />
-          Новый
+          <Plus size={16} strokeWidth={2} />
+          Создать промпт
         </button>
-      </div>
 
-      {editor && (
-        <div className="card" style={{ padding: 16, display: "grid", gap: 12 }}>
-          <div style={{ display: "grid", gap: 6 }}>
-            <div className="label">Название</div>
-            <input
-              value={editor.name}
-              onChange={(e) => setEditor({ ...editor, name: e.target.value })}
-              placeholder="Например: Протокол встречи"
-              maxLength={80}
-              style={PROMPT_FIELD_STYLE}
-            />
-          </div>
-          <div style={{ display: "grid", gap: 6 }}>
-            <div className="label">Промпт</div>
-            <textarea
-              value={editor.prompt}
-              onChange={(e) => setEditor({ ...editor, prompt: e.target.value })}
-              placeholder="Опиши, какое summary нужно сделать по тексту разговора…"
-              rows={5}
-              style={{ ...PROMPT_FIELD_STYLE, resize: "vertical", minHeight: 96 }}
-            />
-          </div>
-          {error && (
-            <div style={{ fontSize: 12, color: "var(--danger)", lineHeight: 1.5 }}>
-              {error}
-            </div>
-          )}
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        {selectedIsCustom && (
+          <>
             <button
-              onClick={() => {
-                setEditor(null);
-                setError(null);
-              }}
-              disabled={saving}
+              onClick={startEditSelected}
               style={{
-                padding: "9px 16px",
+                display: "flex",
+                alignItems: "center",
+                gap: 7,
+                padding: "11px 16px",
                 borderRadius: 10,
                 border: "1px solid var(--border)",
-                background: "transparent",
-                color: "var(--text-mid)",
+                background: "var(--control-bg)",
+                color: "var(--text-hi)",
                 fontSize: 13,
                 fontWeight: 600,
                 cursor: "pointer",
                 fontFamily: "var(--font-main)",
               }}
             >
-              Отмена
+              <Pencil size={15} strokeWidth={2} />
+              Изменить
             </button>
             <button
-              onClick={() => void handleSave()}
-              disabled={saving}
+              onClick={() => void handleDeleteSelected()}
+              disabled={busyId === selectedPreset?.id}
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: 6,
-                padding: "9px 16px",
+                gap: 7,
+                padding: "11px 16px",
                 borderRadius: 10,
-                border: "none",
-                background: "var(--accent)",
-                color: "var(--accent-contrast)",
+                border: "1px solid var(--border)",
+                background: "var(--control-bg)",
+                color: "var(--danger)",
                 fontSize: 13,
-                fontWeight: 700,
-                cursor: saving ? "default" : "pointer",
-                opacity: saving ? 0.6 : 1,
+                fontWeight: 600,
+                cursor: "pointer",
                 fontFamily: "var(--font-main)",
               }}
             >
-              <Check size={15} strokeWidth={2.4} />
-              {saving ? "Сохраняем…" : "Сохранить"}
+              <Trash2 size={15} strokeWidth={2} />
+              Удалить
             </button>
-          </div>
-        </div>
-      )}
-
-      {error && !editor && (
-        <div style={{ fontSize: 12, color: "var(--danger)", lineHeight: 1.5 }}>
-          {error}
-        </div>
-      )}
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {summaryPrompts.map((preset) => {
-          const isDefault = preset.id === defaultId;
-          const isBusy = busyId === preset.id;
-
-          return (
-            <div
-              key={preset.id}
-              className="card"
-              style={{
-                padding: 14,
-                display: "grid",
-                gap: 8,
-                border: isDefault
-                  ? "1px solid var(--accent)"
-                  : "1px solid var(--border)",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 10,
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    minWidth: 0,
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: 14,
-                      fontWeight: 650,
-                      color: "var(--text-hi)",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {preset.name}
-                  </span>
-                  {preset.builtin && (
-                    <span className="label" style={{ color: "var(--text-low)" }}>
-                      Встроенный
-                    </span>
-                  )}
-                  {isDefault && (
-                    <span className="label" style={{ color: "var(--accent)" }}>
-                      По умолчанию
-                    </span>
-                  )}
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                  <button
-                    title="Сделать промптом по умолчанию"
-                    onClick={() => update({ defaultSummaryPromptId: preset.id })}
-                    style={{
-                      display: "flex",
-                      padding: 7,
-                      borderRadius: 8,
-                      border: "none",
-                      background: "transparent",
-                      color: isDefault ? "var(--accent)" : "var(--text-low)",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <Star
-                      size={16}
-                      strokeWidth={2}
-                      fill={isDefault ? "currentColor" : "none"}
-                    />
-                  </button>
-                  <button
-                    title="Дублировать"
-                    onClick={() => startDuplicate(preset)}
-                    style={{
-                      display: "flex",
-                      padding: 7,
-                      borderRadius: 8,
-                      border: "none",
-                      background: "transparent",
-                      color: "var(--text-low)",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <Copy size={16} strokeWidth={2} />
-                  </button>
-                  {!preset.builtin && (
-                    <>
-                      <button
-                        title="Изменить"
-                        onClick={() => startEdit(preset)}
-                        style={{
-                          display: "flex",
-                          padding: 7,
-                          borderRadius: 8,
-                          border: "none",
-                          background: "transparent",
-                          color: "var(--text-low)",
-                          cursor: "pointer",
-                        }}
-                      >
-                        <Pencil size={16} strokeWidth={2} />
-                      </button>
-                      <button
-                        title="Удалить"
-                        onClick={() => void handleDelete(preset)}
-                        disabled={isBusy}
-                        style={{
-                          display: "flex",
-                          padding: 7,
-                          borderRadius: 8,
-                          border: "none",
-                          background: "transparent",
-                          color: "var(--danger)",
-                          cursor: isBusy ? "default" : "pointer",
-                          opacity: isBusy ? 0.5 : 1,
-                        }}
-                      >
-                        <Trash2 size={16} strokeWidth={2} />
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
-              <div
-                style={{
-                  fontSize: 12.5,
-                  color: "var(--text-mid)",
-                  lineHeight: 1.6,
-                  display: "-webkit-box",
-                  WebkitLineClamp: 2,
-                  WebkitBoxOrient: "vertical",
-                  overflow: "hidden",
-                }}
-              >
-                {preset.prompt}
-              </div>
-            </div>
-          );
-        })}
+          </>
+        )}
       </div>
     </div>
   );
 }
 
-/**
- * Text (LLM) model used for summary / text processing in API mode: a custom
- * OpenAI-compatible endpoint, key and model. Empty endpoint = OpenAI with the
- * user's own key. Local mode uses the bundled runtime instead (Phase 3).
- */
 function TextModelCard({
   settings,
   update,
@@ -1119,6 +996,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
   const [waitingForAuth, setWaitingForAuth] = useState(false);
   const [waitingForSubscriptionRefresh, setWaitingForSubscriptionRefresh] = useState(false);
   const [modelModeView, setModelModeView] = useState<ModelMode | null>(null);
+  const [styleTabView, setStyleTabView] = useState<"style" | "prompts">("style");
   const [expandedApiAdapter, setExpandedApiAdapter] = useState<ApiAdapterId | null>(null);
   const [expandedLocalModel, setExpandedLocalModel] = useState<string | null>(null);
   const [pendingDeleteModel, setPendingDeleteModel] = useState<LocalModelOption | null>(null);
@@ -2919,41 +2797,87 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
     tech: Code,
   };
 
+  const styleTabOptions: Array<{
+    id: "style" | "prompts";
+    label: string;
+    Icon: LucideIcon;
+  }> = [
+    { id: "style", label: "Стиль", Icon: Type },
+    { id: "prompts", label: "Промпты", Icon: MessageSquare },
+  ];
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
       <div style={{ display: "grid", gap: 4 }}>
-        <div style={{ fontSize: 17, fontWeight: 700, color: "var(--text-hi)" }}>Стиль обработки текста</div>
-        <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>Выберите режим обработки.</div>
+        <div style={{ fontSize: 17, fontWeight: 700, color: "var(--text-hi)" }}>Обработка текста</div>
+        <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>
+          Стиль очистки расшифровки и Промпты для summary.
+        </div>
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {TRANSCRIPTION_STYLE_OPTIONS.map((st) => {
-          const isActive = settings.style === st.id;
-          const Icon = STYLE_ICONS[st.id];
+      <div style={{ display: "flex", background: "var(--control-track)", borderRadius: 10, padding: 3, gap: 2 }}>
+        {styleTabOptions.map(({ id, label, Icon }) => {
+          const active = styleTabView === id;
 
           return (
-            <OptionCard
-              key={st.id}
-              active={isActive}
-              icon={<Icon size={20} strokeWidth={isActive ? 2.4 : 1.8} />}
-              title={st.title}
-              description={st.description}
-              onClick={() =>
-                update({
-                  style: st.id as AppSettings["style"],
-                  selectedCleanupPromptId: st.id,
-                })
-              }
-            />
+            <button
+              key={id}
+              onClick={() => setStyleTabView(id)}
+              style={{
+                flex: 1,
+                padding: "10px 0",
+                borderRadius: 8,
+                border: "none",
+                fontSize: 13,
+                fontWeight: active ? 700 : 500,
+                fontFamily: "var(--font-main)",
+                background: active ? "var(--dropdown-active)" : "transparent",
+                color: active ? "var(--text-hi)" : "var(--text-mid)",
+                cursor: "pointer",
+                transition: "all 0.18s ease",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 7,
+              }}
+            >
+              <Icon size={15} strokeWidth={active ? 2.2 : 1.7} />
+              <span>{label}</span>
+            </button>
           );
         })}
       </div>
 
-      <div style={{ height: 1, background: "var(--border)", margin: "2px 0" }} />
+      {styleTabView === "style" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {TRANSCRIPTION_STYLE_OPTIONS.map((st) => {
+            const isActive = settings.style === st.id;
+            const Icon = STYLE_ICONS[st.id];
 
-      <PromptLibrary settings={settings} onReload={syncSettings} update={update} />
+            return (
+              <OptionCard
+                key={st.id}
+                active={isActive}
+                icon={<Icon size={20} strokeWidth={isActive ? 2.4 : 1.8} />}
+                title={st.title}
+                description={st.description}
+                onClick={() =>
+                  update({
+                    style: st.id as AppSettings["style"],
+                    selectedCleanupPromptId: st.id,
+                  })
+                }
+              />
+            );
+          })}
+        </div>
+      )}
 
-      {IS_DEV && (
+      {styleTabView === "prompts" && (
+        <PromptLibrary settings={settings} onReload={syncSettings} update={update} />
+      )}
+
+      {IS_DEV && styleTabView === "style" && (
         <details className="card" style={{ background: "var(--surface)" }}>
           <summary style={{ cursor: "pointer", listStyle: "none", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
             <div>

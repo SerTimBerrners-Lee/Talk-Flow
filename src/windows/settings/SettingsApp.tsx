@@ -97,7 +97,7 @@ const TABS: { id: Tab; label: string; icon: LucideIcon; note: string }[] = [
     icon: Cpu,
     note: "Ключи и подключение модели",
   },
-  { id: "style", label: "Стиль и промпты", icon: Sparkles, note: "Стиль обработки и промпты для summary" },
+  { id: "style", label: "Стиль и Промпты", icon: Sparkles, note: "Стиль обработки и Промпты для summary" },
 ];
 
 function TabButton({
