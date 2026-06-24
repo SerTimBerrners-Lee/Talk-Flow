@@ -237,8 +237,10 @@ export function useWidgetRecording({
     }
 
     if (!isSubscriptionMode && !hasKey && !isLocalSttMode) {
-      logError("RECORDING", "API key not set");
-      showError("Добавьте API ключ в настройках → Модели.");
+      logError("RECORDING", "No transcription model configured");
+      showError(
+        "Сначала установите модель в «Настройки → Модели»: облако, локальная модель или свой API-ключ.",
+      );
       return;
     }
 
