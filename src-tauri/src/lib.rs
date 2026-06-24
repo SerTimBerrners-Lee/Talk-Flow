@@ -182,6 +182,7 @@ pub fn run() {
             llm_runtime::start_local_llm,
             llm_runtime::stop_local_llm,
             llm_runtime::get_local_llm_status,
+            llm_runtime::get_llm_download_progress,
             download_cancel::cancel_local_model_download,
             logger::log_event,
             logger::get_log_path_cmd,

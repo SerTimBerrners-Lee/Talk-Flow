@@ -73,11 +73,38 @@ export function LocalLlmModels({
 
   useEffect(() => {
     void refresh();
+    // Restore any in-flight download started before this view was mounted, so the
+    // progress survives switching tabs / minimizing the app.
+    invoke<DownloadProgress[]>("get_llm_download_progress")
+      .then((items) => {
+        setProgress((prev) => {
+          const next = { ...prev };
+          for (const item of items) {
+            next[item.model_id] = item;
+          }
+          return next;
+        });
+      })
+      .catch(() => {});
+
     const unlisten = listen<DownloadProgress>(
       "local-llm-model-download-progress",
       (event) => {
-        setProgress((prev) => ({ ...prev, [event.payload.model_id]: event.payload }));
-        if (event.payload.status === "downloaded") {
+        const payload = event.payload;
+        setProgress((prev) => {
+          const next = { ...prev };
+          if (
+            payload.status === "downloaded" ||
+            payload.status === "cancelled" ||
+            payload.status === "error"
+          ) {
+            delete next[payload.model_id];
+          } else {
+            next[payload.model_id] = payload;
+          }
+          return next;
+        });
+        if (payload.status === "downloaded" || payload.status === "cancelled") {
           void refresh();
         }
       },
@@ -88,20 +115,22 @@ export function LocalLlmModels({
   }, []);
 
   const download = async (model: LocalLlmModel): Promise<void> => {
-    setBusy(model.id);
     setError(null);
+    // Optimistic start; the backend registry + events drive the bar from here,
+    // so it survives this component unmounting (tab switch / minimize).
+    setProgress((prev) => ({
+      ...prev,
+      [model.id]: { model_id: model.id, status: "starting", percent: null },
+    }));
     try {
       await invoke("download_local_llm_model", { modelId: model.id });
-      await refresh();
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       if (!message.includes("отменена")) {
         setError(message);
       }
-      await refresh();
-    } finally {
-      setBusy(null);
     }
+    await refresh();
   };
 
   const cancelDownload = async (model: LocalLlmModel): Promise<void> => {
@@ -179,9 +208,9 @@ export function LocalLlmModels({
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {models.map((model) => {
           const prog = progress[model.id];
-          const isBusy = busy === model.id;
           const isDownloading =
-            isBusy && (!prog || prog.status === "downloading" || prog.status === "starting");
+            prog?.status === "downloading" || prog?.status === "starting";
+          const isBusy = busy === model.id;
           const isActive = activeModelId === model.id && usingLocalEndpoint;
 
           const statusLabel = isActive
@@ -357,12 +386,12 @@ export function LocalLlmModels({
                     <>
                       <button
                         onClick={() => void download(model)}
-                        disabled={isBusy}
+                        disabled={isDownloading}
                         style={{
                           ...ACTION_BUTTON_BASE,
                           background: "var(--accent)",
                           color: "var(--accent-contrast)",
-                          opacity: isBusy && !isDownloading ? 0.6 : 1,
+                          opacity: isDownloading ? 0.85 : 1,
                         }}
                       >
                         {isDownloading ? (

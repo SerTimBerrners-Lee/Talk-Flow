@@ -1,5 +1,6 @@
 use crate::logger;
 use serde::Serialize;
+use std::collections::HashMap;
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
@@ -33,7 +34,7 @@ static LLM_CATALOG: &[LlmModelInfo] = &[
         file_name: "qwen2.5-3b-instruct-q4_k_m.gguf",
         url: "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf",
         label: "Qwen2.5 3B Instruct",
-        size_label: "~2.0 ГБ",
+        size_label: "2.0 ГБ",
         min_ram_gb: 8,
     },
     LlmModelInfo {
@@ -41,7 +42,7 @@ static LLM_CATALOG: &[LlmModelInfo] = &[
         file_name: "qwen2.5-7b-instruct-q4_k_m.gguf",
         url: "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/resolve/main/qwen2.5-7b-instruct-q4_k_m.gguf",
         label: "Qwen2.5 7B Instruct",
-        size_label: "~4.7 ГБ",
+        size_label: "4.7 ГБ",
         min_ram_gb: 16,
     },
 ];
@@ -103,7 +104,7 @@ fn base_url(port: u16) -> String {
 }
 
 #[derive(Serialize, Clone)]
-struct LlmDownloadProgress {
+pub struct LlmDownloadProgress {
     model_id: String,
     status: String,
     downloaded_bytes: u64,
@@ -117,14 +118,55 @@ fn progress_percent(downloaded: u64, total: Option<u64>) -> Option<u8> {
         .map(|value| ((downloaded.min(value) as f64 / value as f64) * 100.0).round() as u8)
 }
 
+/// In-flight download progress kept on the backend so the UI can restore it after
+/// remounting (tab switch, window close), not just from live events.
+fn download_registry() -> &'static Mutex<HashMap<String, LlmDownloadProgress>> {
+    static REGISTRY: OnceLock<Mutex<HashMap<String, LlmDownloadProgress>>> = OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 fn emit_progress(app: &AppHandle, payload: LlmDownloadProgress) {
+    {
+        let mut registry = download_registry()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        if matches!(payload.status.as_str(), "downloaded" | "cancelled" | "error") {
+            registry.remove(&payload.model_id);
+        } else {
+            registry.insert(payload.model_id.clone(), payload.clone());
+        }
+    }
     let _ = app.emit(LLM_DOWNLOAD_PROGRESS_EVENT, payload);
+}
+
+/// Removes the registry entry on any exit from `download_model`, so an errored
+/// download never leaves a stuck "downloading" entry behind.
+struct DownloadGuard(String);
+
+impl Drop for DownloadGuard {
+    fn drop(&mut self) {
+        download_registry()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .remove(&self.0);
+    }
+}
+
+#[tauri::command]
+pub fn get_llm_download_progress() -> Vec<LlmDownloadProgress> {
+    download_registry()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .values()
+        .cloned()
+        .collect()
 }
 
 pub async fn download_model(app: &AppHandle, model_id: &str) -> Result<(), String> {
     let info = model_info(model_id)
         .ok_or_else(|| format!("Неизвестная локальная модель «{}»", model_id))?;
     crate::download_cancel::clear(info.id);
+    let _guard = DownloadGuard(info.id.to_string());
     let dir = models_dir(app)?;
     tokio::fs::create_dir_all(&dir)
         .await
