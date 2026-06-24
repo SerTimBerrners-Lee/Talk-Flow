@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Check, Download, Loader2, Play, Sparkles, Trash2 } from "lucide-react";
+import { Check, Download, Loader2, Play, Sparkles, Trash2, X } from "lucide-react";
 
 import { AppSettings } from "../lib/store";
 
@@ -79,9 +79,22 @@ export function LocalLlmModels({
       await invoke("download_local_llm_model", { modelId: model.id });
       await refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      // User-initiated cancel resets silently instead of showing an error.
+      if (!message.includes("отменена")) {
+        setError(message);
+      }
+      await refresh();
     } finally {
       setBusy(null);
+    }
+  };
+
+  const cancelDownload = async (model: LocalLlmModel): Promise<void> => {
+    try {
+      await invoke("cancel_local_model_download", { modelId: model.id });
+    } catch {
+      /* best-effort */
     }
   };
 
@@ -185,26 +198,39 @@ export function LocalLlmModels({
 
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 {!model.downloaded ? (
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() => void download(model)}
-                    disabled={isBusy}
-                    style={{ minHeight: 34, padding: "0 14px" }}
-                  >
-                    {isDownloading ? (
-                      <Loader2
-                        size={14}
-                        strokeWidth={2.2}
-                        style={{ animation: "spin 1s linear infinite" }}
-                      />
-                    ) : (
-                      <Download size={14} strokeWidth={2} />
+                  <>
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => void download(model)}
+                      disabled={isBusy}
+                      style={{ minHeight: 34, padding: "0 14px" }}
+                    >
+                      {isDownloading ? (
+                        <Loader2
+                          size={14}
+                          strokeWidth={2.2}
+                          style={{ animation: "spin 1s linear infinite" }}
+                        />
+                      ) : (
+                        <Download size={14} strokeWidth={2} />
+                      )}
+                      {isDownloading
+                        ? `Загрузка${prog?.percent != null ? ` ${prog.percent}%` : "…"}`
+                        : "Скачать"}
+                    </button>
+                    {isDownloading && (
+                      <button
+                        type="button"
+                        className="btn"
+                        title="Отменить загрузку"
+                        onClick={() => void cancelDownload(model)}
+                        style={{ width: 34, minWidth: 34, minHeight: 34, padding: 0 }}
+                      >
+                        <X size={14} strokeWidth={2} />
+                      </button>
                     )}
-                    {isDownloading
-                      ? `Загрузка${prog?.percent != null ? ` ${prog.percent}%` : "…"}`
-                      : "Скачать"}
-                  </button>
+                  </>
                 ) : (
                   <>
                     <button

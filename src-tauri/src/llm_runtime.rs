@@ -124,6 +124,7 @@ fn emit_progress(app: &AppHandle, payload: LlmDownloadProgress) {
 pub async fn download_model(app: &AppHandle, model_id: &str) -> Result<(), String> {
     let info = model_info(model_id)
         .ok_or_else(|| format!("Неизвестная локальная модель «{}»", model_id))?;
+    crate::download_cancel::clear(info.id);
     let dir = models_dir(app)?;
     tokio::fs::create_dir_all(&dir)
         .await
@@ -182,6 +183,23 @@ pub async fn download_model(app: &AppHandle, model_id: &str) -> Result<(), Strin
         .await
         .map_err(|err| format!("Не удалось прочитать «{}»: {}", info.id, err))?
     {
+        if crate::download_cancel::is_cancel_requested(info.id) {
+            drop(file);
+            let _ = tokio::fs::remove_file(&temp).await;
+            crate::download_cancel::clear(info.id);
+            emit_progress(
+                app,
+                LlmDownloadProgress {
+                    model_id: info.id.to_string(),
+                    status: "cancelled".to_string(),
+                    downloaded_bytes: downloaded,
+                    total_bytes: total,
+                    percent: None,
+                },
+            );
+            return Err(crate::download_cancel::CANCELLED_MESSAGE.to_string());
+        }
+
         file.write_all(&chunk)
             .await
             .map_err(|err| format!("Не удалось записать «{}»: {}", info.id, err))?;

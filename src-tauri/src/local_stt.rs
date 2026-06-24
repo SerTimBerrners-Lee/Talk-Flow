@@ -509,6 +509,8 @@ pub async fn download_model_with_progress(
             model
         )
     })?;
+    crate::download_cancel::clear(model);
+    crate::download_cancel::clear(info.id);
     let models_dir = resolve_models_dir(app, custom_dir)?;
     tokio::fs::create_dir_all(&models_dir)
         .await
@@ -553,6 +555,18 @@ pub async fn download_model_with_progress(
         .await
         .map_err(|err| format!("Не удалось прочитать модель «{}»: {}", info.id, err))?
     {
+        if crate::download_cancel::is_any_cancel_requested(&[model, info.id]) {
+            drop(file);
+            let _ = tokio::fs::remove_file(&temp_path).await;
+            crate::download_cancel::clear(model);
+            crate::download_cancel::clear(info.id);
+            emit_download_progress(
+                app,
+                model_download_progress(model, "cancelled", downloaded_bytes, total_bytes),
+            );
+            return Err(crate::download_cancel::CANCELLED_MESSAGE.to_string());
+        }
+
         file.write_all(&chunk)
             .await
             .map_err(|err| format!("Не удалось записать модель «{}»: {}", info.id, err))?;

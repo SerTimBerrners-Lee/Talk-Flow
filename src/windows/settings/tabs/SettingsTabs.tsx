@@ -25,6 +25,7 @@ import {
   Target,
   Trash2,
   User,
+  X,
   Zap,
 } from "lucide-react";
 
@@ -2150,6 +2151,20 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        if (message.includes("отменена")) {
+          // User cancelled — reset to the not-downloaded state silently.
+          setLocalModelActionStates((prev) => {
+            const next = { ...prev };
+            delete next[model.id];
+            return next;
+          });
+          updateLocalModelCache(model.id, {
+            status: "not_downloaded",
+            message: undefined,
+            lastCheckedAt: new Date().toISOString(),
+          });
+          return;
+        }
         setLocalModelActionStates((prev) => ({
           ...prev,
           [model.id]: { status: "error", message },
@@ -2159,6 +2174,14 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
           message,
           lastCheckedAt: new Date().toISOString(),
         });
+      }
+    };
+
+    const handleCancelLocalSttDownload = async (model: LocalModelOption) => {
+      try {
+        await invoke("cancel_local_model_download", { modelId: model.model });
+      } catch {
+        /* best-effort */
       }
     };
 
@@ -2778,6 +2801,29 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                                       {isRuntimeReady ? "Скачать" : "Недоступно"}
                                     </>
                                   )}
+                                </button>
+                              )}
+
+                              {modelStatus.status === "installing" && (
+                                <button
+                                  onClick={() => void handleCancelLocalSttDownload(model)}
+                                  style={{
+                                    padding: "9px 12px",
+                                    borderRadius: 10,
+                                    border: "1px solid var(--border-dashed)",
+                                    background: "var(--control-muted)",
+                                    color: "var(--text-hi)",
+                                    fontSize: 12,
+                                    fontWeight: 700,
+                                    fontFamily: "var(--font-main)",
+                                    cursor: "pointer",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 8,
+                                  }}
+                                >
+                                  <X size={14} strokeWidth={2.2} />
+                                  Отмена
                                 </button>
                               )}
                             </div>
