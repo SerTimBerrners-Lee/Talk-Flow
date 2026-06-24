@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Check, Download, Loader2, Play, Sparkles, Trash2, X } from "lucide-react";
+import { Check, Download, Loader2, Trash2, X } from "lucide-react";
 
 import { AppSettings } from "../lib/store";
 
@@ -26,9 +26,23 @@ interface DownloadProgress {
   percent: number | null;
 }
 
+const ACTION_BUTTON_BASE = {
+  padding: "9px 12px",
+  borderRadius: 10,
+  border: "1px solid var(--border-dashed)",
+  fontSize: 12,
+  fontWeight: 700,
+  fontFamily: "var(--font-main)",
+  cursor: "pointer",
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+} as const;
+
 /**
- * Local text (LLM) model slot for "Локально" mode: download a bundled GGUF
- * model and start the managed llama.cpp runtime, then point summary at it.
+ * Local text (LLM) model slot for "Локально" mode — same card style as the local
+ * STT models: download a bundled GGUF model and start the managed runtime, then
+ * point summary at it.
  */
 export function LocalLlmModels({
   settings,
@@ -52,7 +66,7 @@ export function LocalLlmModels({
       setModels(list);
       setStatus(runtime);
     } catch {
-      /* ignore — keep last known state */
+      /* keep last known state */
     }
   };
 
@@ -80,7 +94,6 @@ export function LocalLlmModels({
       await refresh();
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      // User-initiated cancel resets silently instead of showing an error.
       if (!message.includes("отменена")) {
         setError(message);
       }
@@ -131,165 +144,266 @@ export function LocalLlmModels({
   };
 
   const activeModelId = status?.running ? status.model_id : null;
-  const usingEndpoint = settings.llmEndpoint?.trim();
+  const usingLocalEndpoint = Boolean(
+    settings.llmEndpoint?.trim().includes("127.0.0.1"),
+  );
 
   return (
-    <div className="card" style={{ padding: 16, display: "grid", gap: 12 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <Sparkles size={16} strokeWidth={1.9} />
-        <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)" }}>
-          Текстовая модель (для summary)
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div>
+        <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)", marginBottom: 4 }}>
+          Текстовые модели
         </div>
-      </div>
-      <div style={{ fontSize: 12.5, color: "var(--text-mid)", lineHeight: 1.6 }}>
-        Встроенная локальная модель для пересказа разговоров — без облака. Скачайте
-        и запустите её, чтобы summary работало офлайн.
+        <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>
+          Скачайте локальную модель и используйте ее для summary без облака.
+        </div>
       </div>
 
       {error && (
-        <div style={{ fontSize: 12, color: "var(--danger)", lineHeight: 1.5 }}>
+        <div
+          style={{
+            fontSize: 12,
+            lineHeight: 1.6,
+            padding: "8px 10px",
+            borderRadius: 8,
+            background: "var(--danger-soft)",
+            color: "var(--error-bright)",
+            border: "1px solid var(--danger-border)",
+          }}
+        >
           {error}
         </div>
       )}
 
-      {models.map((model) => {
-        const isBusy = busy === model.id;
-        const prog = progress[model.id];
-        const isDownloading =
-          isBusy && (!prog || prog.status === "downloading" || prog.status === "starting");
-        const isActive =
-          activeModelId === model.id &&
-          Boolean(usingEndpoint && usingEndpoint.includes("127.0.0.1"));
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {models.map((model) => {
+          const prog = progress[model.id];
+          const isBusy = busy === model.id;
+          const isDownloading =
+            isBusy && (!prog || prog.status === "downloading" || prog.status === "starting");
+          const isActive = activeModelId === model.id && usingLocalEndpoint;
 
-        return (
-          <div
-            key={model.id}
-            className="card"
-            style={{
-              padding: 14,
-              display: "grid",
-              gap: 8,
-              border: isActive ? "1px solid var(--accent)" : "1px solid var(--border)",
-            }}
-          >
+          const statusLabel = isActive
+            ? "Активна"
+            : model.downloaded
+              ? "Скачана"
+              : isDownloading
+                ? "Загрузка"
+                : "Не скачана";
+          const statusColor = isActive
+            ? "var(--success)"
+            : model.downloaded
+              ? "var(--text-hi)"
+              : "var(--text-low)";
+
+          return (
             <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 10,
-              }}
+              key={model.id}
+              className="card"
+              style={{ padding: 0, overflow: "hidden", background: "var(--surface)" }}
             >
-              <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 14, fontWeight: 650, color: "var(--text-hi)" }}>
-                    {model.label}
-                  </span>
-                  {isActive && (
-                    <span className="label" style={{ color: "var(--accent)" }}>
-                      Активна
-                    </span>
-                  )}
-                </div>
-                <span style={{ fontSize: 12, color: "var(--text-low)" }}>
-                  {model.size_label} · ОЗУ ≥ {model.min_ram_gb} ГБ
-                </span>
-              </div>
-
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                {!model.downloaded ? (
-                  <>
-                    <button
-                      type="button"
-                      className="btn"
-                      onClick={() => void download(model)}
-                      disabled={isBusy}
-                      style={{ minHeight: 34, padding: "0 14px" }}
-                    >
-                      {isDownloading ? (
-                        <Loader2
-                          size={14}
-                          strokeWidth={2.2}
-                          style={{ animation: "spin 1s linear infinite" }}
-                        />
-                      ) : (
-                        <Download size={14} strokeWidth={2} />
-                      )}
-                      {isDownloading
-                        ? `Загрузка${prog?.percent != null ? ` ${prog.percent}%` : "…"}`
-                        : "Скачать"}
-                    </button>
-                    {isDownloading && (
-                      <button
-                        type="button"
-                        className="btn"
-                        title="Отменить загрузку"
-                        onClick={() => void cancelDownload(model)}
-                        style={{ width: 34, minWidth: 34, minHeight: 34, padding: 0 }}
-                      >
-                        <X size={14} strokeWidth={2} />
-                      </button>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      className="btn"
-                      onClick={() => void useForSummary(model)}
-                      disabled={isBusy}
-                      style={{ minHeight: 34, padding: "0 14px" }}
-                    >
-                      {isBusy ? (
-                        <Loader2
-                          size={14}
-                          strokeWidth={2.2}
-                          style={{ animation: "spin 1s linear infinite" }}
-                        />
-                      ) : isActive ? (
-                        <Check size={14} strokeWidth={2.2} />
-                      ) : (
-                        <Play size={14} strokeWidth={2} />
-                      )}
-                      {isActive ? "Используется" : "Для summary"}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn"
-                      title="Удалить модель"
-                      onClick={() => void remove(model)}
-                      disabled={isBusy}
-                      style={{ width: 34, minWidth: 34, minHeight: 34, padding: 0 }}
-                    >
-                      <Trash2 size={14} strokeWidth={2} />
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-
-            {isDownloading && prog?.percent != null && (
-              <div
-                style={{
-                  height: 6,
-                  borderRadius: 999,
-                  background: "var(--control-track)",
-                  overflow: "hidden",
-                }}
-              >
+              <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", gap: 12 }}>
                 <div
                   style={{
-                    width: `${prog.percent}%`,
-                    height: "100%",
-                    background: "var(--accent)",
-                    transition: "width 0.2s",
+                    width: 36,
+                    height: 36,
+                    borderRadius: 999,
+                    background: "var(--icon-soft-bg)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                    color: "var(--text-hi)",
+                    fontSize: 13,
+                    fontWeight: 800,
                   }}
-                />
+                >
+                  {model.label.charAt(0)}
+                </div>
+
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 10,
+                      marginBottom: 3,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 15,
+                        fontWeight: 700,
+                        color: "var(--text-hi)",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {model.label}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: statusColor,
+                        padding: "5px 9px",
+                        borderRadius: 999,
+                        background: "var(--control-muted)",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {statusLabel}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 12, lineHeight: 1.45, color: "var(--text-mid)" }}>
+                    {model.size_label} · ОЗУ ≥ {model.min_ram_gb} ГБ
+                  </div>
+                </div>
               </div>
-            )}
-          </div>
-        );
-      })}
+
+              <div
+                style={{
+                  borderTop: "1px solid var(--border-subtle)",
+                  padding: "12px 14px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 10,
+                }}
+              >
+                {isDownloading && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 12,
+                        fontSize: 12,
+                        color: "var(--text-mid)",
+                        fontWeight: 650,
+                      }}
+                    >
+                      <span>Загрузка модели</span>
+                      <span style={{ color: "var(--text-hi)" }}>
+                        {prog?.percent != null ? `${prog.percent}%` : "Подготовка"}
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        width: "100%",
+                        height: 8,
+                        borderRadius: 999,
+                        background: "var(--progress-track)",
+                        overflow: "hidden",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: `${prog?.percent ?? 2}%`,
+                          minWidth: prog?.percent == null ? 18 : 0,
+                          height: "100%",
+                          borderRadius: 999,
+                          background: "var(--accent)",
+                          transition: "width 0.2s ease",
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    flexWrap: "wrap",
+                    justifyContent: "flex-end",
+                  }}
+                >
+                  {!model.downloaded ? (
+                    <>
+                      <button
+                        onClick={() => void download(model)}
+                        disabled={isBusy}
+                        style={{
+                          ...ACTION_BUTTON_BASE,
+                          background: "var(--accent)",
+                          color: "var(--accent-contrast)",
+                          opacity: isBusy && !isDownloading ? 0.6 : 1,
+                        }}
+                      >
+                        {isDownloading ? (
+                          <Loader2
+                            size={14}
+                            strokeWidth={2.2}
+                            style={{ animation: "spin 1s linear infinite" }}
+                          />
+                        ) : (
+                          <Download size={14} strokeWidth={2.2} />
+                        )}
+                        {isDownloading
+                          ? `Загрузка${prog?.percent != null ? ` ${prog.percent}%` : ""}`
+                          : "Скачать"}
+                      </button>
+                      {isDownloading && (
+                        <button
+                          onClick={() => void cancelDownload(model)}
+                          style={{
+                            ...ACTION_BUTTON_BASE,
+                            background: "var(--control-muted)",
+                            color: "var(--text-hi)",
+                          }}
+                        >
+                          <X size={14} strokeWidth={2.2} />
+                          Отмена
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => void useForSummary(model)}
+                        disabled={isBusy}
+                        style={{
+                          ...ACTION_BUTTON_BASE,
+                          background: isActive ? "var(--control-muted)" : "var(--accent)",
+                          color: isActive ? "var(--text-hi)" : "var(--accent-contrast)",
+                          opacity: isBusy ? 0.7 : 1,
+                        }}
+                      >
+                        {isBusy ? (
+                          <Loader2
+                            size={14}
+                            strokeWidth={2.2}
+                            style={{ animation: "spin 1s linear infinite" }}
+                          />
+                        ) : (
+                          <Check size={14} strokeWidth={2.4} />
+                        )}
+                        {isActive ? "Используется" : "Для summary"}
+                      </button>
+                      <button
+                        onClick={() => void remove(model)}
+                        disabled={isBusy}
+                        style={{
+                          ...ACTION_BUTTON_BASE,
+                          background: "var(--control-muted)",
+                          color: "var(--danger)",
+                        }}
+                      >
+                        <Trash2 size={14} strokeWidth={2.2} />
+                        Удалить
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

@@ -16,6 +16,7 @@ import {
   LogOut,
   LucideIcon,
   MessageSquare,
+  Mic,
   Pencil,
   Plus,
   Server,
@@ -997,6 +998,9 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
   const [waitingForSubscriptionRefresh, setWaitingForSubscriptionRefresh] = useState(false);
   const [modelModeView, setModelModeView] = useState<ModelMode | null>(null);
   const [styleTabView, setStyleTabView] = useState<"style" | "prompts">("style");
+  const [localModelKind, setLocalModelKind] = useState<"transcription" | "text">(
+    "transcription",
+  );
   const [expandedApiAdapter, setExpandedApiAdapter] = useState<ApiAdapterId | null>(null);
   const [expandedLocalModel, setExpandedLocalModel] = useState<string | null>(null);
   const [pendingDeleteModel, setPendingDeleteModel] = useState<LocalModelOption | null>(null);
@@ -2489,8 +2493,44 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
 
           {isLocalMode && (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <LocalLlmModels settings={settings} update={update} />
+              <div style={{ display: "flex", background: "var(--control-track)", borderRadius: 10, padding: 3, gap: 2 }}>
+                {([
+                  { id: "transcription", label: "Транскрибация", Icon: Mic },
+                  { id: "text", label: "Текстовая", Icon: MessageSquare },
+                ] as const).map(({ id, label, Icon }) => {
+                  const active = localModelKind === id;
 
+                  return (
+                    <button
+                      key={id}
+                      onClick={() => setLocalModelKind(id)}
+                      style={{
+                        flex: 1,
+                        padding: "10px 0",
+                        borderRadius: 8,
+                        border: "none",
+                        fontSize: 13,
+                        fontWeight: active ? 700 : 500,
+                        fontFamily: "var(--font-main)",
+                        background: active ? "var(--dropdown-active)" : "transparent",
+                        color: active ? "var(--text-hi)" : "var(--text-mid)",
+                        cursor: "pointer",
+                        transition: "all 0.18s ease",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 7,
+                      }}
+                    >
+                      <Icon size={15} strokeWidth={active ? 2.2 : 1.7} />
+                      <span>{label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {localModelKind === "transcription" && (
+                <>
               <div>
                 <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)", marginBottom: 4 }}>
                   Локальные модели
@@ -2783,6 +2823,12 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                     </div>
                   </div>
                 </div>
+              )}
+                </>
+              )}
+
+              {localModelKind === "text" && (
+                <LocalLlmModels settings={settings} update={update} />
               )}
               </div>
             )}
