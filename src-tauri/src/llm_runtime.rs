@@ -31,16 +31,16 @@ struct LlmModelInfo {
 static LLM_CATALOG: &[LlmModelInfo] = &[
     LlmModelInfo {
         id: "qwen2.5-3b-instruct-q4",
-        file_name: "qwen2.5-3b-instruct-q4_k_m.gguf",
-        url: "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf",
+        file_name: "Qwen2.5-3B-Instruct-Q4_K_M.gguf",
+        url: "https://huggingface.co/bartowski/Qwen2.5-3B-Instruct-GGUF/resolve/main/Qwen2.5-3B-Instruct-Q4_K_M.gguf",
         label: "Qwen2.5 3B Instruct",
         size_label: "2.0 ГБ",
         min_ram_gb: 8,
     },
     LlmModelInfo {
         id: "qwen2.5-7b-instruct-q4",
-        file_name: "qwen2.5-7b-instruct-q4_k_m.gguf",
-        url: "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/resolve/main/qwen2.5-7b-instruct-q4_k_m.gguf",
+        file_name: "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+        url: "https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
         label: "Qwen2.5 7B Instruct",
         size_label: "4.7 ГБ",
         min_ram_gb: 16,
