@@ -13,7 +13,6 @@ import {
   Download,
   Gauge,
   HardDrive,
-  Loader2,
   LogOut,
   LucideIcon,
   MessageSquare,
@@ -43,7 +42,7 @@ import { CloudProfile, fetchCloudProfile, getAuthLoginUrl, cloudLogout, handleAu
 import { logInfo } from "../../../lib/logger";
 
 import { TRANSCRIPTION_STYLE_OPTIONS } from "../../../lib/transcriptionPrompts";
-import { isSummaryAvailable, improvePromptText } from "../../../lib/summarize";
+import { isSummaryAvailable, generatePromptText } from "../../../lib/summarize";
 import { LocalLlmModels } from "../../../components/LocalLlmModels";
 import { SETTINGS_UPDATED_EVENT } from "../../../lib/hotkeyEvents";
 import { useI18n, type MsgKey } from "../../../lib/i18n";
@@ -785,7 +784,7 @@ function PromptLibrary({
   const { t } = useI18n();
   const [editor, setEditor] = useState<PromptEditorState | null>(null);
   const [saving, setSaving] = useState(false);
-  const [improving, setImproving] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const promptFieldRef = useRef<HTMLTextAreaElement>(null);
@@ -802,18 +801,22 @@ function PromptLibrary({
     autoSizePromptField(promptFieldRef.current);
   }, [editor?.id, editor?.prompt]);
 
-  const canImprove = isSummaryAvailable(settings);
-  const handleImprove = async (): Promise<void> => {
-    if (!editor || !editor.prompt.trim() || improving) return;
-    setImproving(true);
+  const canGenerate = isSummaryAvailable(settings);
+  const handleGenerate = async (): Promise<void> => {
+    if (!editor || generating || (!editor.prompt.trim() && !editor.name.trim())) return;
+    setGenerating(true);
     setError(null);
     try {
-      const improved = await improvePromptText(settings, editor.prompt);
-      setEditor((cur) => (cur ? { ...cur, prompt: improved } : cur));
+      // The title participates in forming the prompt (it states the goal).
+      const generated = await generatePromptText(settings, {
+        title: editor.name,
+        draft: editor.prompt,
+      });
+      setEditor((cur) => (cur ? { ...cur, prompt: generated } : cur));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setImproving(false);
+      setGenerating(false);
     }
   };
 
@@ -887,38 +890,7 @@ function PromptLibrary({
           />
         </div>
         <div style={{ display: "grid", gap: 6 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-            <div className="label">{t("models.prompt.promptLabel")}</div>
-            {canImprove && (
-              <button
-                type="button"
-                onClick={() => void handleImprove()}
-                disabled={improving || !editor.prompt.trim()}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  padding: "5px 10px",
-                  borderRadius: 8,
-                  border: "1px solid var(--border)",
-                  background: "var(--control-bg)",
-                  color: "var(--text-hi)",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: improving || !editor.prompt.trim() ? "default" : "pointer",
-                  opacity: improving || !editor.prompt.trim() ? 0.6 : 1,
-                  fontFamily: "var(--font-main)",
-                }}
-              >
-                {improving ? (
-                  <Loader2 size={14} strokeWidth={2.2} style={{ animation: "spin 1s linear infinite" }} />
-                ) : (
-                  <Sparkles size={14} strokeWidth={2} />
-                )}
-                {improving ? t("models.prompt.improving") : t("models.prompt.improve")}
-              </button>
-            )}
-          </div>
+          <div className="label">{t("models.prompt.promptLabel")}</div>
           <textarea
             ref={promptFieldRef}
             value={editor.prompt}
@@ -935,7 +907,31 @@ function PromptLibrary({
             {error}
           </div>
         )}
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <div style={{ display: "flex", gap: 8, justifyContent: "space-between", alignItems: "center", flexWrap: "wrap" }}>
+          {canGenerate ? (
+            <button
+              type="button"
+              onClick={() => void handleGenerate()}
+              disabled={generating || (!editor.prompt.trim() && !editor.name.trim())}
+              style={{
+                padding: "9px 16px",
+                borderRadius: 10,
+                border: "1px solid var(--border)",
+                background: "transparent",
+                color: "var(--text-hi)",
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: generating || (!editor.prompt.trim() && !editor.name.trim()) ? "default" : "pointer",
+                opacity: generating || (!editor.prompt.trim() && !editor.name.trim()) ? 0.6 : 1,
+                fontFamily: "var(--font-main)",
+              }}
+            >
+              {generating ? t("models.prompt.improving") : t("models.prompt.improve")}
+            </button>
+          ) : (
+            <span />
+          )}
+          <div style={{ display: "flex", gap: 8 }}>
           <button
             onClick={() => {
               setEditor(null);
@@ -974,6 +970,7 @@ function PromptLibrary({
           >
             {saving ? t("models.prompt.saving") : t("models.prompt.save")}
           </button>
+          </div>
         </div>
       </div>
     );

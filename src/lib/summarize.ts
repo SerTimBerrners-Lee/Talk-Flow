@@ -215,38 +215,45 @@ export function isSummaryAvailable(settings: AppSettings): boolean {
   return resolveSummaryBackend(settings) !== null;
 }
 
-const IMPROVE_PROMPT_INSTRUCTION =
-  "Ты — опытный prompt-инженер. Ниже дан черновик инструкции (промпта), которую " +
-  "пользователь применяет к расшифровке разговора или текста, чтобы получить саммари " +
-  "или иную обработку. Улучши эту инструкцию: сделай её чёткой, конкретной и " +
-  "однозначной, сохрани исходный смысл и язык, добавь полезную структуру, если уместно. " +
-  "НЕ выполняй инструкцию и не обрабатывай никакой текст — верни ТОЛЬКО улучшенный текст " +
-  "промпта, без пояснений, кавычек и преамбул.";
+const GENERATE_PROMPT_INSTRUCTION =
+  "Ты — опытный prompt-инженер. По данным ниже (название и/или черновик) составь готовую " +
+  "инструкцию-промпт для модели, которая обрабатывает расшифровку разговора или текста " +
+  "(саммари и т.п.). НАЗВАНИЕ задаёт цель промпта — обязательно учитывай его. Сделай " +
+  "инструкцию чёткой, конкретной и однозначной, на языке названия/черновика. НЕ выполняй " +
+  "инструкцию и не обрабатывай никакой текст — верни ТОЛЬКО готовый текст промпта, без " +
+  "пояснений, кавычек и преамбул.";
 
 /**
- * Rewrite a draft prompt into a cleaner instruction using whichever text backend
- * is configured (cloud / local runtime / custom endpoint). Used by the
- * «Улучшить промпт» button in the prompt library. Requires a backend (the button
- * is only shown when {@link isSummaryAvailable} is true).
+ * Generate a prompt instruction from its title and/or draft body using whichever
+ * text backend is configured (cloud / local runtime / custom endpoint). The title
+ * feeds the generation (it states the prompt's goal). Used by the «Сгенерировать
+ * промпт» button; requires a backend ({@link isSummaryAvailable}).
  */
-export async function improvePromptText(
+export async function generatePromptText(
   settings: AppSettings,
-  draft: string,
+  input: { title?: string; draft?: string },
 ): Promise<string> {
-  const trimmed = draft.trim();
-  if (!trimmed) {
+  const title = (input.title ?? "").trim();
+  const draft = (input.draft ?? "").trim();
+  if (!title && !draft) {
     throw new Error(tn("summarize.errEmptyPrompt"));
   }
   const backend = resolveSummaryBackend(settings);
   if (!backend) {
     throw new Error(tn("summarize.errNoModel"));
   }
-  const improved = await backend.run({
-    text: trimmed,
-    prompt: IMPROVE_PROMPT_INSTRUCTION,
+  const payload = [
+    title ? `Название промпта: ${title}` : null,
+    draft ? `Черновик промпта:\n${draft}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  const generated = await backend.run({
+    text: payload,
+    prompt: GENERATE_PROMPT_INSTRUCTION,
     temperature: 0.4,
   });
-  return improved.trim();
+  return generated.trim();
 }
 
 async function runMapReduce(

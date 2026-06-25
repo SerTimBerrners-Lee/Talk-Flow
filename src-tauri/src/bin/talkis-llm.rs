@@ -337,6 +337,7 @@ fn generate(
     let mut n_cur = batch.n_tokens();
     let limit = n_cur + max_tokens;
     let mut output = String::new();
+    let mut pending: Vec<u8> = Vec::new();
 
     while n_cur < limit {
         let token = sampler.sample(&ctx, batch.n_tokens() - 1);
@@ -346,8 +347,38 @@ fn generate(
             break;
         }
 
-        if let Ok(piece) = model.token_to_str(token, Special::Tokenize) {
-            output.push_str(&piece);
+        // Accumulate raw token bytes and emit only COMPLETE UTF-8 sequences. A
+        // single token can carry a partial multibyte char (Cyrillic spans token
+        // boundaries), so decoding tokens one-by-one yielded garbled glyphs.
+        if let Ok(bytes) = model.token_to_bytes(token, Special::Tokenize) {
+            pending.extend_from_slice(&bytes);
+            loop {
+                match std::str::from_utf8(&pending) {
+                    Ok(text) => {
+                        output.push_str(text);
+                        pending.clear();
+                        break;
+                    }
+                    Err(err) => {
+                        let valid = err.valid_up_to();
+                        if valid > 0 {
+                            output.push_str(
+                                std::str::from_utf8(&pending[..valid])
+                                    .expect("valid_up_to bytes are valid UTF-8"),
+                            );
+                            pending.drain(..valid);
+                        }
+                        match err.error_len() {
+                            // Genuinely invalid bytes — drop them so we don't stall.
+                            Some(bad) => {
+                                pending.drain(..bad.max(1));
+                            }
+                            // Just an incomplete tail — wait for the next token.
+                            None => break,
+                        }
+                    }
+                }
+            }
         }
 
         batch.clear();
@@ -357,6 +388,15 @@ fn generate(
         n_cur += 1;
         ctx.decode(&mut batch)
             .map_err(|err| format!("decode error: {}", err))?;
+    }
+
+    // Flush any complete trailing bytes (a dangling partial sequence is dropped).
+    match std::str::from_utf8(&pending) {
+        Ok(text) => output.push_str(text),
+        Err(err) => output.push_str(
+            std::str::from_utf8(&pending[..err.valid_up_to()])
+                .expect("valid_up_to bytes are valid UTF-8"),
+        ),
     }
 
     Ok(output)

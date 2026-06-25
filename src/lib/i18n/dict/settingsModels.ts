@@ -26,8 +26,8 @@ export const settingsModels = {
     en: "Choose a summary prompt. It is offered by default on the transcription result screen.",
   },
   "models.prompt.create": { ru: "Создать промпт", en: "Create prompt" },
-  "models.prompt.improve": { ru: "Улучшить промпт", en: "Improve prompt" },
-  "models.prompt.improving": { ru: "Улучшаю…", en: "Improving…" },
+  "models.prompt.improve": { ru: "Сгенерировать промпт", en: "Generate prompt" },
+  "models.prompt.improving": { ru: "Генерирую…", en: "Generating…" },
 
   // ── Text (summary) model card ──
   "models.textModel.title": { ru: "Текстовая модель", en: "Text model" },
