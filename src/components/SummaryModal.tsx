@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { Check, Clipboard, Pencil, Trash2 } from "lucide-react";
 
+import { SETTINGS_UPDATED_EVENT } from "../lib/hotkeyEvents";
 import {
   getSettings,
   listPromptsByKind,
@@ -65,6 +67,19 @@ export function SummaryModal({
       .catch(() => {});
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  // Live-refresh when prompts/settings change elsewhere (e.g. a new summary prompt
+  // is created in the «Стиль и промпты» tab) so the dropdown updates immediately.
+  useEffect(() => {
+    const unlistenPromise = listen(SETTINGS_UPDATED_EVENT, () => {
+      getSettings({ reload: true })
+        .then(setSettings)
+        .catch(() => {});
+    });
+    return () => {
+      void unlistenPromise.then((dispose) => dispose());
     };
   }, []);
 

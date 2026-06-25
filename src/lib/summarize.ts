@@ -137,6 +137,38 @@ function llmRunner(endpoint: string, model: string, apiKey: string): RunOnce {
 }
 
 /**
+ * Runner for the BUNDLED local runtime. The sidecar process dies when the app
+ * is closed, but `llmEndpoint` stays persisted — so a summary after restart hits
+ * a dead port ("error sending request"). We (re)start the runtime first via
+ * `start_local_llm` (idempotent: returns immediately with the live base URL if
+ * already running) and use whatever port it reports, since it can change.
+ */
+function localLlmRunner(
+  modelId: string,
+  fallbackEndpoint: string,
+  model: string,
+  apiKey: string,
+): RunOnce {
+  let baseUrl: string | null = null;
+  return async ({ text, prompt, temperature }) => {
+    if (!baseUrl) {
+      baseUrl = await invoke<string>("start_local_llm", { modelId });
+    }
+    const response = await invoke<ProcessTextResponse>("process_text", {
+      req: {
+        text,
+        prompt,
+        temperature: temperature ?? null,
+        endpoint: baseUrl || fallbackEndpoint || null,
+        model: model || null,
+        api_key: apiKey || null,
+      },
+    });
+    return response.result;
+  };
+}
+
+/**
  * Pick the summary backend from settings: Talkis Cloud subscription, a custom
  * OpenAI-compatible endpoint, or a local runtime (127.0.0.1). Returns null when
  * nothing is configured yet.
@@ -153,13 +185,16 @@ export function resolveSummaryBackend(
   const model = settings.llmModel?.trim() ?? "";
   const apiKey = (settings.llmApiKey?.trim() || settings.apiKey?.trim()) ?? "";
   const isLocal = /127\.0\.0\.1|localhost/i.test(endpoint);
+  // Only the BUNDLED runtime can be auto-(re)started; a user's own local server
+  // (Ollama/LM Studio) has no marker, so we just use its endpoint as-is.
+  const localModelId = settings.llmLocalModelId?.trim() ?? "";
 
   if (endpoint) {
-    return {
-      kind: isLocal ? "local" : "custom",
-      label: endpoint,
-      run: llmRunner(endpoint, model, apiKey),
-    };
+    const run =
+      isLocal && localModelId
+        ? localLlmRunner(localModelId, endpoint, model, apiKey)
+        : llmRunner(endpoint, model, apiKey);
+    return { kind: isLocal ? "local" : "custom", label: endpoint, run };
   }
 
   // Own OpenAI key without a custom endpoint.
@@ -178,6 +213,40 @@ export function resolveSummaryBackend(
  */
 export function isSummaryAvailable(settings: AppSettings): boolean {
   return resolveSummaryBackend(settings) !== null;
+}
+
+const IMPROVE_PROMPT_INSTRUCTION =
+  "Ты — опытный prompt-инженер. Ниже дан черновик инструкции (промпта), которую " +
+  "пользователь применяет к расшифровке разговора или текста, чтобы получить саммари " +
+  "или иную обработку. Улучши эту инструкцию: сделай её чёткой, конкретной и " +
+  "однозначной, сохрани исходный смысл и язык, добавь полезную структуру, если уместно. " +
+  "НЕ выполняй инструкцию и не обрабатывай никакой текст — верни ТОЛЬКО улучшенный текст " +
+  "промпта, без пояснений, кавычек и преамбул.";
+
+/**
+ * Rewrite a draft prompt into a cleaner instruction using whichever text backend
+ * is configured (cloud / local runtime / custom endpoint). Used by the
+ * «Улучшить промпт» button in the prompt library. Requires a backend (the button
+ * is only shown when {@link isSummaryAvailable} is true).
+ */
+export async function improvePromptText(
+  settings: AppSettings,
+  draft: string,
+): Promise<string> {
+  const trimmed = draft.trim();
+  if (!trimmed) {
+    throw new Error(tn("summarize.errEmptyPrompt"));
+  }
+  const backend = resolveSummaryBackend(settings);
+  if (!backend) {
+    throw new Error(tn("summarize.errNoModel"));
+  }
+  const improved = await backend.run({
+    text: trimmed,
+    prompt: IMPROVE_PROMPT_INSTRUCTION,
+    temperature: 0.4,
+  });
+  return improved.trim();
 }
 
 async function runMapReduce(

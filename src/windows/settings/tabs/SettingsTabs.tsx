@@ -13,6 +13,7 @@ import {
   Download,
   Gauge,
   HardDrive,
+  Loader2,
   LogOut,
   LucideIcon,
   MessageSquare,
@@ -42,6 +43,7 @@ import { CloudProfile, fetchCloudProfile, getAuthLoginUrl, cloudLogout, handleAu
 import { logInfo } from "../../../lib/logger";
 
 import { TRANSCRIPTION_STYLE_OPTIONS } from "../../../lib/transcriptionPrompts";
+import { isSummaryAvailable, improvePromptText } from "../../../lib/summarize";
 import { LocalLlmModels } from "../../../components/LocalLlmModels";
 import { SETTINGS_UPDATED_EVENT } from "../../../lib/hotkeyEvents";
 import { useI18n, type MsgKey } from "../../../lib/i18n";
@@ -489,10 +491,54 @@ interface OptionCardProps {
   active?: boolean;
   icon: React.ReactNode;
   title: string;
-  description: string;
+  description: React.ReactNode;
   badge?: string;
   onClick?: () => void;
   disabled?: boolean;
+}
+
+const CARD_TEXT_PREVIEW_LIMIT = 250;
+
+/**
+ * Long card text (e.g. a prompt body) shown truncated with a Раскрыть/Скрыть
+ * toggle — the same pattern as the history table. The toggle stops propagation so
+ * it doesn't also trigger the card's own onClick (which selects the prompt).
+ */
+function CollapsibleCardText({ text }: { text: string }) {
+  const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
+  const tooLong = text.length > CARD_TEXT_PREVIEW_LIMIT;
+  const visible =
+    tooLong && !expanded
+      ? `${text.slice(0, CARD_TEXT_PREVIEW_LIMIT).trimEnd()}...`
+      : text;
+  return (
+    <div style={{ display: "grid", gap: 3 }}>
+      <span style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{visible}</span>
+      {tooLong && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            setExpanded((v) => !v);
+          }}
+          style={{
+            justifySelf: "start",
+            padding: 0,
+            border: "none",
+            background: "transparent",
+            color: "var(--text-hi)",
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: "pointer",
+            fontFamily: "var(--font-main)",
+          }}
+        >
+          {expanded ? t("mainTab.collapse") : t("mainTab.expand")}
+        </button>
+      )}
+    </div>
+  );
 }
 
 function OptionCard({ active = false, icon, title, description, badge, onClick, disabled = false }: OptionCardProps) {
@@ -733,8 +779,37 @@ function PromptLibrary({
   const { t } = useI18n();
   const [editor, setEditor] = useState<PromptEditorState | null>(null);
   const [saving, setSaving] = useState(false);
+  const [improving, setImproving] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const promptFieldRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-grow the prompt textarea to fit its content up to a cap, then scroll.
+  const autoSizePromptField = (el: HTMLTextAreaElement | null): void => {
+    if (!el) return;
+    const MAX_HEIGHT = 440;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT)}px`;
+    el.style.overflowY = el.scrollHeight > MAX_HEIGHT ? "auto" : "hidden";
+  };
+  useEffect(() => {
+    autoSizePromptField(promptFieldRef.current);
+  }, [editor?.id, editor?.prompt]);
+
+  const canImprove = isSummaryAvailable(settings);
+  const handleImprove = async (): Promise<void> => {
+    if (!editor || !editor.prompt.trim() || improving) return;
+    setImproving(true);
+    setError(null);
+    try {
+      const improved = await improvePromptText(settings, editor.prompt);
+      setEditor((cur) => (cur ? { ...cur, prompt: improved } : cur));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setImproving(false);
+    }
+  };
 
   const summaryPrompts = listPromptsByKind(settings, "summary");
   const defaultId = settings.defaultSummaryPromptId;
@@ -806,13 +881,47 @@ function PromptLibrary({
           />
         </div>
         <div style={{ display: "grid", gap: 6 }}>
-          <div className="label">{t("models.prompt.promptLabel")}</div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+            <div className="label">{t("models.prompt.promptLabel")}</div>
+            {canImprove && (
+              <button
+                type="button"
+                onClick={() => void handleImprove()}
+                disabled={improving || !editor.prompt.trim()}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "5px 10px",
+                  borderRadius: 8,
+                  border: "1px solid var(--border)",
+                  background: "var(--control-bg)",
+                  color: "var(--text-hi)",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: improving || !editor.prompt.trim() ? "default" : "pointer",
+                  opacity: improving || !editor.prompt.trim() ? 0.6 : 1,
+                  fontFamily: "var(--font-main)",
+                }}
+              >
+                {improving ? (
+                  <Loader2 size={14} strokeWidth={2.2} style={{ animation: "spin 1s linear infinite" }} />
+                ) : (
+                  <Sparkles size={14} strokeWidth={2} />
+                )}
+                {improving ? t("models.prompt.improving") : t("models.prompt.improve")}
+              </button>
+            )}
+          </div>
           <textarea
+            ref={promptFieldRef}
             value={editor.prompt}
-            onChange={(e) => setEditor({ ...editor, prompt: e.target.value })}
+            onChange={(e) => {
+              setEditor({ ...editor, prompt: e.target.value });
+              autoSizePromptField(e.target);
+            }}
             placeholder={t("models.prompt.promptPlaceholder")}
-            rows={6}
-            style={{ ...PROMPT_FIELD_STYLE, resize: "vertical", minHeight: 120 }}
+            style={{ ...PROMPT_FIELD_STYLE, resize: "none", minHeight: 120, overflowY: "hidden" }}
           />
         </div>
         {error && (
@@ -879,7 +988,7 @@ function PromptLibrary({
             active={active}
             icon={<MessageSquare size={20} strokeWidth={active ? 2.4 : 1.8} />}
             title={preset.name}
-            description={preset.prompt}
+            description={<CollapsibleCardText text={preset.prompt} />}
             onClick={() => update({ defaultSummaryPromptId: preset.id })}
           />
         );
@@ -974,6 +1083,7 @@ function TextModelCard({
   update: (patch: Partial<AppSettings>) => void;
 }) {
   const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
   // The model name has a built-in default ("gpt-4o-mini"), so only the endpoint
   // or the text-model's own API key signal that the user actually set this up.
   const configured =
@@ -986,9 +1096,16 @@ function TextModelCard({
     fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
     fontSize: 12,
   };
+  // Editing a custom text model means it's no longer the bundled local runtime, so
+  // drop the marker that tells summary to auto-start the sidecar.
+  const editField = (patch: Partial<AppSettings>) => update({ ...patch, llmLocalModelId: "" });
   return (
     <div className="card" style={{ padding: 0, overflow: "hidden", background: "var(--surface)" }}>
-      <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", gap: 12 }}>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        style={{ width: "100%", border: "none", background: "transparent", padding: "12px 14px", display: "flex", alignItems: "center", gap: 12, cursor: "pointer", textAlign: "left", fontFamily: "var(--font-main)" }}
+      >
         <div style={{ width: 36, height: 36, borderRadius: 999, background: "var(--icon-soft-bg)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
           <Sparkles size={18} strokeWidth={1.9} color="var(--text-hi)" />
         </div>
@@ -1003,46 +1120,48 @@ function TextModelCard({
             {t("models.textModel.desc")}
           </div>
         </div>
-      </div>
+      </button>
 
-      <div style={{ borderTop: "1px solid var(--border-subtle)", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div className="label" style={{ width: 76, flexShrink: 0 }}>{t("models.field.apiKey")}</div>
-          <input
-            type="password"
-            value={settings.llmApiKey}
-            onChange={(e) => update({ llmApiKey: e.target.value })}
-            className="input"
-            placeholder={t("models.textModel.apiKeyPlaceholder")}
-            spellCheck={false}
-            style={FIELD_STYLE}
-          />
+      {expanded && (
+        <div style={{ borderTop: "1px solid var(--border-subtle)", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div className="label" style={{ width: 76, flexShrink: 0 }}>{t("models.field.apiKey")}</div>
+            <input
+              type="password"
+              value={settings.llmApiKey}
+              onChange={(e) => editField({ llmApiKey: e.target.value })}
+              className="input"
+              placeholder={t("models.textModel.apiKeyPlaceholder")}
+              spellCheck={false}
+              style={FIELD_STYLE}
+            />
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div className="label" style={{ width: 76, flexShrink: 0 }}>{t("models.field.model")}</div>
+            <input
+              type="text"
+              value={settings.llmModel}
+              onChange={(e) => editField({ llmModel: e.target.value })}
+              className="input"
+              placeholder="gpt-4o-mini"
+              spellCheck={false}
+              style={FIELD_STYLE}
+            />
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div className="label" style={{ width: 76, flexShrink: 0 }}>{t("models.field.host")}</div>
+            <input
+              type="url"
+              value={settings.llmEndpoint}
+              onChange={(e) => editField({ llmEndpoint: e.target.value })}
+              className="input"
+              placeholder="https://api.openai.com/v1 · http://127.0.0.1:2455/v1"
+              spellCheck={false}
+              style={FIELD_STYLE}
+            />
+          </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div className="label" style={{ width: 76, flexShrink: 0 }}>{t("models.field.model")}</div>
-          <input
-            type="text"
-            value={settings.llmModel}
-            onChange={(e) => update({ llmModel: e.target.value })}
-            className="input"
-            placeholder="gpt-4o-mini"
-            spellCheck={false}
-            style={FIELD_STYLE}
-          />
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div className="label" style={{ width: 76, flexShrink: 0 }}>{t("models.field.host")}</div>
-          <input
-            type="url"
-            value={settings.llmEndpoint}
-            onChange={(e) => update({ llmEndpoint: e.target.value })}
-            className="input"
-            placeholder="https://api.openai.com/v1 · http://127.0.0.1:2455/v1"
-            spellCheck={false}
-            style={FIELD_STYLE}
-          />
-        </div>
-      </div>
+      )}
     </div>
   );
 }

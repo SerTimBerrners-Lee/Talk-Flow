@@ -182,6 +182,11 @@ export interface AppSettings {
   whisperEndpoint: string;
   /** Custom LLM endpoint URL (leave empty for OpenAI) */
   llmEndpoint: string;
+  /** When non-empty, llmEndpoint points at the BUNDLED local runtime serving this
+   *  managed GGUF model id. Lets summary (re)start the sidecar before a request —
+   *  the process dies on app restart while the endpoint stays persisted. Empty for
+   *  a user's own local server (e.g. Ollama) or any non-local endpoint. */
+  llmLocalModelId: string;
   /** If true, user provides their own API key. If false, uses subscription */
   useOwnKey: boolean;
   /** Device auth token for Talkis Cloud */
@@ -505,6 +510,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   micId: "",
   whisperEndpoint: "",
   llmEndpoint: "",
+  llmLocalModelId: "",
   useOwnKey: true,
   deviceToken: "",
   fileSpeakerDiarization: false,
@@ -765,6 +771,8 @@ function normalizeSavedSettings(saved: unknown): Partial<AppSettings> {
       typeof raw.whisperEndpoint === "string" ? raw.whisperEndpoint : undefined,
     llmEndpoint:
       typeof raw.llmEndpoint === "string" ? raw.llmEndpoint : undefined,
+    llmLocalModelId:
+      typeof raw.llmLocalModelId === "string" ? raw.llmLocalModelId : undefined,
     useOwnKey: typeof raw.useOwnKey === "boolean" ? raw.useOwnKey : undefined,
     deviceToken:
       typeof raw.deviceToken === "string" ? raw.deviceToken : undefined,

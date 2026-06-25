@@ -61,6 +61,7 @@ export function LocalLlmModels({
   const [busy, setBusy] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const refresh = async (): Promise<void> => {
     try {
@@ -170,7 +171,9 @@ export function LocalLlmModels({
     setError(null);
     try {
       const baseUrl = await invoke<string>("start_local_llm", { modelId: model.id });
-      update({ llmEndpoint: baseUrl, llmModel: model.id });
+      // Mark this as the BUNDLED runtime so summary can auto-(re)start the sidecar
+      // after an app restart (the process dies but the endpoint stays persisted).
+      update({ llmEndpoint: baseUrl, llmModel: model.id, llmLocalModelId: model.id });
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -239,6 +242,9 @@ export function LocalLlmModels({
           const isBusy = busy === model.id;
           const isDeleting = deleting === model.id;
           const isActive = activeModelId === model.id && usingLocalEndpoint;
+          // Collapsed by default like the recognition cards; force-open while a
+          // download runs so its progress bar stays visible.
+          const open = expandedId === model.id || isDownloading;
 
           const statusLabel = isDeleting
             ? t("localLlm.status.deleting")
@@ -263,7 +269,11 @@ export function LocalLlmModels({
               className="card"
               style={{ padding: 0, overflow: "hidden", background: "var(--surface)" }}
             >
-              <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", gap: 12 }}>
+              <button
+                type="button"
+                onClick={() => setExpandedId(expandedId === model.id ? null : model.id)}
+                style={{ width: "100%", border: "none", background: "transparent", padding: "12px 14px", display: "flex", alignItems: "center", gap: 12, cursor: "pointer", textAlign: "left", fontFamily: "var(--font-main)" }}
+              >
                 <div
                   style={{
                     width: 36,
@@ -355,8 +365,9 @@ export function LocalLlmModels({
                     </div>
                   </div>
                 </div>
-              </div>
+              </button>
 
+              {open && (
               <div
                 style={{
                   borderTop: "1px solid var(--border-subtle)",
@@ -493,6 +504,7 @@ export function LocalLlmModels({
                   </div>
                 </div>
               </div>
+              )}
             </div>
           );
         })}
