@@ -682,6 +682,9 @@ function CloudSubscriptionAccountCard({
         </button>
       </div>
 
+      <div style={{ textAlign: "center", marginTop: 10, fontSize: 13, fontWeight: 700, color: "var(--accent)" }}>
+        {t("models.cta.freeTrial")}
+      </div>
       <button
         onClick={onActivate}
         style={{
@@ -690,7 +693,7 @@ function CloudSubscriptionAccountCard({
           justifyContent: "center",
           gap: 6,
           width: "100%",
-          margin: "10px 0 0",
+          margin: "8px 0 0",
           padding: "12px 14px",
           borderRadius: 8,
           background: "var(--accent)",
@@ -727,6 +730,9 @@ function SubscriptionGuestCard({ onActivate }: { onActivate: () => void }) {
         <li>{t("models.guest.benefit2")}</li>
         <li>{t("models.guest.benefit3")}</li>
       </ul>
+      <div style={{ fontSize: 14, fontWeight: 700, color: "var(--accent)", marginBottom: 10, textAlign: "center" }}>
+        {t("models.cta.freeTrial")}
+      </div>
       <button onClick={onActivate} style={{ width: "100%", padding: "12px", borderRadius: 10, background: "var(--accent)", color: "var(--accent-contrast)", border: "none", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", cursor: "pointer", transition: "opacity 0.15s", fontFamily: "var(--font-main)" }}>
         {t("models.cta.upgradePro")}
       </button>
@@ -2370,43 +2376,6 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
 
-        {/* ── Subscription banner OR active status ── */}
-        {hasActiveSubscription ? (
-          <div className="card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-              <div style={{ width: 42, height: 42, borderRadius: 999, background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <Crown size={20} strokeWidth={2.2} color="var(--accent-contrast)" />
-              </div>
-              <div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-hi)" }}>{t("models.subscription.active")}</div>
-                <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>
-                  {t("models.subscription.unlimitedUntil", { date: cloudProfile?.subscription.expiresAt ? new Date(cloudProfile.subscription.expiresAt).toLocaleDateString(lang === "ru" ? "ru-RU" : "en-US", { day: "numeric", month: "long" }) : "—" })}
-                </div>
-              </div>
-            </div>
-            <div style={{ width: 10, height: 10, borderRadius: 999, background: "var(--accent)", flexShrink: 0 }} />
-          </div>
-        ) : isAuthenticated ? (
-          <CloudSubscriptionAccountCard
-            profile={cloudProfile}
-            onActivate={handleActivateSubscription}
-            onLogout={() => {
-              void handleCloudLogout();
-            }}
-          />
-        ) : (
-          <SubscriptionGuestCard onActivate={handleActivateSubscription} />
-        )}
-
-        {/* ── Separator ── */}
-        {!hasActiveSubscription && !isCloudMode && (
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
-            <span className="label">{t("models.common.or")}</span>
-            <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
-          </div>
-        )}
-
         <>
           <div>
             <div style={{ fontSize: 17, fontWeight: 700, color: "var(--text-hi)", marginBottom: 4 }}>
@@ -2451,6 +2420,35 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
           </div>
 
           {isCloudView && (
+            <>
+              {/* Subscription / promo now lives in the Cloud section, above the cloud card */}
+              {hasActiveSubscription ? (
+                <div className="card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                    <div style={{ width: 42, height: 42, borderRadius: 999, background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <Crown size={20} strokeWidth={2.2} color="var(--accent-contrast)" />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-hi)" }}>{t("models.subscription.active")}</div>
+                      <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>
+                        {t("models.subscription.unlimitedUntil", { date: cloudProfile?.subscription.expiresAt ? new Date(cloudProfile.subscription.expiresAt).toLocaleDateString(lang === "ru" ? "ru-RU" : "en-US", { day: "numeric", month: "long" }) : "—" })}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ width: 10, height: 10, borderRadius: 999, background: "var(--accent)", flexShrink: 0 }} />
+                </div>
+              ) : isAuthenticated ? (
+                <CloudSubscriptionAccountCard
+                  profile={cloudProfile}
+                  onActivate={handleActivateSubscription}
+                  onLogout={() => {
+                    void handleCloudLogout();
+                  }}
+                />
+              ) : (
+                <SubscriptionGuestCard onActivate={handleActivateSubscription} />
+              )}
+
             <div className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div>
                 <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)", marginBottom: 4 }}>{t("models.mode.cloud")}</div>
@@ -2508,6 +2506,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                 ) : null}
               </div>
             </div>
+            </>
           )}
 
           {isApiMode && (

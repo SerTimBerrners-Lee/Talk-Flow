@@ -3,6 +3,7 @@ export const settingsModels = {
   // ── Account / subscription cards ──
   "models.account.logout": { ru: "Выйти", en: "Log out" },
   "models.cta.upgradePro": { ru: "Перейти на PRO", en: "Upgrade to PRO" },
+  "models.cta.freeTrial": { ru: "7 дней бесплатно", en: "7 days free" },
   "models.guest.title": { ru: "Подписка Talkis", en: "Talkis subscription" },
   "models.guest.benefit1": { ru: "• Безлимитное использование без ограничений", en: "• Unlimited use, no limits" },
   "models.guest.benefit2": { ru: "• Без VPN и Прокси", en: "• No VPN or proxy required" },
@@ -61,7 +62,7 @@ export const settingsModels = {
     en: "Cloud mode requires sign-in and an active subscription. After you log in, the banner and subscription status update automatically.",
   },
   "models.cloud.proReady": { ru: "PRO активен, облако готово к выбору", en: "PRO is active, the cloud is ready to select" },
-  "models.cloud.needPro": { ru: "Нужна активная подписка PRO", en: "An active PRO subscription is required" },
+  "models.cloud.needPro": { ru: "7 дней бесплатно — перейдите на PRO", en: "7 days free — upgrade to PRO" },
 
   // ── API adapters section ──
   "models.apiSection.title": { ru: "Доступные API-адаптеры", en: "Available API adapters" },
