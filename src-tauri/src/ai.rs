@@ -2164,7 +2164,60 @@ pub async fn install_stt_model(
         request = request.bearer_auth(whisper_key);
     }
 
-    let response = request.send().await.map_err(|err| {
+    // The Qwen/Parakeet model download runs inside the managed Python runtime via
+    // this one blocking POST, so the streaming cancel flag (which Whisper/LLM poll
+    // per chunk) has nothing to watch here — that's why "Отмена" did nothing for
+    // Qwen. Race the request against the cancel flag; on abort, kill the managed
+    // runtime (stops the in-flight huggingface download) and reset to "not downloaded".
+    let cancellable_engine_download =
+        managed_runtime_kind.is_some_and(|kind| kind != local_stt::LocalRuntimeKind::Whisper);
+    if cancellable_engine_download {
+        crate::download_cancel::clear(requested_model);
+    }
+    let send_result = if cancellable_engine_download {
+        let send = request.send();
+        tokio::pin!(send);
+        loop {
+            tokio::select! {
+                result = &mut send => break result,
+                _ = tokio::time::sleep(Duration::from_millis(400)) => {
+                    if crate::download_cancel::is_cancel_requested(requested_model) {
+                        if let Some(stop) = &local_progress_stop {
+                            stop.store(true, Ordering::Relaxed);
+                        }
+                        if let (Some(kind), Some(port)) =
+                            (managed_runtime_kind, port_from_url(&models_url))
+                        {
+                            if let Err(err) = local_stt::stop_managed_runtime(kind, port) {
+                                logger::log_error("STT_INSTALL", &err);
+                            }
+                        }
+                        crate::download_cancel::clear(requested_model);
+                        local_stt::emit_model_download_progress_message(
+                            &app,
+                            requested_model,
+                            "cancelled",
+                            0,
+                            None,
+                            crate::download_cancel::CANCELLED_MESSAGE,
+                        );
+                        logger::log_info(
+                            "STT_INSTALL",
+                            &format!(
+                                "User cancelled managed STT model download: {}",
+                                requested_model
+                            ),
+                        );
+                        return Err(crate::download_cancel::CANCELLED_MESSAGE.to_string());
+                    }
+                }
+            }
+        }
+    } else {
+        request.send().await
+    };
+
+    let response = send_result.map_err(|err| {
         if let Some(stop) = &local_progress_stop {
             stop.store(true, Ordering::Relaxed);
         }
@@ -2185,6 +2238,9 @@ pub async fn install_stt_model(
     })?;
     if let Some(stop) = &local_progress_stop {
         stop.store(true, Ordering::Relaxed);
+    }
+    if cancellable_engine_download {
+        crate::download_cancel::clear(requested_model);
     }
 
     let status = response.status();

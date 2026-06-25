@@ -19,6 +19,7 @@ import {
   Copy,
   HelpCircle,
   Loader2,
+  ListChecks,
   Pencil,
   RotateCcw,
   Square,
@@ -34,12 +35,16 @@ import {
   type ProcessingCancelRequestPayload,
   type WidgetRetryProcessingPayload,
 } from "../../../lib/hotkeyEvents";
+import { isSummaryAvailable } from "../../../lib/summarize";
 import { retryCallCaptureHistoryEntry } from "../../../lib/callCapture";
 import { retryFileHistoryEntry } from "../../../lib/fileTranscription";
 import { cancelProcessing } from "../../../lib/processingControl";
 import { logError } from "../../../lib/logger";
 import { TranscriptionStatsPanel } from "../../../components/TranscriptionStatsPanel";
+import { SummaryModal } from "../../../components/SummaryModal";
+import { RowActionsMenu, type RowActionItem } from "../../../components/RowActionsMenu";
 import { retryHistoryEntry } from "../../widget/services/transcriptionPipeline";
+import { useI18n, type TFunc, type UiLanguage, type MsgKey } from "../../../lib/i18n";
 
 interface MainTabProps {
   initialHistory?: HistoryEntry[];
@@ -55,11 +60,11 @@ type HistorySource = "voice" | "file" | "call";
 type HistoryFilter = "all" | HistorySource;
 
 const HISTORY_TEXT_PREVIEW_LIMIT = 250;
-const HISTORY_FILTER_OPTIONS: { id: HistoryFilter; label: string }[] = [
-  { id: "all", label: "Все" },
-  { id: "voice", label: "Голос" },
-  { id: "file", label: "Файл" },
-  { id: "call", label: "Созвон" },
+const HISTORY_FILTER_OPTIONS: { id: HistoryFilter; labelKey: MsgKey }[] = [
+  { id: "all", labelKey: "mainTab.filter.all" },
+  { id: "voice", labelKey: "mainTab.filter.voice" },
+  { id: "file", labelKey: "mainTab.filter.file" },
+  { id: "call", labelKey: "mainTab.filter.call" },
 ];
 
 function getHistorySource(entry: HistoryEntry): HistorySource {
@@ -70,10 +75,10 @@ function getHistorySource(entry: HistoryEntry): HistorySource {
   return "voice";
 }
 
-function sourceLabel(source: HistorySource): string {
-  if (source === "file") return "Файл";
-  if (source === "call") return "Созвон";
-  return "Голос";
+function sourceLabelKey(source: HistorySource): MsgKey {
+  if (source === "file") return "mainTab.source.file";
+  if (source === "call") return "mainTab.source.call";
+  return "mainTab.source.voice";
 }
 
 function formatTimestamp(seconds: number): string {
@@ -166,6 +171,7 @@ function ExpandableHistoryText({
   onSpeakerRename: (speakerId: string, label: string) => void;
   onToggle: () => void;
 }): ReactElement {
+  const { t } = useI18n();
   const speakerSegments = segments?.length ? segments : null;
   const textTooLong = text.length > HISTORY_TEXT_PREVIEW_LIMIT;
   const shouldCollapse = textTooLong || Boolean(speakerSegments);
@@ -204,7 +210,7 @@ function ExpandableHistoryText({
                     fontSize: 12,
                     fontWeight: 650,
                   }}
-                  aria-label={`Имя ${speaker.label}`}
+                  aria-label={t("mainTab.speakerNameAria", { name: speaker.label })}
                 />
               ))}
             </div>
@@ -231,14 +237,14 @@ function ExpandableHistoryText({
             justifySelf: "start",
           }}
         >
-          {expanded ? "Скрыть" : "Раскрыть"}
+          {expanded ? t("mainTab.collapse") : t("mainTab.expand")}
         </button>
       )}
     </div>
   );
 }
 
-function formatDayLabel(timestamp: string): string {
+function formatDayLabel(timestamp: string, t: TFunc, lang: UiLanguage): string {
   const entryDate = new Date(timestamp);
   const today = new Date();
   const startOfToday = new Date(
@@ -255,16 +261,17 @@ function formatDayLabel(timestamp: string): string {
     (startOfToday.getTime() - startOfEntryDay.getTime()) / 86400000,
   );
 
-  if (diffDays === 0) return "Сегодня";
-  if (diffDays === 1) return "Вчера";
+  if (diffDays === 0) return t("mainTab.day.today");
+  if (diffDays === 1) return t("mainTab.day.yesterday");
 
-  return entryDate.toLocaleDateString("ru-RU", {
+  return entryDate.toLocaleDateString(lang === "en" ? "en-US" : "ru-RU", {
     day: "numeric",
     month: "long",
     weekday: "long",
   });
 }
 export function MainTab({ initialHistory = [] }: MainTabProps) {
+  const { t, lang } = useI18n();
   const [history, setHistory] = useState<HistoryEntry[]>(initialHistory);
   const [copied, setCopied] = useState<string | null>(null);
   const [retryingId, setRetryingId] = useState<string | null>(null);
@@ -279,11 +286,14 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
   const [editingSpeakerEntryId, setEditingSpeakerEntryId] = useState<
     string | null
   >(null);
+  const [summaryEntry, setSummaryEntry] = useState<HistoryEntry | null>(null);
+  const [summaryAvailable, setSummaryAvailable] = useState(false);
 
   useEffect(() => {
     const syncHotkeyLabel = async (reload = false) => {
       const settings = await getSettings({ reload });
       setHotkeyLabel(formatHotkeyLabel(settings.hotkey || DEFAULT_HOTKEY));
+      setSummaryAvailable(isSummaryAvailable(settings));
     };
 
     const loadHistory = async (): Promise<void> => {
@@ -456,7 +466,7 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
       const message =
         error instanceof Error
           ? error.message
-          : "Не удалось повторно отправить запись.";
+          : t("mainTab.retryFailed");
 
       setHistory((current) =>
         current.map((item) =>
@@ -490,7 +500,7 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
           ? {
               ...item,
               status: "interrupted",
-              errorMessage: "Обработка остановлена. Можно запустить повторно.",
+              errorMessage: t("mainTab.processingStopped"),
             }
           : item,
       ),
@@ -515,7 +525,7 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
     const groups: HistoryGroup[] = [];
 
     for (const item of filteredHistory) {
-      const label = formatDayLabel(item.timestamp);
+      const label = formatDayLabel(item.timestamp, t, lang);
       const existing = groups[groups.length - 1];
 
       if (!existing || existing.label !== label) {
@@ -531,7 +541,7 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
     }
 
     return groups;
-  }, [filteredHistory]);
+  }, [filteredHistory, t, lang]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -558,14 +568,14 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
               <span
                 style={{ fontSize: 16, fontWeight: 700, color: "var(--text-hi)" }}
               >
-                Как начать запись
+                {t("mainTab.howToStart")}
               </span>
               <button
                 type="button"
                 onClick={() => setHintHelpOpen((value) => !value)}
                 aria-expanded={hintHelpOpen}
-                aria-label="Как это работает"
-                title="Как это работает"
+                aria-label={t("mainTab.howItWorks")}
+                title={t("mainTab.howItWorks")}
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
@@ -591,8 +601,7 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                   lineHeight: 1.7,
                 }}
               >
-                Удерживайте горячую клавишу, говорите и отпустите ее, когда
-                закончите. После обработки текст вставится автоматически.
+                {t("mainTab.howToStartHint")}
               </div>
             )}
           </div>
@@ -610,7 +619,7 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
             }}
           >
             <span style={{ color: "var(--text-low)", letterSpacing: "0.08em" }}>
-              Комбинация
+              {t("mainTab.combination")}
             </span>
             <span>{hotkeyLabel}</span>
           </div>
@@ -638,7 +647,7 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                 letterSpacing: "-0.03em",
               }}
             >
-              История записей
+              {t("mainTab.historyTitle")}
             </h2>
             <div
               style={{
@@ -648,8 +657,8 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
               }}
             >
               {history.length > 0
-                ? "Последние записи доступны для копирования и удаления."
-                : `Записей пока нет. Удерживайте ${hotkeyLabel} для записи.`}
+                ? t("mainTab.historyDescFilled")
+                : t("mainTab.historyDescEmpty", { hotkey: hotkeyLabel })}
             </div>
           </div>
 
@@ -662,12 +671,12 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
               style={{ minHeight: 34, padding: "0 12px" }}
               title={
                 isClearArmed
-                  ? "Нажмите еще раз, чтобы очистить всю историю"
-                  : "Очистить всю историю"
+                  ? t("mainTab.clearAllConfirmTitle")
+                  : t("mainTab.clearAllTitle")
               }
             >
               <Trash2 size={12} strokeWidth={2} />{" "}
-              {isClearArmed ? "Подтвердить" : "Очистить"}
+              {isClearArmed ? t("mainTab.confirm") : t("mainTab.clear")}
             </button>
           )}
         </div>
@@ -713,7 +722,7 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                       cursor: "pointer",
                     }}
                   >
-                    {option.label}
+                    {t(option.labelKey)}
                   </button>
                 );
               })}
@@ -754,7 +763,7 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                 </span>
               </div>
               <div className="label" style={{ marginBottom: 10 }}>
-                История пуста
+                {t("mainTab.emptyTitle")}
               </div>
               <p
                 style={{
@@ -764,7 +773,8 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                   lineHeight: 1.7,
                 }}
               >
-                Записей пока нет. Удерживайте <b>{hotkeyLabel}</b> для записи.
+                {t("mainTab.emptyHintBefore")} <b>{hotkeyLabel}</b>{" "}
+                {t("mainTab.emptyHintAfter")}
               </p>
             </div>
           ) : filteredHistory.length === 0 ? (
@@ -777,7 +787,7 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                 color: "var(--text-mid)",
               }}
             >
-              В этом фильтре записей пока нет.
+              {t("mainTab.filterEmpty")}
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -792,8 +802,8 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                   >
                     <thead>
                       <tr>
-                        <th style={{ width: 92 }}>Время</th>
-                        <th style={{ paddingLeft: 8 }}>Текст</th>
+                        <th style={{ width: 92 }}>{t("mainTab.colTime")}</th>
+                        <th style={{ paddingLeft: 8 }}>{t("mainTab.colText")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -846,8 +856,8 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                                     }}
                                   >
                                     {item.processingTime < 1000
-                                      ? `${item.processingTime}мс`
-                                      : `${(item.processingTime / 1000).toFixed(1)}с`}
+                                      ? t("mainTab.durationMs", { value: item.processingTime })
+                                      : t("mainTab.durationS", { value: (item.processingTime / 1000).toFixed(1) })}
                                   </span>
                                 )}
                                 {historyFilter === "all" && (
@@ -858,7 +868,7 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                                       letterSpacing: "0.02em",
                                     }}
                                   >
-                                    {sourceLabel(source)}
+                                    {t(sourceLabelKey(source))}
                                   </span>
                                 )}
                               </div>
@@ -903,7 +913,7 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                                         size={13}
                                         strokeWidth={2}
                                       />
-                                      <span>Идёт обработка…</span>
+                                      <span>{t("mainTab.processing")}</span>
                                     </div>
                                   ) : item.status === "failed" ||
                                     item.status === "interrupted" ? (
@@ -930,8 +940,8 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                                         />
                                         <span>
                                           {item.status === "interrupted"
-                                            ? "Обработка прервана"
-                                            : "Обработка не завершилась"}
+                                            ? t("mainTab.statusInterrupted")
+                                            : t("mainTab.statusFailed")}
                                         </span>
                                       </div>
                                       <div
@@ -943,7 +953,7 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                                         }}
                                       >
                                         {item.errorMessage ||
-                                          "Аудио сохранено локально. Можно отправить повторно."}
+                                          t("mainTab.audioSavedLocally")}
                                       </div>
                                     </>
                                   ) : (
@@ -989,7 +999,7 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                                         flexShrink: 0,
                                         borderRadius: 8,
                                       }}
-                                      title="Остановить обработку"
+                                      title={t("mainTab.stopProcessing")}
                                     >
                                       <Square
                                         size={11}
@@ -1018,7 +1028,7 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                                         flexShrink: 0,
                                         borderRadius: 8,
                                       }}
-                                      title="Обработать заново"
+                                      title={t("mainTab.retryProcess")}
                                     >
                                       {retryingId === item.id ? (
                                         <Loader2
@@ -1031,59 +1041,54 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                                       )}
                                     </button>
                                   ) : (
-                                    <button
-                                      onClick={() =>
-                                        copyText(item.id, item.cleaned)
-                                      }
-                                      className="btn"
-                                      style={{
-                                        width: 32,
-                                        minWidth: 32,
-                                        height: 32,
-                                        minHeight: 32,
-                                        padding: 0,
-                                        flexShrink: 0,
-                                        borderRadius: 8,
-                                      }}
-                                      title={
-                                        retrySucceededId === item.id
-                                          ? "Успешно"
-                                          : "Скопировать"
-                                      }
-                                    >
-                                      {copied === item.id ||
-                                      retrySucceededId === item.id ? (
-                                        <Check size={12} strokeWidth={2.5} />
-                                      ) : (
-                                        <Copy size={12} strokeWidth={2} />
-                                      )}
-                                    </button>
+                                    <RowActionsMenu
+                                      label={t("rowMenu.actions")}
+                                      items={[
+                                        (source === "file" ||
+                                          source === "call") && {
+                                          key: "edit",
+                                          label: t("rowMenu.edit"),
+                                          icon: (
+                                            <Pencil size={14} strokeWidth={2} />
+                                          ),
+                                          onSelect: () => editEntry(item),
+                                        },
+                                        {
+                                          key: "copy",
+                                          label:
+                                            copied === item.id ||
+                                            retrySucceededId === item.id
+                                              ? t("mainTab.success")
+                                              : t("rowMenu.copy"),
+                                          icon:
+                                            copied === item.id ||
+                                            retrySucceededId === item.id ? (
+                                              <Check
+                                                size={14}
+                                                strokeWidth={2.5}
+                                              />
+                                            ) : (
+                                              <Copy size={14} strokeWidth={2} />
+                                            ),
+                                          onSelect: () =>
+                                            copyText(item.id, item.cleaned),
+                                        },
+                                        {
+                                          key: "summarize",
+                                          label: t("rowMenu.summarize"),
+                                          icon: (
+                                            <ListChecks
+                                              size={14}
+                                              strokeWidth={2}
+                                            />
+                                          ),
+                                          disabled: !summaryAvailable,
+                                          hint: t("summary.unavailable.tooltip"),
+                                          onSelect: () => setSummaryEntry(item),
+                                        },
+                                      ].filter(Boolean) as RowActionItem[]}
+                                    />
                                   )}
-                                  {(!item.status ||
-                                    item.status === "completed") &&
-                                    (source === "file" ||
-                                      source === "call") && (
-                                      <button
-                                        onClick={() => editEntry(item)}
-                                        className="btn"
-                                        style={{
-                                          width: 32,
-                                          minWidth: 32,
-                                          height: 32,
-                                          minHeight: 32,
-                                          padding: 0,
-                                          flexShrink: 0,
-                                          borderRadius: 8,
-                                          background:
-                                            editingSpeakerEntryId === item.id
-                                              ? "var(--dropdown-active)"
-                                              : undefined,
-                                        }}
-                                        title="Редактировать"
-                                      >
-                                        <Pencil size={12} strokeWidth={2} />
-                                      </button>
-                                    )}
                                   {item.status !== "processing" && (
                                     <button
                                       onClick={() => deleteEntry(item.id)}
@@ -1097,7 +1102,7 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                                         flexShrink: 0,
                                         borderRadius: 8,
                                       }}
-                                      title="Удалить"
+                                      title={t("mainTab.delete")}
                                     >
                                       <Trash2 size={12} strokeWidth={2} />
                                     </button>
@@ -1116,6 +1121,17 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
           )}
         </div>
       </section>
+
+      {summaryEntry && (
+        <SummaryModal
+          entry={summaryEntry}
+          onClose={() => setSummaryEntry(null)}
+          onEntryChange={(updated) => {
+            setSummaryEntry(updated);
+            void emit(HISTORY_UPDATED_EVENT, updated);
+          }}
+        />
+      )}
     </div>
   );
 }

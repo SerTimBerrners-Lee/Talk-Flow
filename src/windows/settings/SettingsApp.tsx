@@ -46,6 +46,7 @@ import {
   subscribeToAppUpdateState,
   type AppUpdateState,
 } from "../../lib/updater";
+import { useI18n, type MsgKey } from "../../lib/i18n";
 
 type Tab = "main" | "file" | "interpreter" | "settings" | "model" | "style";
 
@@ -71,33 +72,33 @@ function resolveInitialTab(): Tab {
   return "main";
 }
 
-const TABS: { id: Tab; label: string; icon: LucideIcon; note: string }[] = [
-  { id: "main", label: "Главная", icon: Home, note: "История записей" },
+const TABS: { id: Tab; labelKey: MsgKey; icon: LucideIcon; note: string }[] = [
+  { id: "main", labelKey: "settingsApp.tab.main", icon: Home, note: "История записей" },
   {
     id: "file",
-    label: "Транскрибация",
+    labelKey: "settingsApp.tab.file",
     icon: FileAudio,
     note: "Транскрибация",
   },
   {
     id: "interpreter",
-    label: "Переводчик (бета)",
+    labelKey: "settingsApp.tab.interpreter",
     icon: Languages,
     note: "Realtime Interpreter beta",
   },
   {
     id: "settings",
-    label: "Настройки",
+    labelKey: "settingsApp.tab.settings",
     icon: Sliders,
     note: "Язык, микрофон и горячая клавиша",
   },
   {
     id: "model",
-    label: "Модели",
+    labelKey: "settingsApp.tab.model",
     icon: Cpu,
     note: "Ключи и подключение модели",
   },
-  { id: "style", label: "Стиль и Промпты", icon: Sparkles, note: "Стиль обработки и Промпты для summary" },
+  { id: "style", labelKey: "settingsApp.tab.style", icon: Sparkles, note: "Стиль обработки и Промпты для summary" },
 ];
 
 function TabButton({
@@ -109,6 +110,7 @@ function TabButton({
   isActive: boolean;
   onClick: () => void;
 }) {
+  const { t } = useI18n();
   const Icon = tab.icon;
 
   return (
@@ -118,7 +120,7 @@ function TabButton({
       style={{ width: "100%", textAlign: "left", font: "inherit" }}
     >
       <Icon size={18} strokeWidth={isActive ? 2.2 : 1.6} />
-      <span>{tab.label}</span>
+      <span>{t(tab.labelKey)}</span>
     </button>
   );
 }
@@ -175,6 +177,7 @@ function formatUpdateVersion(version: string): string {
 }
 
 function AppUpdateFooter(): ReactElement | null {
+  const { t } = useI18n();
   const [version, setVersion] = useState<string | null>(null);
   const [updateState, setUpdateState] = useState<AppUpdateState>({
     status: "idle",
@@ -277,8 +280,8 @@ function AppUpdateFooter(): ReactElement | null {
             )}
             <span>
               {installing
-                ? "Устанавливаем..."
-                : `Установить обновление ${updateVersion}`}
+                ? t("settingsApp.installing")
+                : t("settingsApp.installUpdate", { version: updateVersion })}
             </span>
           </button>
 
@@ -291,7 +294,7 @@ function AppUpdateFooter(): ReactElement | null {
                 textAlign: "center",
               }}
             >
-              Не удалось установить обновление
+              {t("settingsApp.updateFailed")}
             </div>
           )}
         </div>
@@ -309,8 +312,8 @@ function AppUpdateFooter(): ReactElement | null {
             void openUrl(GITHUB_REPO_URL);
           }
         }}
-        aria-label={`Версия приложения ${version}. Открыть проект на GitHub`}
-        title="Проект на GitHub"
+        aria-label={t("settingsApp.versionAria", { version })}
+        title={t("settingsApp.githubTitle")}
         style={{
           display: "flex",
           alignItems: "center",
@@ -337,6 +340,7 @@ function AppUpdateFooter(): ReactElement | null {
 }
 
 export function SettingsApp() {
+  const { t } = useI18n();
   const [activeTab, setActiveTab] = useState<Tab>(resolveInitialTab);
   const [focusedFileResultId, setFocusedFileResultId] = useState<string | null>(
     () => new URLSearchParams(window.location.search).get("resultId"),
@@ -388,9 +392,7 @@ export function SettingsApp() {
         );
         setInitialHistory([]);
         setShowPermissions(false);
-        setLoadError(
-          "Не удалось загрузить состояние приложения. Некоторые данные могут быть недоступны.",
-        );
+        setLoadError(t("settingsApp.loadError"));
       });
   }, []);
 
@@ -435,7 +437,7 @@ export function SettingsApp() {
       >
         <div className="card" style={{ width: 420, textAlign: "center" }}>
           <div style={{ fontSize: 14, color: "var(--text-mid)" }}>
-            Загружаем настройки…
+            {t("settingsApp.loading")}
           </div>
         </div>
       </div>

@@ -3,13 +3,14 @@ import { emit } from "@tauri-apps/api/event";
 import { addHistoryEntry, updateHistoryEntry, type HistoryEntry } from "./store";
 import { HISTORY_UPDATED_EVENT } from "./hotkeyEvents";
 import { logError, logInfo } from "./logger";
+import { tn } from "./i18n";
 
 // Cancellation registry for in-flight transcription jobs. Lives in the widget
 // process (where all transcription runs). The history table in the Settings
 // window triggers cancellation by emitting PROCESSING_CANCEL_REQUEST_EVENT,
 // which the widget forwards to cancelProcessing().
 
-const INTERRUPTED_MESSAGE = "Обработка остановлена. Можно запустить повторно.";
+const interruptedMessage = (): string => tn("processing.interrupted");
 
 interface ActiveProcessing {
   cancelled: boolean;
@@ -102,7 +103,7 @@ export async function cancelProcessing(entryId: string): Promise<boolean> {
 
   try {
     await persist(
-      { ...item.entry, status: "interrupted", errorMessage: INTERRUPTED_MESSAGE },
+      { ...item.entry, status: "interrupted", errorMessage: interruptedMessage() },
       "update",
     );
   } catch (error) {

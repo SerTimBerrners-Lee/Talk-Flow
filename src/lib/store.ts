@@ -4,6 +4,19 @@ import { load } from "@tauri-apps/plugin-store";
 import { DEFAULT_WIDGET_SCALE, normalizeWidgetScale } from "./widgetScale";
 import { recordTranscriptionStats } from "./stats";
 
+export interface SummaryEntry {
+  id: string;
+  /** ISO timestamp when this summary was generated. */
+  createdAt: string;
+  /** Generation time in milliseconds. */
+  durationMs: number;
+  /** Id of the summary prompt preset used. */
+  promptId: string;
+  /** Display name of the preset at generation time (so old summaries keep their label). */
+  promptName: string;
+  text: string;
+}
+
 export interface HistoryEntry {
   id: string;
   timestamp: string;
@@ -34,6 +47,8 @@ export interface HistoryEntry {
   speakers?: Speaker[];
   segments?: SpeakerTranscriptSegment[];
   translation?: RealtimeTranslationHistory;
+  /** Generated summaries for this record (newest first); persists across restarts. */
+  summaries?: SummaryEntry[];
 }
 
 export interface Speaker {
@@ -150,7 +165,10 @@ export interface AppSettings {
   /** Floating widget visual scale. 1 = 100%. */
   widgetScale: number;
   theme: ThemePreference;
+  /** Transcription/recognition language (not the UI language). */
   language: string;
+  /** UI/interface language. Undefined = auto-detect from OS on first run. */
+  uiLanguage?: "ru" | "en";
   doubleTapTimeout: number;
   style: "classic" | "business" | "tech";
   /** User-defined prompt presets (built-in presets are merged in at runtime). */
@@ -448,7 +466,7 @@ export const BUILTIN_PROMPTS: PromptPreset[] = [
     builtin: true,
     temperature: 0.3,
     prompt:
-      "Сделай структурированное саммари разговора на русском: основные темы, ключевые решения и важные детали. Используй маркированные списки. Не добавляй то, чего нет в тексте.",
+      "Сделай саммари разговора на русском в виде маркированного списка: каждый пункт — отдельный ключевой момент, факт или вывод. Будь лаконичен и не выдумывай того, чего нет в тексте.",
   },
   {
     id: "summary-actions",
@@ -720,6 +738,10 @@ function normalizeSavedSettings(saved: unknown): Partial<AppSettings> {
         : normalizeWidgetScale(raw.widgetScale),
     theme: parseTheme(raw.theme),
     language: typeof raw.language === "string" ? raw.language : undefined,
+    uiLanguage:
+      raw.uiLanguage === "en" || raw.uiLanguage === "ru"
+        ? raw.uiLanguage
+        : undefined,
     doubleTapTimeout:
       typeof raw.doubleTapTimeout === "number"
         ? raw.doubleTapTimeout
@@ -1026,6 +1048,63 @@ export async function updateHistoryEntry(entry: HistoryEntry): Promise<void> {
 export async function deleteHistoryEntry(id: string): Promise<void> {
   const history = await getHistory();
   await writeHistory(history.filter((e) => e.id !== id));
+}
+
+/** Prepend a generated summary to a history entry and persist. Returns the updated entry. */
+export async function addSummaryToEntry(
+  entryId: string,
+  summary: SummaryEntry,
+): Promise<HistoryEntry | null> {
+  const history = await getHistory();
+  let updatedEntry: HistoryEntry | null = null;
+  const updated = history.map((item) => {
+    if (item.id !== entryId) return item;
+    updatedEntry = { ...item, summaries: [summary, ...(item.summaries ?? [])] };
+    return updatedEntry;
+  });
+  if (updatedEntry) await writeHistory(updated);
+  return updatedEntry;
+}
+
+/** Replace the text of one summary on an entry (used by inline edit). */
+export async function updateSummaryInEntry(
+  entryId: string,
+  summaryId: string,
+  text: string,
+): Promise<HistoryEntry | null> {
+  const history = await getHistory();
+  let updatedEntry: HistoryEntry | null = null;
+  const updated = history.map((item) => {
+    if (item.id !== entryId) return item;
+    updatedEntry = {
+      ...item,
+      summaries: (item.summaries ?? []).map((s) =>
+        s.id === summaryId ? { ...s, text } : s,
+      ),
+    };
+    return updatedEntry;
+  });
+  if (updatedEntry) await writeHistory(updated);
+  return updatedEntry;
+}
+
+/** Remove one summary from an entry and persist. */
+export async function deleteSummaryFromEntry(
+  entryId: string,
+  summaryId: string,
+): Promise<HistoryEntry | null> {
+  const history = await getHistory();
+  let updatedEntry: HistoryEntry | null = null;
+  const updated = history.map((item) => {
+    if (item.id !== entryId) return item;
+    updatedEntry = {
+      ...item,
+      summaries: (item.summaries ?? []).filter((s) => s.id !== summaryId),
+    };
+    return updatedEntry;
+  });
+  if (updatedEntry) await writeHistory(updated);
+  return updatedEntry;
 }
 
 /**

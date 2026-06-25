@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 import { AppSettings, HistoryEntry } from "./store";
 import { processTextWithCloudPrompt } from "./cloudTextProcessing";
+import { tn } from "./i18n";
 
 /**
  * Long transcripts (videos / hour-long calls) don't fit a model's context, so
@@ -169,6 +170,16 @@ export function resolveSummaryBackend(
   return null;
 }
 
+/**
+ * True when summarization can run with the current settings — i.e. a text
+ * backend is resolvable (cloud sign-in, a custom API, or a local runtime).
+ * When false, summary triggers should be disabled and the user pointed at the
+ * «Models» tab to pick a text model.
+ */
+export function isSummaryAvailable(settings: AppSettings): boolean {
+  return resolveSummaryBackend(settings) !== null;
+}
+
 async function runMapReduce(
   text: string,
   instruction: string,
@@ -230,17 +241,15 @@ export async function summarizeTranscript({
   const trimmed = text.trim();
 
   if (!trimmed) {
-    throw new Error("Нет текста для обработки");
+    throw new Error(tn("summarize.errNoText"));
   }
   if (!instruction) {
-    throw new Error("Промпт пустой");
+    throw new Error(tn("summarize.errEmptyPrompt"));
   }
 
   const backend = resolveSummaryBackend(settings);
   if (!backend) {
-    throw new Error(
-      "Нет доступной модели для summary: войдите в Talkis Cloud или укажите текстовую модель во вкладке «Модели».",
-    );
+    throw new Error(tn("summarize.errNoModel"));
   }
 
   return runMapReduce(

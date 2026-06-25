@@ -12,6 +12,7 @@ import {
 } from "../lib/permissions";
 import { getSettings } from "../lib/store";
 import { logError } from "../lib/logger";
+import { useI18n } from "../lib/i18n";
 import { scaleWidgetDimension } from "../lib/widgetScale";
 import {
   CALL_STACK_WIDGET_HEIGHT,
@@ -35,6 +36,7 @@ function PermissionRow({
   onAction,
   helpText,
 }: PermissionRowProps) {
+  const { t } = useI18n();
   const isGranted = status === "granted";
   const isDenied = status === "denied";
   const isPrompting = status === "prompting";
@@ -94,10 +96,10 @@ function PermissionRow({
                 }}
               >
                 {isPrompting
-                  ? "Проверьте"
+                  ? t("permission.badge.check")
                   : isDenied
-                    ? "Нужно действие"
-                    : "Не выдано"}
+                    ? t("permission.badge.actionNeeded")
+                    : t("permission.badge.notGranted")}
               </span>
             )}
           </div>
@@ -124,7 +126,7 @@ function PermissionRow({
                 transition: "opacity 0.15s",
               }}
             >
-              {isPrompting ? "Проверить" : isDenied ? "Повторить" : "Разрешить"}
+              {isPrompting ? t("permission.action.check") : isDenied ? t("permission.action.retry") : t("permission.action.allow")}
             </button>
           )}
         </div>
@@ -180,23 +182,26 @@ function detectDesktopPlatform(): DesktopPlatform {
   return "unknown";
 }
 
-function microphoneHelpText(platform: DesktopPlatform): string {
+type TranslateFn = ReturnType<typeof useI18n>["t"];
+
+function microphoneHelpText(platform: DesktopPlatform, t: TranslateFn): string {
   if (platform === "macos") {
-    return "Если микрофон был отклонен, откройте Системные настройки -> Конфиденциальность -> Микрофон и включите Talkis.";
+    return t("permission.micHelp.macos");
   }
 
   if (platform === "windows") {
-    return "Если микрофон был отклонен, откройте Параметры -> Конфиденциальность и безопасность -> Микрофон и разрешите доступ для Talkis.";
+    return t("permission.micHelp.windows");
   }
 
   if (platform === "linux") {
-    return "Если микрофон недоступен, проверьте системные настройки звука и разрешения браузерного WebView для записи.";
+    return t("permission.micHelp.linux");
   }
 
-  return "Если микрофон был отклонен, откройте системные настройки приватности и разрешите доступ для Talkis.";
+  return t("permission.micHelp.default");
 }
 
 export function PermissionScreen({ onComplete }: PermissionScreenProps) {
+  const { t } = useI18n();
   const [micStatus, setMicStatus] = useState<PermissionStatus>("unknown");
   const [accStatus, setAccStatus] = useState<PermissionStatus>("unknown");
   const [systemAudioStatus, setSystemAudioStatus] =
@@ -358,17 +363,17 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
     ? false
     : Boolean(runtimeInfo?.shouldMoveToApplications);
   const pastePermissionTitle = requiresAccessibility
-    ? "Универсальный доступ"
-    : "Вставка текста";
+    ? t("permission.paste.titleAccessibility")
+    : t("permission.paste.titlePaste");
   const pastePermissionDescription = requiresAccessibility
-    ? "Нужен для глобальной горячей клавиши и вставки текста."
+    ? t("permission.paste.descAccessibility")
     : platform === "linux"
-      ? "Talkis использует буфер обмена и Ctrl+V. В некоторых Wayland/X11 окружениях автоматическая вставка может быть ограничена."
-      : "Talkis использует буфер обмена и Ctrl+V. Отдельное системное разрешение обычно не требуется.";
+      ? t("permission.paste.descLinux")
+      : t("permission.paste.descDefault");
   const pastePermissionHelpText = shouldShowInstallWarning
-    ? `Приложение запущено не из Applications: ${runtimeInfo?.bundlePath ?? "-"}`
+    ? t("permission.paste.helpNotInApplications", { path: runtimeInfo?.bundlePath ?? "-" })
     : platform === "linux"
-      ? "Если вставка не сработает, скопированный текст останется в буфере обмена и его можно вставить вручную."
+      ? t("permission.paste.helpLinux")
       : undefined;
   const canContinue =
     micStatus === "granted" &&
@@ -426,7 +431,7 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
                 color: "var(--text-hi)",
               }}
             >
-              Доступы для Talkis
+              {t("permission.header.title")}
             </h1>
             <p
               style={{
@@ -437,8 +442,7 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
                 lineHeight: 1.7,
               }}
             >
-              Осталось выдать системные разрешения для записи голоса, звука
-              созвона и работы горячей клавиши.
+              {t("permission.header.subtitle")}
             </p>
           </div>
 
@@ -472,7 +476,7 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
                       color: "var(--danger)",
                     }}
                   >
-                    Переместите приложение в Applications
+                    {t("permission.installWarning.title")}
                   </div>
                   <div
                     style={{
@@ -481,8 +485,7 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
                       lineHeight: 1.6,
                     }}
                   >
-                    Текущая сборка запущена из временного места. Переместите
-                    Talkis в Applications и откройте оттуда.
+                    {t("permission.installWarning.desc")}
                   </div>
                 </div>
               </div>
@@ -490,8 +493,8 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
 
             <PermissionRow
               icon={<Mic size={16} strokeWidth={1.8} />}
-              title="Микрофон"
-              description="Нужен для записи голоса перед отправкой на распознавание."
+              title={t("permission.mic.title")}
+              description={t("permission.mic.desc")}
               status={micStatus}
               onAction={handleMicRequest}
             />
@@ -499,11 +502,11 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
             {requiresSystemAudio && (
               <PermissionRow
                 icon={<Volume2 size={16} strokeWidth={1.8} />}
-                title="Звук системы"
-                description="Нужен, чтобы слушать звук созвона вместе с микрофоном."
+                title={t("permission.systemAudio.title")}
+                description={t("permission.systemAudio.desc")}
                 status={systemAudioStatus}
                 onAction={handleSystemAudioRequest}
-                helpText="После нажатия macOS может попросить разрешить Talkis запись системного аудио."
+                helpText={t("permission.systemAudio.help")}
               />
             )}
 
@@ -561,12 +564,12 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
                 }}
               >
                 {micStatus === "denied"
-                  ? microphoneHelpText(platform)
+                  ? microphoneHelpText(platform, t)
                   : systemAudioStatus === "denied"
-                    ? "Если доступ был отклонен, откройте Системные настройки -> Конфиденциальность и безопасность -> Запись экрана и системного аудио и включите Talkis."
+                    ? t("permission.hint.systemAudioDenied")
                     : shouldShowInstallWarning
-                      ? "После перемещения приложения в Applications откройте его заново."
-                      : "macOS применяет доступ не мгновенно. После изменения настройки вернитесь в приложение."}
+                      ? t("permission.hint.reopenAfterMove")
+                      : t("permission.hint.macosDelay")}
               </div>
             </div>
           )}
@@ -588,14 +591,14 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
               }}
             >
               {shouldShowInstallWarning
-                ? "Сначала запустите из Applications."
+                ? t("permission.footer.launchFromApplications")
                 : canContinue
-                  ? "Все доступы выданы."
+                  ? t("permission.footer.allGranted")
                   : requiresSystemAudio
-                    ? "Выдайте разрешения для продолжения."
+                    ? t("permission.footer.grantToContinue")
                     : requiresAccessibility
-                      ? "Выдайте оба разрешения для продолжения."
-                      : "Разрешите микрофон для продолжения."}
+                      ? t("permission.footer.grantBothToContinue")
+                      : t("permission.footer.grantMicToContinue")}
             </div>
             <button
               onClick={handleContinue}
@@ -620,10 +623,10 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
               }}
             >
               {canCompleteOnboarding
-                ? "Продолжить"
+                ? t("permission.button.continue")
                 : shouldShowInstallWarning
                   ? "Applications"
-                  : "Проверить"}
+                  : t("permission.button.check")}
             </button>
           </div>
         </div>

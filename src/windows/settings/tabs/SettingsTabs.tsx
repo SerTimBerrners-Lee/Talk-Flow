@@ -44,6 +44,7 @@ import { logInfo } from "../../../lib/logger";
 import { TRANSCRIPTION_STYLE_OPTIONS } from "../../../lib/transcriptionPrompts";
 import { LocalLlmModels } from "../../../components/LocalLlmModels";
 import { SETTINGS_UPDATED_EVENT } from "../../../lib/hotkeyEvents";
+import { useI18n, type MsgKey } from "../../../lib/i18n";
 import assemblyAiAvatar from "../../../assets/adapters/assemblyai.png";
 import cartesiaAvatar from "../../../assets/adapters/cartesia.png";
 import deepgramAvatar from "../../../assets/adapters/deepgram.jpeg";
@@ -454,6 +455,36 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
   },
 ];
 
+// Translation keys for the per-adapter / per-model descriptions. The original
+// Russian text lives in the i18n dictionary fragment (settingsModels); these maps
+// keep the keys statically typed so they satisfy the MsgKey union.
+const API_ADAPTER_DESCRIPTION_KEYS: Record<ApiAdapterId, MsgKey> = {
+  openai: "models.adapter.openai.description",
+  deepgram: "models.adapter.deepgram.description",
+  cartesia: "models.adapter.cartesia.description",
+  mistral: "models.adapter.mistral.description",
+  elevenlabs: "models.adapter.elevenlabs.description",
+  fireworks: "models.adapter.fireworks.description",
+  groq: "models.adapter.groq.description",
+  assemblyai: "models.adapter.assemblyai.description",
+  volcengine: "models.adapter.volcengine.description",
+  xai: "models.adapter.xai.description",
+};
+
+const LOCAL_MODEL_DESCRIPTION_KEYS: Record<string, MsgKey> = {
+  "whisper-large-v3-turbo": "models.local.whisper-large-v3-turbo.description",
+  "whisper-large-v3-turbo-quantized": "models.local.whisper-large-v3-turbo-quantized.description",
+  "whisper-small": "models.local.whisper-small.description",
+  "whisper-large-v3": "models.local.whisper-large-v3.description",
+  "whisper-large-v2": "models.local.whisper-large-v2.description",
+  "whisper-medium": "models.local.whisper-medium.description",
+  "whisper-base": "models.local.whisper-base.description",
+  "whisper-tiny": "models.local.whisper-tiny.description",
+  "parakeet-tdt-06b-v3": "models.local.parakeet-tdt-06b-v3.description",
+  "parakeet-tdt-06b-v2": "models.local.parakeet-tdt-06b-v2.description",
+  "qwen3-asr-06b": "models.local.qwen3-asr-06b.description",
+};
+
 interface OptionCardProps {
   active?: boolean;
   icon: React.ReactNode;
@@ -530,6 +561,7 @@ function CloudSubscriptionAccountCard({
   onActivate: () => void;
   onLogout: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <div className="card" style={{ padding: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "2px 2px 4px" }}>
@@ -598,7 +630,7 @@ function CloudSubscriptionAccountCard({
             justifyContent: "center",
             transition: "color 0.15s, background 0.15s",
           }}
-          title="Выйти"
+          title={t("models.account.logout")}
         >
           <LogOut size={16} strokeWidth={1.8} />
         </button>
@@ -630,26 +662,27 @@ function CloudSubscriptionAccountCard({
         }}
       >
         <Crown size={13} strokeWidth={2} color="var(--accent-contrast)" />
-        <span style={{ display: "flex", alignItems: "center", lineHeight: 1, whiteSpace: "nowrap" }}>Перейти на PRO</span>
+        <span style={{ display: "flex", alignItems: "center", lineHeight: 1, whiteSpace: "nowrap" }}>{t("models.cta.upgradePro")}</span>
       </button>
     </div>
   );
 }
 
 function SubscriptionGuestCard({ onActivate }: { onActivate: () => void }) {
+  const { t } = useI18n();
   return (
     <div className="card" style={{ padding: "22px 20px", borderRadius: 10, background: "var(--control-muted)", color: "var(--text-hi)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
         <Crown size={16} strokeWidth={2.2} />
-        <span style={{ fontWeight: 700, fontSize: 14, letterSpacing: "-0.02em" }}>Подписка Talkis</span>
+        <span style={{ fontWeight: 700, fontSize: 14, letterSpacing: "-0.02em" }}>{t("models.guest.title")}</span>
       </div>
       <ul style={{ listStyle: "none", padding: 0, margin: "0 0 14px", fontSize: 12, lineHeight: 2, opacity: 0.85 }}>
-        <li>• Безлимитное использование без ограничений</li>
-        <li>• Без VPN и Прокси</li>
-        <li>• Синхронизация со всеми устройствами</li>
+        <li>{t("models.guest.benefit1")}</li>
+        <li>{t("models.guest.benefit2")}</li>
+        <li>{t("models.guest.benefit3")}</li>
       </ul>
       <button onClick={onActivate} style={{ width: "100%", padding: "12px", borderRadius: 10, background: "var(--accent)", color: "var(--accent-contrast)", border: "none", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", cursor: "pointer", transition: "opacity 0.15s", fontFamily: "var(--font-main)" }}>
-        Перейти на PRO
+        {t("models.cta.upgradePro")}
       </button>
     </div>
   );
@@ -697,6 +730,7 @@ function PromptLibrary({
   onReload: () => Promise<unknown>;
   update: (patch: Partial<AppSettings>) => void;
 }) {
+  const { t } = useI18n();
   const [editor, setEditor] = useState<PromptEditorState | null>(null);
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -762,21 +796,21 @@ function PromptLibrary({
     return (
       <div className="card" style={{ padding: 16, display: "grid", gap: 12 }}>
         <div style={{ display: "grid", gap: 6 }}>
-          <div className="label">Название</div>
+          <div className="label">{t("models.prompt.nameLabel")}</div>
           <input
             value={editor.name}
             onChange={(e) => setEditor({ ...editor, name: e.target.value })}
-            placeholder="Например: Протокол встречи"
+            placeholder={t("models.prompt.namePlaceholder")}
             maxLength={80}
             style={PROMPT_FIELD_STYLE}
           />
         </div>
         <div style={{ display: "grid", gap: 6 }}>
-          <div className="label">Промпт</div>
+          <div className="label">{t("models.prompt.promptLabel")}</div>
           <textarea
             value={editor.prompt}
             onChange={(e) => setEditor({ ...editor, prompt: e.target.value })}
-            placeholder="Опиши, какое summary нужно сделать по тексту разговора"
+            placeholder={t("models.prompt.promptPlaceholder")}
             rows={6}
             style={{ ...PROMPT_FIELD_STYLE, resize: "vertical", minHeight: 120 }}
           />
@@ -805,7 +839,7 @@ function PromptLibrary({
               fontFamily: "var(--font-main)",
             }}
           >
-            Отмена
+            {t("models.common.cancel")}
           </button>
           <button
             onClick={() => void handleSave()}
@@ -823,7 +857,7 @@ function PromptLibrary({
               fontFamily: "var(--font-main)",
             }}
           >
-            {saving ? "Сохраняем" : "Сохранить"}
+            {saving ? t("models.prompt.saving") : t("models.prompt.save")}
           </button>
         </div>
       </div>
@@ -833,8 +867,7 @@ function PromptLibrary({
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>
-        Выберите промпт для summary. Он предлагается по умолчанию на экране
-        результата транскрибации.
+        {t("models.prompt.libraryHint")}
       </div>
 
       {summaryPrompts.map((preset) => {
@@ -880,7 +913,7 @@ function PromptLibrary({
           }}
         >
           <Plus size={16} strokeWidth={2} />
-          Создать промпт
+          {t("models.prompt.create")}
         </button>
 
         {selectedIsCustom && (
@@ -903,7 +936,7 @@ function PromptLibrary({
               }}
             >
               <Pencil size={15} strokeWidth={2} />
-              Изменить
+              {t("models.common.edit")}
             </button>
             <button
               onClick={() => void handleDeleteSelected()}
@@ -924,7 +957,7 @@ function PromptLibrary({
               }}
             >
               <Trash2 size={15} strokeWidth={2} />
-              Удалить
+              {t("models.common.delete")}
             </button>
           </>
         )}
@@ -940,54 +973,82 @@ function TextModelCard({
   settings: AppSettings;
   update: (patch: Partial<AppSettings>) => void;
 }) {
+  const { t } = useI18n();
+  // The model name has a built-in default ("gpt-4o-mini"), so only the endpoint
+  // or the text-model's own API key signal that the user actually set this up.
+  const configured =
+    Boolean((settings.llmEndpoint || "").trim()) || Boolean((settings.llmApiKey || "").trim());
+  const FIELD_STYLE: CSSProperties = {
+    flex: 1,
+    minWidth: 0,
+    height: 36,
+    padding: "8px 10px",
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+    fontSize: 12,
+  };
   return (
-    <div className="card" style={{ padding: 16, display: "grid", gap: 12 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <Sparkles size={16} strokeWidth={1.9} />
-        <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)" }}>
-          Текстовая модель (для summary)
+    <div className="card" style={{ padding: 0, overflow: "hidden", background: "var(--surface)" }}>
+      <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ width: 36, height: 36, borderRadius: 999, background: "var(--icon-soft-bg)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <Sparkles size={18} strokeWidth={1.9} color="var(--text-hi)" />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 3 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)" }}>{t("models.textModel.title")}</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: configured ? "var(--success-bright)" : "var(--text-low)", padding: "5px 9px", borderRadius: 999, background: "var(--control-muted)", whiteSpace: "nowrap" }}>
+              {configured ? t("models.textModel.statusSet") : t("models.textModel.statusUnset")}
+            </div>
+          </div>
+          <div style={{ fontSize: 12, lineHeight: 1.45, color: "var(--text-mid)" }}>
+            {t("models.textModel.desc")}
+          </div>
         </div>
       </div>
-      <div style={{ fontSize: 12.5, color: "var(--text-mid)", lineHeight: 1.6 }}>
-        OpenAI-совместимый endpoint для summary и обработки текста. Оставьте
-        endpoint пустым, чтобы использовать OpenAI с вашим API-ключом.
-      </div>
-      <div style={{ display: "grid", gap: 6 }}>
-        <div className="label">Endpoint</div>
-        <input
-          value={settings.llmEndpoint}
-          onChange={(e) => update({ llmEndpoint: e.target.value })}
-          placeholder="https://api.openai.com/v1  ·  http://127.0.0.1:2455/v1"
-          spellCheck={false}
-          style={PROMPT_FIELD_STYLE}
-        />
-      </div>
-      <div style={{ display: "grid", gap: 6 }}>
-        <div className="label">Модель</div>
-        <input
-          value={settings.llmModel}
-          onChange={(e) => update({ llmModel: e.target.value })}
-          placeholder="gpt-4o-mini"
-          spellCheck={false}
-          style={PROMPT_FIELD_STYLE}
-        />
-      </div>
-      <div style={{ display: "grid", gap: 6 }}>
-        <div className="label">API-ключ</div>
-        <input
-          type="password"
-          value={settings.llmApiKey}
-          onChange={(e) => update({ llmApiKey: e.target.value })}
-          placeholder="Необязательно для локального endpoint"
-          spellCheck={false}
-          style={PROMPT_FIELD_STYLE}
-        />
+
+      <div style={{ borderTop: "1px solid var(--border-subtle)", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div className="label" style={{ width: 76, flexShrink: 0 }}>{t("models.field.apiKey")}</div>
+          <input
+            type="password"
+            value={settings.llmApiKey}
+            onChange={(e) => update({ llmApiKey: e.target.value })}
+            className="input"
+            placeholder={t("models.textModel.apiKeyPlaceholder")}
+            spellCheck={false}
+            style={FIELD_STYLE}
+          />
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div className="label" style={{ width: 76, flexShrink: 0 }}>{t("models.field.model")}</div>
+          <input
+            type="text"
+            value={settings.llmModel}
+            onChange={(e) => update({ llmModel: e.target.value })}
+            className="input"
+            placeholder="gpt-4o-mini"
+            spellCheck={false}
+            style={FIELD_STYLE}
+          />
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div className="label" style={{ width: 76, flexShrink: 0 }}>{t("models.field.host")}</div>
+          <input
+            type="url"
+            value={settings.llmEndpoint}
+            onChange={(e) => update({ llmEndpoint: e.target.value })}
+            className="input"
+            placeholder="https://api.openai.com/v1 · http://127.0.0.1:2455/v1"
+            spellCheck={false}
+            style={FIELD_STYLE}
+          />
+        </div>
       </div>
     </div>
   );
 }
 
 export function SettingsTabs({ type }: SettingsTabsProps) {
+  const { t, lang } = useI18n();
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [promptPreview, setPromptPreview] = useState<PromptPreview | null>(null);
   const [promptPreviewError, setPromptPreviewError] = useState<string | null>(null);
@@ -999,6 +1060,9 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
   const [modelModeView, setModelModeView] = useState<ModelMode | null>(null);
   const [styleTabView, setStyleTabView] = useState<"style" | "prompts">("style");
   const [localModelKind, setLocalModelKind] = useState<"transcription" | "text">(
+    "transcription",
+  );
+  const [apiModelKind, setApiModelKind] = useState<"transcription" | "text">(
     "transcription",
   );
   const [expandedApiAdapter, setExpandedApiAdapter] = useState<ApiAdapterId | null>(null);
@@ -1307,8 +1371,8 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
         ? Math.max(0, Math.min(100, event.payload.percent))
         : undefined;
       const message = event.payload.message || (progress !== undefined
-        ? `Скачиваем модель: ${progress}%`
-        : "Скачиваем модель.");
+        ? t("models.download.progress", { percent: progress })
+        : t("models.download.inProgress"));
 
       setLocalModelActionStates((prev) => {
         const modelOption = modelOptions.find((model) => prev[model.id]?.status === "installing")
@@ -1320,7 +1384,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
           [modelOption.id]: {
             ...(prev[modelOption.id] || { status: "installing", message }),
             status: event.payload.status === "downloaded" ? "success" : "installing",
-            message: event.payload.status === "downloaded" ? (event.payload.message || "Модель скачана.") : message,
+            message: event.payload.status === "downloaded" ? (event.payload.message || t("models.download.done")) : message,
             progress: event.payload.status === "downloaded" ? 100 : progress,
             downloadedBytes: event.payload.downloaded_bytes,
             totalBytes: event.payload.total_bytes ?? undefined,
@@ -1362,6 +1426,13 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
     const isLocalMode = visibleModelMode === "local";
     const isCloudView = visibleModelMode === "cloud";
     const selectedApiAdapterId = (settings.selectedApiAdapter || "openai") as ApiAdapterId;
+    // In Local mode a local text (LLM) model is "selected" once llmEndpoint points
+    // at a local runtime. Without it, transcription works but summarization can't.
+    const localTextModelSelected = /127\.0\.0\.1|localhost/i.test(settings.llmEndpoint || "");
+    // In API mode the text model is "set up" once its own endpoint or API key is
+    // filled. The model name has a built-in default ("gpt-4o-mini"), so it can't
+    // signal configuration on its own.
+    const apiTextModelConfigured = Boolean((settings.llmEndpoint || "").trim()) || Boolean((settings.llmApiKey || "").trim());
     const localSttTargetModel = (settings.whisperModel || LOCAL_STT_PRESET_MODEL).trim() || LOCAL_STT_PRESET_MODEL;
     const localInstalledModelSet = new Set(localInstalledModels);
     const localModelsDir = (settings.localModelsDir || "").trim();
@@ -1372,7 +1443,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
     }> = [
       {
         id: "cloud",
-        label: "Облако",
+        label: t("models.mode.cloud"),
         Icon: Cloud,
       },
       {
@@ -1382,7 +1453,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
       },
       {
         id: "local",
-        label: "Локально",
+        label: t("models.mode.local"),
         Icon: Server,
       },
     ];
@@ -1512,27 +1583,27 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
           ? "success"
           : testStatus as AdapterTestStatus;
         const label = isSelected
-          ? "Выбран"
+          ? t("models.adapterStatus.selected")
           : !apiKey.trim()
-          ? "Нужен API-ключ"
+          ? t("models.adapterStatus.needApiKey")
           : effectiveStatus === "success"
-            ? "Готов"
+            ? t("models.adapterStatus.ready")
             : effectiveStatus === "error"
-              ? "Ошибка"
+              ? t("models.adapterStatus.error")
               : effectiveStatus === "testing"
-                ? "Проверяем"
-                : "Готов к проверке";
+                ? t("models.adapterStatus.testing")
+                : t("models.adapterStatus.readyToTest");
         const connectionLabel = !hasCredentials
-          ? "API-ключ не указан"
+          ? t("models.connection.noApiKey")
           : isSelected
-            ? "Используется для распознавания"
+            ? t("models.connection.usedForRecognition")
           : effectiveStatus === "success"
-            ? "Соединение работает"
+            ? t("models.connection.working")
             : effectiveStatus === "error"
-              ? "Ошибка соединения"
+              ? t("models.connection.error")
               : effectiveStatus === "testing"
-                ? "Проверяем соединение..."
-                : "Соединение не проверено";
+                ? t("models.connection.testing")
+                : t("models.connection.notTested");
         const color = isSelected || effectiveStatus === "success"
           ? "var(--success-bright)"
           : effectiveStatus === "error"
@@ -1541,7 +1612,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
 
         return {
           label,
-          message: adapterState?.message || testMessage || (persistedStatus === "verified" ? "Соединение проверено и сохранено." : null),
+          message: adapterState?.message || testMessage || (persistedStatus === "verified" ? t("models.connection.verifiedSaved") : null),
           status: isSelected ? "success" as AdapterTestStatus : effectiveStatus,
           color,
           connectionLabel,
@@ -1557,21 +1628,21 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
           ? "success"
           : adapterState?.status || "idle";
       const label = isSelected
-        ? "Выбран"
+        ? t("models.adapterStatus.selected")
         : effectiveStatus === "success"
-        ? "Готов"
+        ? t("models.adapterStatus.ready")
         : !apiKey.trim()
-          ? "Нужен API-ключ"
+          ? t("models.adapterStatus.needApiKey")
           : !model.trim()
-            ? "Нужна модель"
-            : "Готов к выбору";
+            ? t("models.adapterStatus.needModel")
+            : t("models.adapterStatus.readyToSelect");
 
       return {
         label,
-        message: adapterState?.message || (persistedStatus ? `${adapter.name}: ключ и модель сохранены.` : null),
+        message: adapterState?.message || (persistedStatus ? t("models.connection.keyModelSavedNamed", { name: adapter.name }) : null),
         status: effectiveStatus,
         color: isSelected || effectiveStatus === "success" ? "var(--success-bright)" : effectiveStatus === "error" ? "var(--error-bright)" : hasCredentials ? "var(--text-hi)" : "var(--text-low)",
-        connectionLabel: isSelected ? "Используется для распознавания" : effectiveStatus === "success" ? "Ключ и модель сохранены" : hasCredentials ? "Готов к выбору" : "Заполните ключ и модель",
+        connectionLabel: isSelected ? t("models.connection.usedForRecognition") : effectiveStatus === "success" ? t("models.connection.keyModelSaved") : hasCredentials ? t("models.connection.readyToSelect") : t("models.connection.fillKeyModel"),
         isSelected,
       };
     };
@@ -1581,7 +1652,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
       if (!values.apiKey.trim() || !values.model.trim()) {
         setApiAdapterTestStates((prev) => ({
           ...prev,
-          [adapter.id]: { status: "error", message: "Укажите API-ключ и название модели перед проверкой." },
+          [adapter.id]: { status: "error", message: t("models.test.needKeyAndModel") },
         }));
         return;
       }
@@ -1589,7 +1660,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
       if (adapter.testable) {
         setApiAdapterTestStates((prev) => ({
           ...prev,
-          [adapter.id]: { status: "testing", message: "Проверяем соединение..." },
+          [adapter.id]: { status: "testing", message: t("models.connection.testing") },
         }));
 
         try {
@@ -1624,7 +1695,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
           ...prev,
           [adapter.id]: {
             status: "success",
-            message: `${adapter.name}: ключ и модель сохранены. Реальная проверка соединения будет доступна после подключения backend-адаптера.`,
+            message: t("models.test.savedPendingBackend", { name: adapter.name }),
           },
         }));
       }
@@ -1633,7 +1704,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
         ...prev,
         [adapter.id]: {
           status: "success",
-          message: adapter.testable ? "Соединение проверено и сохранено." : `${adapter.name}: ключ и модель сохранены. Реальная проверка соединения будет доступна после подключения backend-адаптера.`,
+          message: adapter.testable ? t("models.connection.verifiedSaved") : t("models.test.savedPendingBackend", { name: adapter.name }),
         },
       }));
       update({
@@ -1686,7 +1757,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
       if (!apiKey || !model) {
         setApiAdapterTestStates((prev) => ({
           ...prev,
-          [adapter.id]: { status: "error", message: "Укажите API-ключ и модель перед выбором адаптера." },
+          [adapter.id]: { status: "error", message: t("models.test.needKeyAndModelBeforeSelect") },
         }));
         return;
       }
@@ -1772,6 +1843,45 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
       resetInstallState();
     };
 
+    // Explicit "use this mode" commit for the API / Local segments. The recognition
+    // and text model share the same backend flag, so committing the mode here is the
+    // single source of truth; the specific adapter / model is still picked below.
+    const handleSelectApiMode = () => {
+      update({ useOwnKey: true, provider: "openai" });
+      setModelModeView("api");
+      resetTestState();
+      resetInstallState();
+    };
+
+    const handleSelectLocalMode = () => {
+      update({ useOwnKey: true, provider: "custom" });
+      setModelModeView("local");
+      resetTestState();
+      resetInstallState();
+    };
+
+    const renderModeCommitRow = (mode: "api" | "local") => {
+      const isActive = activeModelMode === mode;
+      const modeLabel = mode === "api" ? "API" : t("models.mode.local");
+      return (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "10px 12px", borderRadius: 10, background: "var(--control-muted)", border: "1px solid var(--border-subtle)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 650, color: isActive ? "var(--success-bright)" : "var(--text-mid)" }}>
+            {isActive && <Check size={15} strokeWidth={2.5} />}
+            <span>{isActive ? t("models.modeCommit.active") : t("models.modeCommit.label", { mode: modeLabel })}</span>
+          </div>
+          {!isActive && (
+            <button
+              type="button"
+              onClick={mode === "api" ? handleSelectApiMode : handleSelectLocalMode}
+              style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: "var(--accent)", color: "var(--accent-contrast)", fontSize: 12, fontWeight: 700, fontFamily: "var(--font-main)", cursor: "pointer", flexShrink: 0 }}
+            >
+              {t("models.modeCommit.select")}
+            </button>
+          )}
+        </div>
+      );
+    };
+
     const updateLocalModelCache = (modelId: string, patch: Partial<LocalModelSettings>) => {
       const current = settings.localModels?.[modelId] || { status: "not_downloaded" as const };
       update({
@@ -1797,15 +1907,15 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
         const runtimeName = model.runtimeKind === "nvidia" ? "NVIDIA" : model.runtimeKind === "qwen" ? "Qwen" : model.runtimeKind === "diarization" ? "Diarization" : "MLX";
         const isRuntimeSlotReady = model.runtimeKind === "qwen" || model.runtimeKind === "nvidia" || model.runtimeKind === "diarization";
         return {
-          label: isRuntimeSlotReady ? "Модель не подключена" : "Движок не подключен",
+          label: isRuntimeSlotReady ? t("models.local.modelNotConnected") : t("models.local.engineNotConnected"),
           connectionLabel: isRuntimeSlotReady
-            ? `${runtimeName} runtime работает, но эта модель ещё не включена.`
-            : `${runtimeName} runtime-слот подготовлен, но движок еще не встроен в сборку.`,
+            ? t("models.local.runtimeReadyModelOff", { runtime: runtimeName })
+            : t("models.local.runtimeSlotPrepared", { runtime: runtimeName }),
           status: "unsupported" as const,
           color: "var(--text-low)",
           message: !isPlatformSupported
-            ? "Эта локальная модель пока доступна только на macOS. Для Windows и Linux оставлен Whisper runtime."
-            : model.unavailableReason || `${runtimeName} sidecar запускается отдельно от Whisper, но скачивание и распознавание для этой линейки будут включены после подключения локального engine.`,
+            ? t("models.local.macOnly")
+            : model.unavailableReason || t("models.local.sidecarPending", { runtime: runtimeName }),
           isInstalled: false,
           isSelected: false,
         };
@@ -1813,7 +1923,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
 
       if (actionState?.status === "deleting") {
         return {
-          label: "Удаляется",
+          label: t("models.local.deleting"),
           connectionLabel: "",
           status: "deleting" as const,
           color: "var(--text-hi)",
@@ -1825,7 +1935,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
 
       if (!isInstalled && (actionState?.status === "installing" || cachedState?.status === "downloading")) {
         return {
-          label: "Скачивается",
+          label: t("models.local.downloading"),
           connectionLabel: "",
           status: "installing" as const,
           color: "var(--text-hi)",
@@ -1837,7 +1947,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
 
       if (isSelected) {
         return {
-          label: "Выбрана",
+          label: t("models.local.selected"),
           connectionLabel: "",
           status: "selected" as const,
           color: "var(--success-bright)",
@@ -1849,7 +1959,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
 
       if (isInstalled) {
         return {
-          label: "Готова",
+          label: t("models.local.ready"),
           connectionLabel: "",
           status: "installed" as const,
           color: "var(--success-bright)",
@@ -1861,8 +1971,8 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
 
       if (actionState?.status === "error" || cachedState?.status === "error") {
         return {
-          label: "Ошибка",
-          connectionLabel: "Не удалось подготовить модель",
+          label: t("models.adapterStatus.error"),
+          connectionLabel: t("models.local.prepareFailed"),
           status: "error" as const,
           color: "var(--error-bright)",
           message: actionState?.message || cachedState?.message || null,
@@ -1872,7 +1982,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
       }
 
       return {
-        label: "Не скачана",
+        label: t("models.local.notDownloaded"),
         connectionLabel: "",
         status: "idle" as const,
         color: "var(--text-low)",
@@ -1898,18 +2008,18 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
     };
 
     const formatLocalDownloadBytes = (bytes?: number, options: { showZero?: boolean } = {}) => {
-      if (!bytes || bytes <= 0) return options.showZero ? "0 Б" : "";
+      if (!bytes || bytes <= 0) return options.showZero ? t("models.size.zero") : "";
       const mb = bytes / (1024 * 1024);
       if (mb >= 1024) {
         const gb = mb / 1024;
-        return `${gb.toFixed(gb >= 10 ? 0 : 1).replace(".", ",")} ГБ`;
+        return t("models.size.gb", { value: gb.toFixed(gb >= 10 ? 0 : 1).replace(".", ",") });
       }
 
-      return `${mb.toFixed(mb >= 10 ? 0 : 1).replace(".", ",")} МБ`;
+      return t("models.size.mb", { value: mb.toFixed(mb >= 10 ? 0 : 1).replace(".", ",") });
     };
 
     const getLocalModelStorageLabel = (model: LocalModelOption) => {
-      return formatLocalDownloadBytes(model.downloadBytes) || (model.runtimeReady ? "Неизвестно" : "Не подключено");
+      return formatLocalDownloadBytes(model.downloadBytes) || (model.runtimeReady ? t("models.size.unknown") : t("models.size.notConnected"));
     };
 
     const renderDotRating = (level: number) => (
@@ -1929,18 +2039,42 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
       </div>
     );
 
+    const translateSpeedValue = (value: string) => {
+      switch (value) {
+        case "очень быстро": return t("models.speedValue.veryFast");
+        case "быстро": return t("models.speedValue.fast");
+        case "средне": return t("models.speedValue.medium");
+        default: return value;
+      }
+    };
+
+    const translateAccuracyValue = (value: string) => {
+      switch (value) {
+        case "максимальная": return t("models.accuracyValue.maximum");
+        case "высокая": return t("models.accuracyValue.high");
+        case "средняя": return t("models.accuracyValue.medium");
+        case "средняя+": return t("models.accuracyValue.mediumPlus");
+        case "базовая": return t("models.accuracyValue.basic");
+        case "низкая+": return t("models.accuracyValue.lowPlus");
+        case "служебная": return t("models.accuracyValue.utility");
+        default: return value;
+      }
+    };
+
     const renderLocalModelStats = (model: LocalModelOption) => {
+      const speedValueLabel = translateSpeedValue(model.speed);
+      const accuracyValueLabel = translateAccuracyValue(model.accuracy);
       const stats: { key: string; title: string; label: string; Icon: LucideIcon; level: number }[] = [
-        { key: "speed", title: `Скорость: ${model.speed}`, label: "Скорость", Icon: Gauge, level: getLocalModelLevel("speed", model.speed) },
-        { key: "accuracy", title: `Точность: ${model.accuracy}`, label: "Точность", Icon: Target, level: getLocalModelLevel("accuracy", model.accuracy) },
+        { key: "speed", title: t("models.stat.speedTitle", { value: speedValueLabel }), label: t("models.stat.speed"), Icon: Gauge, level: getLocalModelLevel("speed", model.speed) },
+        { key: "accuracy", title: t("models.stat.accuracyTitle", { value: accuracyValueLabel }), label: t("models.stat.accuracy"), Icon: Target, level: getLocalModelLevel("accuracy", model.accuracy) },
       ];
       const storageLabel = getLocalModelStorageLabel(model);
 
       return (
         <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 9, flexWrap: "wrap" }}>
           <div
-            title={`Размер загрузки: ${storageLabel}`}
-            aria-label={`Размер загрузки: ${storageLabel}`}
+            title={t("models.stat.downloadSizeTitle", { value: storageLabel })}
+            aria-label={t("models.stat.downloadSizeTitle", { value: storageLabel })}
             style={{ display: "flex", alignItems: "center", gap: 6 }}
           >
             <HardDrive size={14} strokeWidth={1.9} color="var(--text-hi)" />
@@ -1996,11 +2130,11 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
     const handleInstallLocalSttModel = async (model: LocalModelOption) => {
       setLocalModelActionStates((prev) => ({
         ...prev,
-        [model.id]: { status: "installing", message: "Готовим локальный STT runtime.", progress: 0 },
+        [model.id]: { status: "installing", message: t("models.install.preparingRuntime"), progress: 0 },
       }));
       updateLocalModelCache(model.id, {
         status: "downloading",
-        message: "Готовим локальный STT runtime.",
+        message: t("models.install.preparingRuntime"),
       });
 
       try {
@@ -2071,7 +2205,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
       setPendingDeleteModel(null);
       setLocalModelActionStates((prev) => ({
         ...prev,
-        [model.id]: { status: "deleting", message: "Удаляем локальный файл модели." },
+        [model.id]: { status: "deleting", message: t("models.delete.removingFile") },
       }));
 
       try {
@@ -2125,9 +2259,9 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                 <Crown size={20} strokeWidth={2.2} color="var(--accent-contrast)" />
               </div>
               <div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-hi)" }}>Подписка активна</div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-hi)" }}>{t("models.subscription.active")}</div>
                 <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>
-                  {`Безлимитный доступ до ${cloudProfile?.subscription.expiresAt ? new Date(cloudProfile.subscription.expiresAt).toLocaleDateString("ru-RU", { day: "numeric", month: "long" }) : "—"}`}
+                  {t("models.subscription.unlimitedUntil", { date: cloudProfile?.subscription.expiresAt ? new Date(cloudProfile.subscription.expiresAt).toLocaleDateString(lang === "ru" ? "ru-RU" : "en-US", { day: "numeric", month: "long" }) : "—" })}
                 </div>
               </div>
             </div>
@@ -2149,7 +2283,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
         {!hasActiveSubscription && !isCloudMode && (
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
-            <span className="label">или</span>
+            <span className="label">{t("models.common.or")}</span>
             <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
           </div>
         )}
@@ -2157,10 +2291,10 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
         <>
           <div>
             <div style={{ fontSize: 17, fontWeight: 700, color: "var(--text-hi)", marginBottom: 4 }}>
-              Режим распознавания
+              {t("models.modeSection.title")}
             </div>
             <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6, marginBottom: 14 }}>
-              Вы можете в любой момент переключаться между облаком, своим API-ключом и локальной моделью.
+              {t("models.modeSection.desc")}
             </div>
 
             <div style={{ display: "flex", background: "var(--control-track)", borderRadius: 10, padding: 3, gap: 2 }}>
@@ -2200,18 +2334,18 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
           {isCloudView && (
             <div className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div>
-                <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)", marginBottom: 4 }}>Облако</div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)", marginBottom: 4 }}>{t("models.mode.cloud")}</div>
                 <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>
                   {hasActiveSubscription
-                    ? "Запросы на распознавание и обработку текста идут через облако Talkis. Все данные шифруются при передаче, а аудио и текст не сохраняются на сервере после обработки."
-                    : "Для облачного режима нужна авторизация и активная подписка. После входа плашка и статус подписки обновятся автоматически."}
+                    ? t("models.cloud.descActive")
+                    : t("models.cloud.descGuest")}
                 </div>
               </div>
 
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, color: isCloudSelected ? "var(--success-bright)" : hasActiveSubscription ? "var(--text-hi)" : "var(--text-low)", fontSize: 12, fontWeight: 600 }}>
                   {(isCloudSelected || hasActiveSubscription) && <Check size={15} strokeWidth={2.5} />}
-                  {isCloudSelected ? "Используется для распознавания" : hasActiveSubscription ? "PRO активен, облако готово к выбору" : "Нужна активная подписка PRO"}
+                  {isCloudSelected ? t("models.connection.usedForRecognition") : hasActiveSubscription ? t("models.cloud.proReady") : t("models.cloud.needPro")}
                 </div>
 
                 {isCloudSelected ? (
@@ -2228,7 +2362,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                     gap: 8,
                   }}>
                     <Check size={14} strokeWidth={2.5} />
-                    Выбрано
+                    {t("models.common.selected")}
                   </div>
                 ) : hasActiveSubscription ? (
                   <button
@@ -2250,7 +2384,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                     }}
                   >
                     <Check size={14} strokeWidth={2.5} />
-                    Выбрать
+                    {t("models.common.select")}
                   </button>
                 ) : null}
               </div>
@@ -2259,15 +2393,60 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
 
           {isApiMode && (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <div>
-                <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)", marginBottom: 4 }}>
-                  Доступные API-адаптеры
-                </div>
-                <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>
-                  Выберите адаптер, раскройте его и укажите ключ вместе с названием модели распознавания.
-                </div>
+              <div style={{ display: "flex", background: "var(--control-track)", borderRadius: 10, padding: 3, gap: 2 }}>
+                {([
+                  { id: "transcription", label: t("models.local.tabTranscription"), Icon: Mic },
+                  { id: "text", label: t("models.local.tabText"), Icon: MessageSquare },
+                ] as const).map(({ id, label, Icon }) => {
+                  const active = apiModelKind === id;
+
+                  return (
+                    <button
+                      key={id}
+                      onClick={() => setApiModelKind(id)}
+                      style={{
+                        flex: 1,
+                        padding: "10px 0",
+                        borderRadius: 8,
+                        border: "none",
+                        fontSize: 13,
+                        fontWeight: active ? 700 : 500,
+                        fontFamily: "var(--font-main)",
+                        background: active ? "var(--dropdown-active)" : "transparent",
+                        color: active ? "var(--text-hi)" : "var(--text-mid)",
+                        cursor: "pointer",
+                        transition: "all 0.18s ease",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 7,
+                      }}
+                    >
+                      <Icon size={15} strokeWidth={active ? 2.2 : 1.7} />
+                      <span>{label}</span>
+                      {id === "text" && !apiTextModelConfigured && (
+                        <span
+                          title={t("summary.unavailable.tooltip")}
+                          style={{ width: 7, height: 7, borderRadius: 999, background: "var(--accent)", flexShrink: 0 }}
+                        />
+                      )}
+                    </button>
+                  );
+                })}
               </div>
 
+              {renderModeCommitRow("api")}
+
+              {apiModelKind === "transcription" && (
+              <>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)", marginBottom: 4 }}>
+                  {t("models.apiSection.title")}
+                </div>
+                <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>
+                  {t("models.apiSection.desc")}
+                </div>
+              </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {API_ADAPTERS.map((adapter) => {
                   const isExpanded = expandedApiAdapter === adapter.id;
@@ -2319,7 +2498,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                             </div>
                           </div>
                           <div style={{ fontSize: 12, lineHeight: 1.45, color: "var(--text-mid)" }}>
-                            {adapter.description} Рекомендуемая модель: {adapter.recommendedModel}.
+                            {t(API_ADAPTER_DESCRIPTION_KEYS[adapter.id])} {t("models.adapter.recommendedModel", { model: adapter.recommendedModel })}
                           </div>
                         </div>
                       </button>
@@ -2327,7 +2506,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                       {isExpanded && (
                         <div style={{ borderTop: "1px solid var(--border-subtle)", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                            <div className="label" style={{ width: 76, flexShrink: 0 }}>API-ключ</div>
+                            <div className="label" style={{ width: 76, flexShrink: 0 }}>{t("models.field.apiKey")}</div>
                             <input
                               type="password"
                               value={adapterValues.apiKey}
@@ -2339,7 +2518,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                           </div>
 
                           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                            <div className="label" style={{ width: 76, flexShrink: 0 }}>Модель</div>
+                            <div className="label" style={{ width: 76, flexShrink: 0 }}>{t("models.field.model")}</div>
                             <input
                               type="text"
                               value={adapterValues.model}
@@ -2348,17 +2527,17 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                               placeholder={adapter.recommendedModel}
                               style={{ flex: 1, minWidth: 0, height: 36, padding: "8px 10px", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize: 12 }}
                             />
-                            <div style={{ fontSize: 11, color: "var(--text-low)", whiteSpace: "nowrap", flexShrink: 0 }}>Рекомендуем: {adapter.recommendedModel}</div>
+                            <div style={{ fontSize: 11, color: "var(--text-low)", whiteSpace: "nowrap", flexShrink: 0 }}>{t("models.field.recommended", { model: adapter.recommendedModel })}</div>
                           </div>
 
                           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                            <div className="label" style={{ width: 76, flexShrink: 0 }}>Хост</div>
+                            <div className="label" style={{ width: 76, flexShrink: 0 }}>{t("models.field.host")}</div>
                             <input
                               type="url"
                               value={adapterValues.endpoint}
                               onChange={(e) => updateApiAdapterValues(adapter, { endpoint: e.target.value })}
                               className="input"
-                              placeholder={adapter.defaultEndpoint ? `По умолчанию: ${adapter.defaultEndpoint}` : "https://api.example.com или http://localhost:8000"}
+                              placeholder={adapter.defaultEndpoint ? t("models.field.hostDefaultPlaceholder", { endpoint: adapter.defaultEndpoint }) : t("models.field.hostPlaceholder")}
                               style={{ flex: 1, minWidth: 0, height: 36, padding: "8px 10px", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize: 12 }}
                             />
                             {adapterValues.endpoint.trim() ? (
@@ -2379,10 +2558,10 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                                   cursor: "pointer",
                                 }}
                               >
-                                Сбросить
+                                {t("models.common.reset")}
                               </button>
                             ) : (
-                              <div style={{ fontSize: 11, color: "var(--text-low)", whiteSpace: "nowrap", flexShrink: 0 }}>Необязательно</div>
+                              <div style={{ fontSize: 11, color: "var(--text-low)", whiteSpace: "nowrap", flexShrink: 0 }}>{t("models.common.optional")}</div>
                             )}
                           </div>
 
@@ -2419,7 +2598,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                                 gap: 8,
                               }}>
                                 <Check size={14} strokeWidth={2.5} />
-                                Выбрано
+                                {t("models.common.selected")}
                               </div>
                             ) : (
                               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -2443,7 +2622,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                                     }}
                                   >
                                     <Check size={14} strokeWidth={2.5} />
-                                    Выбрать
+                                    {t("models.common.select")}
                                   </button>
                                 )}
 
@@ -2468,12 +2647,12 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                                   {adapterStatus.status === "testing" ? (
                                     <>
                                       <span className="loading-soft-ring" />
-                                      Проверяем...
+                                      {t("models.test.checking")}
                                     </>
                                   ) : (
                                     <>
                                       <Zap size={14} strokeWidth={2.2} />
-                                      {adapter.testable ? "Тестировать и сохранить" : "Сохранить"}
+                                      {adapter.testable ? t("models.test.testAndSave") : t("models.test.saveButton")}
                                     </>
                                   )}
                                 </button>
@@ -2486,17 +2665,19 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                   );
                 })}
               </div>
+              </>
+              )}
+
+              {apiModelKind === "text" && <TextModelCard settings={settings} update={update} />}
             </div>
           )}
-
-          {isApiMode && <TextModelCard settings={settings} update={update} />}
 
           {isLocalMode && (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div style={{ display: "flex", background: "var(--control-track)", borderRadius: 10, padding: 3, gap: 2 }}>
                 {([
-                  { id: "transcription", label: "Транскрибация", Icon: Mic },
-                  { id: "text", label: "Текстовая", Icon: MessageSquare },
+                  { id: "transcription", label: t("models.local.tabTranscription"), Icon: Mic },
+                  { id: "text", label: t("models.local.tabText"), Icon: MessageSquare },
                 ] as const).map(({ id, label, Icon }) => {
                   const active = localModelKind === id;
 
@@ -2524,19 +2705,27 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                     >
                       <Icon size={15} strokeWidth={active ? 2.2 : 1.7} />
                       <span>{label}</span>
+                      {id === "text" && !localTextModelSelected && (
+                        <span
+                          title={t("localLlm.required")}
+                          style={{ width: 7, height: 7, borderRadius: 999, background: "var(--accent)", flexShrink: 0 }}
+                        />
+                      )}
                     </button>
                   );
                 })}
               </div>
 
+              {renderModeCommitRow("local")}
+
               {localModelKind === "transcription" && (
                 <>
               <div>
                 <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)", marginBottom: 4 }}>
-                  Локальные модели
+                  {t("models.local.sectionTitle")}
                 </div>
                 <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>
-                  Выберите модель, скачайте ее через локальный STT runtime и используйте без облака.
+                  {t("models.local.sectionDesc")}
                 </div>
               </div>
 
@@ -2591,7 +2780,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                               <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{model.name}</div>
                               {model.recommended && (
                                 <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text-hi)", padding: "3px 7px", borderRadius: 999, background: "var(--control-muted)", flexShrink: 0 }}>
-                                  Рекомендуем
+                                  {t("models.local.recommendedBadge")}
                                 </div>
                               )}
                             </div>
@@ -2600,7 +2789,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                             </div>
                           </div>
                           <div style={{ fontSize: 12, lineHeight: 1.45, color: "var(--text-mid)" }}>
-                            {model.description} Runtime: {model.runtime}.
+                            {t(LOCAL_MODEL_DESCRIPTION_KEYS[model.id])} {t("models.local.runtimeSuffix", { runtime: model.runtime })}
                           </div>
                           {renderLocalModelStats(model)}
                         </div>
@@ -2625,9 +2814,9 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                           {modelStatus.status === "installing" && (
                             <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
                               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, fontSize: 12, color: "var(--text-mid)", fontWeight: 650 }}>
-                                <span>{modelActionState?.message || "Загрузка модели"}</span>
+                                <span>{modelActionState?.message || t("models.download.loading")}</span>
                                 <span style={{ color: "var(--text-hi)" }}>
-                                  {downloadProgress !== undefined ? `${downloadProgress}%` : downloadedLabel || "Подготовка"}
+                                  {downloadProgress !== undefined ? `${downloadProgress}%` : downloadedLabel || t("models.download.preparing")}
                                 </span>
                               </div>
                               <div style={{ width: "100%", height: 8, borderRadius: 999, background: "var(--progress-track)", overflow: "hidden" }}>
@@ -2644,7 +2833,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                               </div>
                               {(downloadedLabel || totalLabel) && (
                                 <div style={{ fontSize: 11, color: "var(--text-low)", lineHeight: 1.4 }}>
-                                  {downloadedLabel}{totalLabel ? ` из ${totalLabel}` : ""}
+                                  {downloadedLabel}{totalLabel ? ` ${t("models.download.of", { total: totalLabel })}` : ""}
                                 </div>
                               )}
                             </div>
@@ -2678,7 +2867,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                                   }}
                                 >
                                   <Check size={14} strokeWidth={2.5} />
-                                  Выбрать
+                                  {t("models.common.select")}
                                 </button>
                               )}
 
@@ -2711,12 +2900,12 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                                   {isDownloaded ? (
                                     <>
                                       <Trash2 size={14} strokeWidth={2.2} />
-                                      Удалить
+                                      {t("models.common.delete")}
                                     </>
                                   ) : (
                                     <>
                                       <Download size={14} strokeWidth={2.2} />
-                                      {isRuntimeReady ? "Скачать" : "Недоступно"}
+                                      {isRuntimeReady ? t("models.common.download") : t("models.common.unavailable")}
                                     </>
                                   )}
                                 </button>
@@ -2741,7 +2930,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                                   }}
                                 >
                                   <X size={14} strokeWidth={2.2} />
-                                  Отмена
+                                  {t("models.common.cancel")}
                                 </button>
                               )}
                             </div>
@@ -2780,10 +2969,10 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                     onClick={(event) => event.stopPropagation()}
                   >
                     <div id="delete-local-model-title" style={{ fontSize: 17, fontWeight: 750, color: "var(--text-hi)", marginBottom: 8 }}>
-                      Вы действительно хотите удалить?
+                      {t("models.deleteDialog.title")}
                     </div>
                     <div style={{ fontSize: 13, lineHeight: 1.6, color: "var(--text-mid)", marginBottom: 16 }}>
-                      {pendingDeleteModel.name} будет удалена с диска. При необходимости модель можно скачать заново.
+                      {t("models.deleteDialog.body", { name: pendingDeleteModel.name })}
                     </div>
                     <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
                       <button
@@ -2801,7 +2990,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                           cursor: "pointer",
                         }}
                       >
-                        Отмена
+                        {t("models.common.cancel")}
                       </button>
                       <button
                         type="button"
@@ -2818,7 +3007,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                           cursor: "pointer",
                         }}
                       >
-                        Удалить
+                        {t("models.common.delete")}
                       </button>
                     </div>
                   </div>
@@ -2848,16 +3037,16 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
     label: string;
     Icon: LucideIcon;
   }> = [
-    { id: "style", label: "Стиль", Icon: Type },
-    { id: "prompts", label: "Промпты", Icon: MessageSquare },
+    { id: "style", label: t("models.styleTab.style"), Icon: Type },
+    { id: "prompts", label: t("models.styleTab.prompts"), Icon: MessageSquare },
   ];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
       <div style={{ display: "grid", gap: 4 }}>
-        <div style={{ fontSize: 17, fontWeight: 700, color: "var(--text-hi)" }}>Обработка текста</div>
+        <div style={{ fontSize: 17, fontWeight: 700, color: "var(--text-hi)" }}>{t("models.textProcessing.title")}</div>
         <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>
-          Стиль очистки расшифровки и Промпты для summary.
+          {t("models.textProcessing.desc")}
         </div>
       </div>
 
@@ -2927,9 +3116,9 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
         <details className="card" style={{ background: "var(--surface)" }}>
           <summary style={{ cursor: "pointer", listStyle: "none", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
             <div>
-              <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)", marginBottom: 4 }}>Prompt Preview</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)", marginBottom: 4 }}>{t("models.preview.title")}</div>
               <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>
-                Итоговый prompt для текущего языка и стиля обработки.
+                {t("models.preview.desc")}
               </div>
             </div>
             {promptPreview && <div className="label">v{promptPreview.version}</div>}
@@ -2938,19 +3127,19 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
           <div style={{ marginTop: 14, display: "grid", gap: 12 }}>
             {promptPreviewError ? (
               <div style={{ fontSize: 12, color: "var(--danger)", lineHeight: 1.6 }}>
-                Не удалось собрать preview prompt: {promptPreviewError}
+                {t("models.preview.buildError", { error: promptPreviewError })}
               </div>
             ) : promptPreview ? (
               <>
                 <div style={{ display: "grid", gap: 4 }}>
-                  <div className="label">Профиль</div>
+                  <div className="label">{t("models.preview.profile")}</div>
                   <div style={{ fontSize: 12, color: "var(--text-hi)", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" }}>
                     {promptPreview.profileKey}
                   </div>
                 </div>
 
                 <div style={{ display: "grid", gap: 6 }}>
-                  <div className="label">Слои</div>
+                  <div className="label">{t("models.preview.layers")}</div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                     {promptPreview.layers.map((layer) => (
                       <span
@@ -2971,7 +3160,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                 </div>
 
                 <div style={{ display: "grid", gap: 6 }}>
-                  <div className="label">Текст prompt</div>
+                  <div className="label">{t("models.preview.promptText")}</div>
                   <pre
                     style={{
                       margin: 0,
@@ -2992,7 +3181,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                 </div>
               </>
             ) : (
-              <div style={{ fontSize: 12, color: "var(--text-mid)" }}>Собираем preview...</div>
+              <div style={{ fontSize: 12, color: "var(--text-mid)" }}>{t("models.preview.building")}</div>
             )}
           </div>
         </details>

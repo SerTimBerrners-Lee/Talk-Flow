@@ -66,23 +66,29 @@ pub fn ensure_widget_notice_window(app: &AppHandle) -> Result<tauri::WebviewWind
     Ok(win)
 }
 
+/// Maximum expanded height for the notice bubble (logical px) — keeps a very long
+/// hint from running off the top of the screen.
+pub const NOTICE_MAX_HEIGHT: f64 = 360.0;
+
 fn position_widget_notice_window(
     widget_window: &tauri::WebviewWindow,
     notice_window: &tauri::WebviewWindow,
+    height: f64,
 ) -> Result<(), String> {
     let widget_position = widget_window.outer_position().map_err(|e| e.to_string())?;
     let widget_size = widget_window.outer_size().map_err(|e| e.to_string())?;
     let scale_factor = widget_window.scale_factor().map_err(|e| e.to_string())?;
     let notice_width = NOTICE_WIDTH * scale_factor;
-    let notice_height = NOTICE_HEIGHT * scale_factor;
+    let notice_height = height * scale_factor;
     let notice_gap = NOTICE_GAP * scale_factor;
     let x = widget_position.x as f64 + (widget_size.width as f64 - notice_width) / 2.0;
+    // Anchor the bubble's bottom edge just above the widget, so it grows upward.
     let y = widget_position.y as f64 - notice_gap - notice_height;
 
     notice_window
         .set_size(tauri::Size::Logical(tauri::LogicalSize {
             width: NOTICE_WIDTH,
-            height: NOTICE_HEIGHT,
+            height,
         }))
         .map_err(|e| e.to_string())?;
 
@@ -271,7 +277,8 @@ pub async fn show_widget_notice(
         .ok_or_else(|| "Widget window not found".to_string())?;
     let notice_window = ensure_widget_notice_window(&app)?;
 
-    position_widget_notice_window(&widget_window, &notice_window)?;
+    // Always (re)show collapsed; the overlay expands on click.
+    position_widget_notice_window(&widget_window, &notice_window, NOTICE_HEIGHT)?;
 
     app.emit_to(
         NOTICE_WINDOW_LABEL,
@@ -292,6 +299,20 @@ pub async fn hide_widget_notice(app: AppHandle) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Resize the notice bubble to fit its full text on click (or back to the
+/// collapsed height). Re-anchors above the widget so it grows upward.
+#[tauri::command]
+pub async fn expand_widget_notice(app: AppHandle, height: f64) -> Result<(), String> {
+    let widget_window = app
+        .get_webview_window("widget")
+        .ok_or_else(|| "Widget window not found".to_string())?;
+    let notice_window = app
+        .get_webview_window(NOTICE_WINDOW_LABEL)
+        .ok_or_else(|| "Notice window not found".to_string())?;
+    let clamped = height.clamp(NOTICE_HEIGHT, NOTICE_MAX_HEIGHT);
+    position_widget_notice_window(&widget_window, &notice_window, clamped)
 }
 
 #[tauri::command]

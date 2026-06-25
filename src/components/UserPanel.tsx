@@ -7,6 +7,7 @@ import { LogOut, User, Crown } from "lucide-react";
 import { CloudProfile, fetchCloudProfile, cloudLogout, getAuthLoginUrl, handleAuthToken, generateExchangeCode, getAuthLoginUrlWithCode, pollForToken, getCachedCloudProfile, subscribeCloudProfile } from "../lib/cloudAuth";
 import { logError, logInfo } from "../lib/logger";
 import { SETTINGS_UPDATED_EVENT } from "../lib/hotkeyEvents";
+import { useI18n } from "../lib/i18n";
 
 /** Extract token from talkis://auth?token=... */
 function extractTokenFromUrl(url: string): string | null {
@@ -19,6 +20,7 @@ function extractTokenFromUrl(url: string): string | null {
 }
 
 export function UserPanel() {
+  const { t } = useI18n();
   const [profile, setProfile] = useState<CloudProfile | null | undefined>(() => getCachedCloudProfile());
   const [loading, setLoading] = useState(() => getCachedCloudProfile() === undefined);
   const [waitingForAuth, setWaitingForAuth] = useState(false);
@@ -188,7 +190,7 @@ export function UserPanel() {
         <ProfileRow profile={profile} onLogout={handleLogout} />
         <div style={styles.badgeActive}>
           <div style={styles.badgeDot} />
-          Подписка активна
+          {t("userPanel.subscriptionActive")}
         </div>
       </div>
     );
@@ -201,7 +203,7 @@ export function UserPanel() {
         <ProfileRow profile={profile} onLogout={handleLogout} />
         <button onClick={handleActivate} style={styles.compactCta}>
           <Crown size={13} strokeWidth={2} color="var(--accent-contrast)" />
-          <span style={styles.compactCtaLabel}>Перейти на PRO</span>
+          <span style={styles.compactCtaLabel}>{t("userPanel.upgradeToPro")}</span>
         </button>
       </div>
     );
@@ -216,6 +218,7 @@ export function UserPanel() {
 }
 
 function ProfileRow({ profile, onLogout }: { profile: CloudProfile; onLogout: () => void }) {
+  const { t } = useI18n();
   return (
     <div style={styles.profileRow}>
       <div style={styles.avatar}>
@@ -235,7 +238,7 @@ function ProfileRow({ profile, onLogout }: { profile: CloudProfile; onLogout: ()
         </div>
         <div style={styles.profileEmail}>{profile.user.email}</div>
       </div>
-      <button onClick={onLogout} style={styles.logoutButton} title="Выйти">
+      <button onClick={onLogout} style={styles.logoutButton} title={t("userPanel.logout")}>
         <LogOut size={14} strokeWidth={1.8} />
       </button>
     </div>
@@ -243,23 +246,24 @@ function ProfileRow({ profile, onLogout }: { profile: CloudProfile; onLogout: ()
 }
 
 function SubscriptionCTA({ onActivate }: { onActivate: () => void }) {
+  const { t } = useI18n();
   return (
     <div style={styles.ctaBox}>
       <div style={styles.ctaHeader}>
         <Crown size={14} strokeWidth={2} color="var(--text-hi)" />
         <span style={{ fontWeight: 700, fontSize: 12, letterSpacing: "-0.02em", color: "var(--text-hi)" }}>
-          Активируйте Talkis
+          {t("userPanel.cta.title")}
         </span>
       </div>
 
       <ul style={styles.ctaList}>
-        <li>Безлимитное использование</li>
-        <li>Без VPN и Прокси</li>
-        <li>Синхронизация устройств</li>
+        <li>{t("userPanel.cta.feature.unlimited")}</li>
+        <li>{t("userPanel.cta.feature.noVpn")}</li>
+        <li>{t("userPanel.cta.feature.deviceSync")}</li>
       </ul>
 
       <button onClick={onActivate} style={styles.ctaButton}>
-        Перейти на PRO
+        {t("userPanel.upgradeToPro")}
       </button>
     </div>
   );

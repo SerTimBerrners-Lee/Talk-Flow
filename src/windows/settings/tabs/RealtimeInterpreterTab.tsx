@@ -28,6 +28,7 @@ import {
   SETTINGS_UPDATED_EVENT,
 } from "../../../lib/hotkeyEvents";
 import { logError } from "../../../lib/logger";
+import { useI18n, type TFunc } from "../../../lib/i18n";
 import {
   getRealtimeInterpreterStatus,
   listRealtimeAudioDevices,
@@ -82,13 +83,13 @@ interface LiveTextState {
   remoteToUser: string;
 }
 
-function statusLabel(status: RealtimeInterpreterStatus | null): string {
-  if (!status) return "Проверяем";
-  if (status.state === "running") return "Работает";
-  if (status.state === "starting") return "Запускается";
-  if (status.state === "stopping") return "Останавливается";
-  if (status.state === "error") return "Ошибка";
-  return "Выключен";
+function statusLabel(status: RealtimeInterpreterStatus | null, t: TFunc): string {
+  if (!status) return t("realtime.status.checking");
+  if (status.state === "running") return t("realtime.status.running");
+  if (status.state === "starting") return t("realtime.status.starting");
+  if (status.state === "stopping") return t("realtime.status.stopping");
+  if (status.state === "error") return t("realtime.status.error");
+  return t("realtime.status.off");
 }
 
 function statusColor(status: RealtimeInterpreterStatus | null): string {
@@ -159,28 +160,33 @@ function formatDurationSeconds(startedAt?: string | null): number {
 
 function directionSpeakerLabel(
   direction: RealtimeTranslationSegment["direction"],
+  t: TFunc,
 ): string {
-  return direction === "user_to_remote" ? "Вы" : "Собеседник";
+  return direction === "user_to_remote"
+    ? t("realtime.speaker.you")
+    : t("realtime.speaker.remote");
 }
 
 function formatRealtimeRawTranscript(
   segments: RealtimeTranslationSegment[],
+  t: TFunc,
 ): string {
   return segments
     .map(
       (segment) =>
-        `${directionSpeakerLabel(segment.direction)} (${segment.sourceLanguage}): ${segment.sourceText}`,
+        `${directionSpeakerLabel(segment.direction, t)} (${segment.sourceLanguage}): ${segment.sourceText}`,
     )
     .join("\n");
 }
 
 function formatRealtimeBilingualTranscript(
   segments: RealtimeTranslationSegment[],
+  t: TFunc,
 ): string {
   return segments
     .map(
       (segment) =>
-        `${directionSpeakerLabel(segment.direction)}: ${segment.sourceText}\nПеревод (${segment.targetLanguage}): ${segment.translatedText}`,
+        `${directionSpeakerLabel(segment.direction, t)}: ${segment.sourceText}\n${t("realtime.transcript.translationLabel", { lang: segment.targetLanguage })}: ${segment.translatedText}`,
     )
     .join("\n\n");
 }
@@ -335,6 +341,7 @@ function LevelMeter({
 }
 
 export function RealtimeInterpreterTab(): ReactElement {
+  const { t } = useI18n();
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [devices, setDevices] = useState<RealtimeAudioDevices | null>(null);
   const [status, setStatus] = useState<RealtimeInterpreterStatus | null>(null);
@@ -551,15 +558,13 @@ export function RealtimeInterpreterTab(): ReactElement {
   const warnings = useMemo(() => {
     const result = [...(devices?.warnings || [])];
     if (!hasCloudToken) {
-      result.push("Для облачного режима войдите в аккаунт Talkis.");
+      result.push(t("realtime.warning.needLogin"));
     }
     if (!interpreterSettings?.headphonesConfirmed) {
-      result.push(
-        "Для локального перевода нужны наушники или отдельный output.",
-      );
+      result.push(t("realtime.warning.needHeadphones"));
     }
     return result;
-  }, [devices?.warnings, hasCloudToken, interpreterSettings]);
+  }, [devices?.warnings, hasCloudToken, interpreterSettings, t]);
 
   const canStart = Boolean(
     interpreterSettings &&
@@ -609,10 +614,10 @@ export function RealtimeInterpreterTab(): ReactElement {
       id: crypto.randomUUID(),
       timestamp: new Date().toISOString(),
       duration: formatDurationSeconds(sessionStatus.startedAt),
-      raw: formatRealtimeRawTranscript(finalSegments),
-      cleaned: formatRealtimeBilingualTranscript(finalSegments),
+      raw: formatRealtimeRawTranscript(finalSegments, t),
+      cleaned: formatRealtimeBilingualTranscript(finalSegments, t),
       source: "call",
-      fileName: "Перевод звонка",
+      fileName: t("realtime.history.fileName"),
       callSessionId: sessionStatus.sessionId,
       status: "completed",
       translation: {
@@ -651,7 +656,7 @@ export function RealtimeInterpreterTab(): ReactElement {
     setTestMessage(null);
     try {
       await testVirtualMicOutput(interpreterSettings.virtualMicOutputDeviceId);
-      setTestMessage("Тестовый сигнал отправлен в virtual mic output.");
+      setTestMessage(t("realtime.test.signalSent"));
     } catch (testError) {
       setError(errorMessage(testError));
     } finally {
@@ -663,7 +668,7 @@ export function RealtimeInterpreterTab(): ReactElement {
     return (
       <div className="card" style={CARD_STYLE}>
         <div style={{ fontSize: 14, color: "var(--text-mid)" }}>
-          Загружаем переводчик…
+          {t("realtime.loading")}
         </div>
       </div>
     );
@@ -699,7 +704,7 @@ export function RealtimeInterpreterTab(): ReactElement {
                 color: "var(--text-hi)",
               }}
             >
-              Синхронный переводчик
+              {t("realtime.title")}
             </div>
           </div>
 
@@ -712,9 +717,9 @@ export function RealtimeInterpreterTab(): ReactElement {
               maxWidth: "100%",
             }}
           >
-            <Metric label="Статус" value={statusLabel(status)} />
-            <Metric label="Языки" value={pairDefinition.label} />
-            <Metric label="Маршрут" value="Talkis Cloud" />
+            <Metric label={t("realtime.metric.status")} value={statusLabel(status, t)} />
+            <Metric label={t("realtime.metric.languages")} value={pairDefinition.label} />
+            <Metric label={t("realtime.metric.route")} value="Talkis Cloud" />
           </div>
         </div>
 
@@ -729,14 +734,14 @@ export function RealtimeInterpreterTab(): ReactElement {
           }}
         >
           <Radio size={14} strokeWidth={2.2} />
-          {status?.message || "Realtime Interpreter выключен."}
+          {status?.message || t("realtime.statusMessage.off")}
         </div>
       </div>
 
       <div className="card" style={CARD_STYLE}>
         <SettingField
-          label="Настоящий микрофон"
-          note={`Голос пользователя для RU → ${pairDefinition.userTargetLanguage}.`}
+          label={t("realtime.field.realMic.label")}
+          note={t("realtime.field.realMic.note", { lang: pairDefinition.userTargetLanguage })}
         >
           <DeviceSelect
             value={interpreterSettings.realMicDeviceId}
@@ -744,14 +749,14 @@ export function RealtimeInterpreterTab(): ReactElement {
               void updateInterpreterSettings({ realMicDeviceId: value });
             }}
             devices={devices?.realMics || []}
-            emptyLabel="Системный микрофон"
+            emptyLabel={t("realtime.field.realMic.empty")}
             disabled={loadPending}
           />
         </SettingField>
 
         <SettingField
-          label="Пара языков"
-          note="Русский остается локальным языком пользователя в v1."
+          label={t("realtime.field.languagePair.label")}
+          note={t("realtime.field.languagePair.note")}
         >
           <select
             value={interpreterSettings.languagePair}
@@ -779,7 +784,7 @@ export function RealtimeInterpreterTab(): ReactElement {
 
         <SettingField
           label="Virtual mic output"
-          note={`${devices?.virtualDriverName || "Virtual driver"} для приложения звонка.`}
+          note={t("realtime.field.virtualMic.note", { driver: devices?.virtualDriverName || "Virtual driver" })}
         >
           <DeviceSelect
             value={interpreterSettings.virtualMicOutputDeviceId}
@@ -789,7 +794,7 @@ export function RealtimeInterpreterTab(): ReactElement {
               });
             }}
             devices={devices?.virtualMicOutputs || []}
-            emptyLabel={`Установите ${devices?.virtualDriverName || "virtual driver"}`}
+            emptyLabel={t("realtime.field.virtualMic.empty", { driver: devices?.virtualDriverName || "virtual driver" })}
             disabled={
               loadPending || (devices?.virtualMicOutputs.length || 0) === 0
             }
@@ -797,8 +802,8 @@ export function RealtimeInterpreterTab(): ReactElement {
         </SettingField>
 
         <SettingField
-          label="Локальное прослушивание"
-          note="Русский перевод собеседника."
+          label={t("realtime.field.localPlayback.label")}
+          note={t("realtime.field.localPlayback.note")}
         >
           <DeviceSelect
             value={interpreterSettings.localPlaybackDeviceId}
@@ -806,14 +811,14 @@ export function RealtimeInterpreterTab(): ReactElement {
               void updateInterpreterSettings({ localPlaybackDeviceId: value });
             }}
             devices={devices?.localPlaybackOutputs || []}
-            emptyLabel="Системный output"
+            emptyLabel={t("realtime.field.localPlayback.empty")}
             disabled={loadPending}
           />
         </SettingField>
 
         <SettingField
-          label="Доступ"
-          note="V1 работает только через Talkis Cloud."
+          label={t("realtime.field.access.label")}
+          note={t("realtime.field.access.note")}
         >
           <div
             style={{
@@ -836,7 +841,7 @@ export function RealtimeInterpreterTab(): ReactElement {
                 fontWeight: 700,
               }}
             >
-              {hasCloudToken ? "Аккаунт подключен" : "Нужен вход"}
+              {hasCloudToken ? t("realtime.access.connected") : t("realtime.access.needLogin")}
             </span>
           </div>
         </SettingField>
@@ -864,7 +869,7 @@ export function RealtimeInterpreterTab(): ReactElement {
             style={{ width: 16, height: 16, accentColor: "var(--accent)" }}
           />
           <Headphones size={16} strokeWidth={2} />
-          <span>Локальный перевод идет в наушники или отдельный output</span>
+          <span>{t("realtime.headphonesConfirm")}</span>
         </label>
       </div>
 
@@ -883,7 +888,7 @@ export function RealtimeInterpreterTab(): ReactElement {
             <div
               style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)" }}
             >
-              Проверка и запуск
+              {t("realtime.checkAndRun")}
             </div>
           </div>
 
@@ -891,7 +896,7 @@ export function RealtimeInterpreterTab(): ReactElement {
             <button
               type="button"
               className="btn"
-              title="Обновить устройства"
+              title={t("realtime.button.refresh.title")}
               disabled={loadPending || actionPending}
               onClick={() => {
                 void loadState();
@@ -899,12 +904,12 @@ export function RealtimeInterpreterTab(): ReactElement {
               style={{ minHeight: 36, borderRadius: 10, padding: "0 12px" }}
             >
               <RefreshCcw size={14} strokeWidth={2} />
-              Обновить
+              {t("realtime.button.refresh")}
             </button>
             <button
               type="button"
               className="btn"
-              title="Тест virtual mic output"
+              title={t("realtime.button.test.title")}
               disabled={
                 actionPending ||
                 !interpreterSettings.virtualMicOutputDeviceId ||
@@ -916,13 +921,13 @@ export function RealtimeInterpreterTab(): ReactElement {
               style={{ minHeight: 36, borderRadius: 10, padding: "0 12px" }}
             >
               <Volume2 size={14} strokeWidth={2} />
-              Тест
+              {t("realtime.button.test")}
             </button>
             {status?.active ? (
               <button
                 type="button"
                 className="btn btn-danger"
-                title="Остановить переводчик"
+                title={t("realtime.button.stop.title")}
                 disabled={actionPending}
                 onClick={() => {
                   void handleStop();
@@ -930,13 +935,13 @@ export function RealtimeInterpreterTab(): ReactElement {
                 style={{ minHeight: 36, borderRadius: 10, padding: "0 12px" }}
               >
                 <Square size={13} strokeWidth={2.4} />
-                Стоп
+                {t("realtime.button.stop")}
               </button>
             ) : (
               <button
                 type="button"
                 className="btn btn-primary"
-                title="Запустить переводчик"
+                title={t("realtime.button.start.title")}
                 disabled={actionPending || !canStart}
                 onClick={() => {
                   void handleStart();
@@ -944,7 +949,7 @@ export function RealtimeInterpreterTab(): ReactElement {
                 style={{ minHeight: 36, borderRadius: 10, padding: "0 12px" }}
               >
                 <Play size={13} strokeWidth={2.4} />
-                Старт
+                {t("realtime.button.start")}
               </button>
             )}
           </div>
@@ -1022,7 +1027,7 @@ export function RealtimeInterpreterTab(): ReactElement {
           <div style={{ display: "grid", gap: 10, minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <Speaker size={15} strokeWidth={2} />
-              <div style={{ fontSize: 14, fontWeight: 700 }}>Вы → звонок</div>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>{t("realtime.panel.youToCall")}</div>
             </div>
             <LevelMeter
               label={`RU → ${pairDefinition.userTargetLanguage}`}
@@ -1042,14 +1047,14 @@ export function RealtimeInterpreterTab(): ReactElement {
                 lineHeight: 1.5,
               }}
             >
-              {liveText.userToRemote || "Нет live transcript"}
+              {liveText.userToRemote || t("realtime.noLiveTranscript")}
             </div>
           </div>
 
           <div style={{ display: "grid", gap: 10, minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <Headphones size={15} strokeWidth={2} />
-              <div style={{ fontSize: 14, fontWeight: 700 }}>Звонок → вы</div>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>{t("realtime.panel.callToYou")}</div>
             </div>
             <LevelMeter
               label={`${pairDefinition.remoteSourceLanguage} → RU`}
@@ -1069,7 +1074,7 @@ export function RealtimeInterpreterTab(): ReactElement {
                 lineHeight: 1.5,
               }}
             >
-              {liveText.remoteToUser || "Нет live transcript"}
+              {liveText.remoteToUser || t("realtime.noLiveTranscript")}
             </div>
           </div>
         </div>
@@ -1077,8 +1082,10 @@ export function RealtimeInterpreterTab(): ReactElement {
         <div
           style={{ fontSize: 12, color: "var(--text-low)", lineHeight: 1.55 }}
         >
-          Virtual mic: {selectedVirtualOutput?.label || "не выбран"} · Playback:{" "}
-          {selectedPlayback?.label || "системный output"}
+          {t("realtime.routingSummary", {
+            virtualMic: selectedVirtualOutput?.label || t("realtime.routing.notSelected"),
+            playback: selectedPlayback?.label || t("realtime.routing.systemOutput"),
+          })}
         </div>
       </div>
     </div>

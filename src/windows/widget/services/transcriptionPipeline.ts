@@ -3,6 +3,7 @@ import { emit } from "@tauri-apps/api/event";
 
 import { AppSettings, deleteHistoryEntry, HistoryEntry } from "../../../lib/store";
 import { logError, logInfo } from "../../../lib/logger";
+import { tn } from "../../../lib/i18n";
 import { formatErrorMessage } from "../../../lib/utils";
 import { HISTORY_UPDATED_EVENT } from "../../../lib/hotkeyEvents";
 import { beginProcessing, finishProcessing, isAbortError } from "../../../lib/processingControl";
@@ -43,7 +44,7 @@ function toUserFacingErrorMessage(error: unknown): string {
   const missingModelMatch = raw.match(/Model ['"]([^'"]+)['"] is not installed locally/i);
   if (missingModelMatch) {
     const model = missingModelMatch[1];
-    return `Локальный runtime запущен, но модель ${model} ещё не скачана. Откройте Настройки -> Модели -> Локально и нажмите «Скачать».`;
+    return tn("widget.error.modelNotDownloaded", { model });
   }
 
   if (
@@ -54,54 +55,54 @@ function toUserFacingErrorMessage(error: unknown): string {
     normalized.includes("os error 61") ||
     normalized.includes("os error 111")
   ) {
-    return "Не удалось запустить локальный runtime распознавания. Откройте Настройки -> Модели -> Локально и нажмите «Скачать» для нужной Whisper-модели.";
+    return tn("widget.error.localRuntimeStartFailed");
   }
 
   if (normalized.includes("unsupported_country_region_territory") || normalized.includes("country, region, or territory not supported")) {
-    return "Сервис распознавания сейчас недоступен в вашем регионе. Попробуйте другой endpoint или VPN.";
+    return tn("widget.error.regionUnsupported");
   }
 
   if (normalized.includes("403") || normalized.includes("forbidden")) {
     if (normalized.includes("subscription inactive") || normalized.includes("активная подписка") || normalized.includes("cloud mode")) {
-      return "Для облачного режима нужна активная подписка Talkis.";
+      return tn("widget.error.subscriptionRequired");
     }
 
-    return "Сервис отклонил запрос. Проверьте API-ключ, регион доступа или настройки endpoint.";
+    return tn("widget.error.requestRejected");
   }
 
   if (normalized.includes("invalid or expired token") || normalized.includes("token expired") || normalized.includes("token missing user id")) {
-    return "Сессия Talkis Cloud истекла. Войдите в облако заново.";
+    return tn("widget.error.cloudSessionExpired");
   }
 
   if (normalized.includes("talkis cloud session missing")) {
-    return "Войдите в Talkis Cloud заново, чтобы использовать облачный режим.";
+    return tn("widget.error.cloudSignInRequired");
   }
 
   if (normalized.includes("talkis cloud returned an invalid response")) {
-    return "Talkis Cloud вернул некорректный ответ. Попробуйте отправить запись ещё раз.";
+    return tn("widget.error.cloudInvalidResponse");
   }
 
   if (normalized.includes("subscription check failed") || normalized.includes("cloud auth unavailable")) {
-    return "Talkis Cloud временно недоступен. Попробуйте ещё раз через несколько секунд.";
+    return tn("widget.error.cloudUnavailable");
   }
 
   if (normalized.includes("401") || normalized.includes("unauthorized") || normalized.includes("invalid api key")) {
-    return "Не удалось авторизоваться в API. Проверьте ваш ключ доступа.";
+    return tn("widget.error.authFailed");
   }
 
   if (normalized.includes("429") || normalized.includes("rate limit") || normalized.includes("quota")) {
-    return "Превышен лимит запросов или закончилась квота API. Попробуйте позже.";
+    return tn("widget.error.rateLimited");
   }
 
   if (normalized.includes("network") || normalized.includes("fetch") || normalized.includes("failed to fetch") || normalized.includes("timed out")) {
-    return "Не удалось связаться с сервером. Проверьте интернет и попробуйте снова.";
+    return tn("widget.error.networkFailed");
   }
 
   if (normalized.includes("500") || normalized.includes("502") || normalized.includes("503") || normalized.includes("504") || normalized.includes("server")) {
-    return "Сервис временно недоступен. Попробуйте повторить отправку чуть позже.";
+    return tn("widget.error.serverUnavailable");
   }
 
-  return "Не удалось обработать запись. Попробуйте отправить ее повторно.";
+  return tn("widget.error.processingFailed");
 }
 
 function normalizeTranscriptForPlaceholderCheck(value: string): string {
@@ -369,13 +370,11 @@ export async function processRecordingBlob({
   }
 }
 
-const INTERRUPTED_MESSAGE = "Обработка остановлена. Можно запустить повторно.";
-
 function buildInterruptedEntry(entry: HistoryEntry): HistoryEntry {
   return {
     ...entry,
     status: "interrupted",
-    errorMessage: INTERRUPTED_MESSAGE,
+    errorMessage: tn("widget.processing.interrupted"),
   };
 }
 
@@ -385,7 +384,7 @@ export async function retryHistoryEntry(
   options?: { shouldPaste?: boolean },
 ): Promise<RetryHistoryEntryResult> {
   if (!entry.audioBase64) {
-    throw new Error("У этой записи нет сохраненного аудио для повторной отправки.");
+    throw new Error(tn("widget.error.noSavedAudio"));
   }
 
   const retrySettings: AppSettings = {
@@ -415,7 +414,7 @@ export async function retryHistoryEntry(
     }
 
     if (!hasRecognizedSpeech(result)) {
-      throw new Error("Речь не распознана. Попробуйте отправить запись еще раз.");
+      throw new Error(tn("widget.error.speechNotRecognized"));
     }
 
     const updatedEntry: HistoryEntry = {

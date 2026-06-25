@@ -22,6 +22,7 @@ struct LlmModelInfo {
     file_name: &'static str,
     url: &'static str,
     label: &'static str,
+    description: &'static str,
     size_label: &'static str,
     min_ram_gb: u32,
 }
@@ -34,6 +35,7 @@ static LLM_CATALOG: &[LlmModelInfo] = &[
         file_name: "Qwen2.5-3B-Instruct-Q4_K_M.gguf",
         url: "https://huggingface.co/bartowski/Qwen2.5-3B-Instruct-GGUF/resolve/main/Qwen2.5-3B-Instruct-Q4_K_M.gguf",
         label: "Qwen2.5 3B Instruct",
+        description: "Компактная текстовая модель для саммари на слабых машинах: быстрая, с хорошей поддержкой русского.",
         size_label: "2.0 ГБ",
         min_ram_gb: 8,
     },
@@ -42,6 +44,7 @@ static LLM_CATALOG: &[LlmModelInfo] = &[
         file_name: "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
         url: "https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
         label: "Qwen2.5 7B Instruct",
+        description: "Более качественная текстовая модель для детальных саммари: точнее, но требовательнее к памяти.",
         size_label: "4.7 ГБ",
         min_ram_gb: 16,
     },
@@ -374,6 +377,7 @@ pub fn stop_runtime() {
 pub struct LocalLlmModel {
     id: String,
     label: String,
+    description: String,
     file_name: String,
     size_label: String,
     min_ram_gb: u32,
@@ -387,6 +391,7 @@ pub fn list_local_llm_models(app: AppHandle) -> Vec<LocalLlmModel> {
         .map(|model| LocalLlmModel {
             id: model.id.to_string(),
             label: model.label.to_string(),
+            description: model.description.to_string(),
             file_name: model.file_name.to_string(),
             size_label: model.size_label.to_string(),
             min_ram_gb: model.min_ram_gb,

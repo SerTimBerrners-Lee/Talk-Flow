@@ -9,6 +9,9 @@ import {
   STATS_UPDATED_EVENT,
   type TranscriptionStatsView,
 } from "../lib/stats";
+import { useI18n } from "../lib/i18n";
+
+type TranslateFn = ReturnType<typeof useI18n>["t"];
 
 function compact(scaled: number, suffix: string): string {
   // One decimal below 100 (12,5к), whole numbers above (123к); comma decimal.
@@ -20,14 +23,14 @@ function compact(scaled: number, suffix: string): string {
 }
 
 /** Full number up to 10k, then abbreviated: 200000 → "200к", 1 200 000 → "1,2М". */
-function formatStatValue(value: number): string {
+function formatStatValue(value: number, t: TranslateFn): string {
   if (value < 10_000) {
     return String(value);
   }
   if (value < 1_000_000) {
-    return compact(value / 1000, "к");
+    return compact(value / 1000, t("stats.suffix.thousand"));
   }
-  return compact(value / 1_000_000, "М");
+  return compact(value / 1_000_000, t("stats.suffix.million"));
 }
 
 interface StatItem {
@@ -36,27 +39,28 @@ interface StatItem {
   value: string;
 }
 
-function buildStats(view: TranscriptionStatsView): StatItem[] {
+function buildStats(view: TranscriptionStatsView, t: TranslateFn): StatItem[] {
   return [
     {
       key: "month",
-      label: "Слов за месяц",
-      value: formatStatValue(view.monthWords),
+      label: t("stats.wordsThisMonth"),
+      value: formatStatValue(view.monthWords, t),
     },
     {
       key: "all",
-      label: "Слов всего",
-      value: formatStatValue(view.allTimeWords),
+      label: t("stats.wordsTotal"),
+      value: formatStatValue(view.allTimeWords, t),
     },
     {
       key: "speed",
-      label: "Слов в минуту",
-      value: view.hasSpeed ? formatStatValue(view.averageWpm) : "—",
+      label: t("stats.wordsPerMinute"),
+      value: view.hasSpeed ? formatStatValue(view.averageWpm, t) : "—",
     },
   ];
 }
 
 export function TranscriptionStatsPanel(): ReactElement {
+  const { t } = useI18n();
   const [view, setView] = useState<TranscriptionStatsView>(() => getEmptyView());
 
   useEffect(() => {
@@ -87,7 +91,7 @@ export function TranscriptionStatsPanel(): ReactElement {
     };
   }, []);
 
-  const stats = buildStats(view);
+  const stats = buildStats(view, t);
 
   return (
     <section

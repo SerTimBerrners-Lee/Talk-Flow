@@ -16,6 +16,7 @@ import {
   SETTINGS_UPDATED_EVENT,
 } from "../../../lib/hotkeyEvents";
 import { logError, logInfo } from "../../../lib/logger";
+import { useI18n } from "../../../lib/i18n";
 import type { WidgetAction, WidgetMachineState } from "../services/widgetMachine";
 
 interface UseWidgetHotkeyParams {
@@ -41,6 +42,7 @@ export function useWidgetHotkey({
   clearReleaseStopTimer,
   showError,
 }: UseWidgetHotkeyParams): void {
+  const { t } = useI18n();
   const attemptHotkeyRegistrationRef = useRef<(rawHotkey: string) => Promise<HotkeyRegistrationResultPayload>>(
     attemptHotkeyRegistrationPlaceholder,
   );
@@ -92,7 +94,7 @@ export function useWidgetHotkey({
         success: false,
         requestedHotkey: rawHotkey,
         activeHotkey: registeredHotkeyRef.current ?? settingsRef.current?.hotkey ?? DEFAULT_HOTKEY,
-        message: normalized.error || "Неверный формат горячей клавиши",
+        message: normalized.error || t("widget.hotkey.invalidFormat"),
       };
     }
 
@@ -132,10 +134,10 @@ export function useWidgetHotkey({
         success: false,
         requestedHotkey: nextHotkey,
         activeHotkey: currentHotkey ?? settingsRef.current?.hotkey ?? DEFAULT_HOTKEY,
-        message: `Не удалось зарегистрировать горячую клавишу "${nextHotkey}". Возможно, сочетание занято другим приложением.`,
+        message: t("widget.hotkey.registerFailed", { hotkey: nextHotkey }),
       };
     }
-  }, [handleHotkeyPress, registeredHotkeyRef, settingsRef]);
+  }, [handleHotkeyPress, registeredHotkeyRef, settingsRef, t]);
 
   const registerCurrentHotkey = useCallback(async () => {
     const activeSettings = settingsRef.current;
@@ -146,9 +148,9 @@ export function useWidgetHotkey({
 
     const result = await attemptHotkeyRegistration(activeSettings.hotkey || DEFAULT_HOTKEY);
     if (!result.success) {
-      showError(result.message || "Не удалось зарегистрировать горячую клавишу.");
+      showError(result.message || t("widget.hotkey.registerFailedGeneric"));
     }
-  }, [attemptHotkeyRegistration, settingsLoaded, settingsRef, showError]);
+  }, [attemptHotkeyRegistration, settingsLoaded, settingsRef, showError, t]);
 
   useEffect(() => {
     void registerCurrentHotkey();

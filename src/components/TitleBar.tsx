@@ -1,5 +1,7 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
+import { useI18n } from "../lib/i18n";
+
 function TrafficLight({ color, onClick, title }: { color: string; onClick: () => void; title: string }) {
   return (
     <button
@@ -24,6 +26,7 @@ function TrafficLight({ color, onClick, title }: { color: string; onClick: () =>
 }
 
 export function TitleBar() {
+  const { t } = useI18n();
   const win = getCurrentWindow();
 
   return (
@@ -55,9 +58,9 @@ export function TitleBar() {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8, width: 56 }}>
-          <TrafficLight color="#ff5f57" title="Закрыть" onClick={() => win.close()} />
-          <TrafficLight color="#febc2e" title="Свернуть" onClick={() => win.minimize()} />
-          <TrafficLight color="#28c840" title="Развернуть" onClick={() => win.toggleMaximize()} />
+          <TrafficLight color="#ff5f57" title={t("titleBar.close")} onClick={() => win.close()} />
+          <TrafficLight color="#febc2e" title={t("titleBar.minimize")} onClick={() => win.minimize()} />
+          <TrafficLight color="#28c840" title={t("titleBar.maximize")} onClick={() => win.toggleMaximize()} />
         </div>
 
         <div style={{ fontSize: 12, fontWeight: 600, color: "var(--titlebar-text)", letterSpacing: "-0.02em" }}>

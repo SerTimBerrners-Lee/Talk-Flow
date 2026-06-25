@@ -9,6 +9,7 @@ import {
   Check,
   Clipboard,
   FileAudio,
+  ListChecks,
   Loader2,
   X,
 } from "lucide-react";
@@ -23,10 +24,11 @@ import {
   type AppSettings,
   type SpeakerTranscriptSegment,
 } from "../../../lib/store";
-import { HISTORY_UPDATED_EVENT } from "../../../lib/hotkeyEvents";
+import { HISTORY_UPDATED_EVENT, SETTINGS_UPDATED_EVENT } from "../../../lib/hotkeyEvents";
 import { formatErrorMessage } from "../../../lib/utils";
-import { transcriptToText } from "../../../lib/summarize";
-import { SummaryPanel } from "../../../components/SummaryPanel";
+import { isSummaryAvailable } from "../../../lib/summarize";
+import { SummaryModal } from "../../../components/SummaryModal";
+import { useI18n, type TFunc } from "../../../lib/i18n";
 import {
   canUseCloudSpeakerDiarization,
   fileNameFromPath,
@@ -118,23 +120,27 @@ function getDiarizationWhisperOption(
 function statusLabel(
   status: ProcessingState,
   progress: FileTranscriptionProgress | null,
+  t: TFunc,
 ): string {
-  if (status === "reading") return "Читаем файл";
-  if (status === "converting") return "Извлекаем и сжимаем аудио";
-  if (status === "uploading") return "Отправляем на транскрибацию";
-  if (status === "preparing") return progress?.message || "Готовим файл";
-  if (status === "diarizing") return progress?.message || "Разделяем говорящих";
+  if (status === "reading") return t("fileTab.status.reading");
+  if (status === "converting") return t("fileTab.status.converting");
+  if (status === "uploading") return t("fileTab.status.uploading");
+  if (status === "preparing") return progress?.message || t("fileTab.status.preparing");
+  if (status === "diarizing") return progress?.message || t("fileTab.status.diarizing");
   if (status === "transcribing") {
     if (progress && progress.totalChunks > 0) {
-      return `Распознаём фрагмент ${progress.currentChunk} из ${progress.totalChunks}`;
+      return t("fileTab.status.transcribingChunk", {
+        current: progress.currentChunk,
+        total: progress.totalChunks,
+      });
     }
 
-    return "Распознаём фрагменты";
+    return t("fileTab.status.transcribing");
   }
-  if (status === "assembling") return progress?.message || "Собираем протокол";
-  if (status === "done") return "Готово";
-  if (status === "error") return "Ошибка";
-  return "Ожидаем файл";
+  if (status === "assembling") return progress?.message || t("fileTab.status.assembling");
+  if (status === "done") return t("fileTab.status.done");
+  if (status === "error") return t("fileTab.status.error");
+  return t("fileTab.status.idle");
 }
 
 function formatTimestamp(seconds: number): string {
@@ -154,10 +160,10 @@ function formatSpeakerTranscript(segments: SpeakerTranscriptSegment[]): string {
     .join("\n");
 }
 
-function resultSourceLabel(entry: HistoryEntry): string {
-  if (entry.source === "call") return "Созвон";
-  if (entry.source === "file") return "Файл";
-  return "Голос";
+function resultSourceLabel(entry: HistoryEntry, t: TFunc): string {
+  if (entry.source === "call") return t("fileTab.source.call");
+  if (entry.source === "file") return t("fileTab.source.file");
+  return t("fileTab.source.voice");
 }
 
 function requirementStatusColor(isReady: boolean): string {
@@ -180,20 +186,20 @@ function isSpeakerSetupRepairError(error: unknown): boolean {
   );
 }
 
-function toSpeakerSetupErrorMessage(error: unknown): string {
+function toSpeakerSetupErrorMessage(error: unknown, t: TFunc): string {
   const raw = formatErrorMessage(error);
   const normalized = raw.toLowerCase();
 
   if (normalized.includes("401") || normalized.includes("api-ключ")) {
-    return "Не удалось подготовить локальные компоненты: STT runtime отклонил API-ключ.";
+    return t("fileTab.setupError.rejectedKey");
   }
 
   if (normalized.includes("403")) {
-    return "Не удалось подготовить локальные компоненты: STT runtime запретил установку модели.";
+    return t("fileTab.setupError.forbidden");
   }
 
   if (normalized.includes("timeout") || normalized.includes("timed out")) {
-    return "Не удалось подготовить локальные компоненты: локальный STT runtime не ответил вовремя.";
+    return t("fileTab.setupError.timeout");
   }
 
   if (
@@ -202,7 +208,7 @@ function toSpeakerSetupErrorMessage(error: unknown): string {
     normalized.includes("python3-venv") ||
     normalized.includes("no module named pip")
   ) {
-    return "Не удалось подготовить локальные компоненты: в системе нет Python venv/pip. Установите пакет python3.12-venv и повторите скачивание.";
+    return t("fileTab.setupError.noVenv");
   }
 
   if (
@@ -214,8 +220,8 @@ function toSpeakerSetupErrorMessage(error: unknown): string {
   }
 
   return raw.trim()
-    ? `Не удалось подготовить локальные компоненты для разделения по говорящим: ${raw}`
-    : "Не удалось подготовить локальные компоненты для разделения по говорящим.";
+    ? t("fileTab.setupError.genericWithDetail", { detail: raw })
+    : t("fileTab.setupError.generic");
 }
 
 async function refreshSpeakerInstalledModels(
@@ -291,6 +297,7 @@ async function refreshSpeakerInstalledModels(
 export function FileTranscriptionTab({
   focusedEntryId = null,
 }: FileTranscriptionTabProps = {}): JSX.Element {
+  const { t } = useI18n();
   const inputRef = useRef<HTMLInputElement>(null);
   const resultSectionRef = useRef<HTMLElement | null>(null);
   const isProcessingRef = useRef(false);
@@ -311,6 +318,8 @@ export function FileTranscriptionTab({
   const [convertedInfo, setConvertedInfo] = useState("");
   const [isDragOver, setIsDragOver] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  const [summaryAvailable, setSummaryAvailable] = useState(false);
   const [resultExpanded, setResultExpanded] = useState(false);
   const [speakerDiarization, setSpeakerDiarization] = useState(false);
   const [diarizationInstalled, setDiarizationInstalled] = useState(false);
@@ -360,6 +369,7 @@ export function FileTranscriptionTab({
         if (!mounted) return;
 
         settingsRef.current = settings;
+        setSummaryAvailable(isSummaryAvailable(settings));
         setSpeakerDiarization(settings.fileSpeakerDiarization);
         syncSpeakerSetupState(settings);
 
@@ -373,6 +383,7 @@ export function FileTranscriptionTab({
           if (!mounted) return;
 
           settingsRef.current = syncedSettings;
+          setSummaryAvailable(isSummaryAvailable(syncedSettings));
           syncSpeakerSetupState(syncedSettings);
           if (speakerDiarizationToggleRunRef.current !== validationRun) {
             return;
@@ -399,6 +410,21 @@ export function FileTranscriptionTab({
     };
   }, []);
 
+  // Keep the summary availability in sync when the text model is changed from
+  // the «Models» tab (same window) or another window.
+  useEffect(() => {
+    let mounted = true;
+    const unlisten = listen(SETTINGS_UPDATED_EVENT, () => {
+      void getSettings({ reload: true }).then((settings) => {
+        if (mounted) setSummaryAvailable(isSummaryAvailable(settings));
+      });
+    });
+    return () => {
+      mounted = false;
+      void unlisten.then((dispose) => dispose());
+    };
+  }, []);
+
   const resetResult = (): void => {
     setResultEntry(null);
     setError("");
@@ -413,7 +439,7 @@ export function FileTranscriptionTab({
     scrollToResult = false,
   ): void => {
     setSelectedFile({
-      name: entry.fileName || "Файл",
+      name: entry.fileName || t("fileTab.source.file"),
       size: entry.fileSize ?? null,
     });
     setError("");
@@ -496,9 +522,7 @@ export function FileTranscriptionTab({
 
     try {
       if (speakerDiarization) {
-        throw new Error(
-          "Разделение по говорящим доступно для файлов, выбранных через системный диалог или перетаскиванием в окно Talkis.",
-        );
+        throw new Error(t("fileTab.error.speakerNeedsDialog"));
       }
       const settings = await getSettings();
       const startedAt = Date.now();
@@ -526,7 +550,10 @@ export function FileTranscriptionTab({
       setResultEntry(entry);
       setConvertedInfo(
         transcription.converted
-          ? `Отправлено как ${transcription.uploadedFileName}, ${formatFileSize(transcription.uploadedSizeBytes)}`
+          ? t("fileTab.convertedInfo", {
+              name: transcription.uploadedFileName,
+              size: formatFileSize(transcription.uploadedSizeBytes),
+            })
           : "",
       );
       setStatus("done");
@@ -658,7 +685,7 @@ export function FileTranscriptionTab({
         multiple: false,
         filters: [
           {
-            name: "Аудио и видео",
+            name: t("fileTab.dialog.audioVideoFilter"),
             extensions: [
               "mp3",
               "wav",
@@ -722,7 +749,7 @@ export function FileTranscriptionTab({
     if (speakerSetupInstalling) return;
 
     setSpeakerSetupInstalling(true);
-    setSpeakerSetupMessage("Готовим локальные компоненты...");
+    setSpeakerSetupMessage(t("fileTab.setup.preparing"));
     setSpeakerSetupError("");
     try {
       let settings = await getSettings({ reload: true });
@@ -731,7 +758,7 @@ export function FileTranscriptionTab({
 
       if (!getDiarizationWhisperOption(settings)) {
         setSpeakerSetupMessage(
-          `Скачиваем ${RECOMMENDED_LOCAL_WHISPER_LABEL}...`,
+          t("fileTab.setup.downloading", { name: RECOMMENDED_LOCAL_WHISPER_LABEL }),
         );
         const whisperResult = await invoke<{
           success: boolean;
@@ -767,8 +794,8 @@ export function FileTranscriptionTab({
       ) {
         setSpeakerSetupMessage(
           speakerSetupForceRepair
-            ? "Восстанавливаем runtime для разметки..."
-            : "Скачиваем компоненты для разметки говорящих...",
+            ? t("fileTab.setup.repairing")
+            : t("fileTab.setup.downloadingDiarization"),
         );
         const speakerResult = await invoke<{
           success: boolean;
@@ -805,8 +832,8 @@ export function FileTranscriptionTab({
       syncSpeakerSetupState(finalSettings);
       setSpeakerSetupMessage(
         speakerSetupIntent === "toggle"
-          ? "Готово."
-          : "Готово. Продолжаем обработку файла...",
+          ? t("fileTab.setup.done")
+          : t("fileTab.setup.doneContinue"),
       );
       setSpeakerSetupError("");
       setError("");
@@ -828,7 +855,7 @@ export function FileTranscriptionTab({
       }
       setSpeakerSetupIntent(null);
     } catch (caughtError) {
-      setSpeakerSetupError(toSpeakerSetupErrorMessage(caughtError));
+      setSpeakerSetupError(toSpeakerSetupErrorMessage(caughtError, t));
     } finally {
       setSpeakerSetupInstalling(false);
     }
@@ -958,7 +985,7 @@ export function FileTranscriptionTab({
     shouldCollapseResult && !resultExpanded
       ? `${resultText.slice(0, RESULT_PREVIEW_LIMIT).trimEnd()}...`
       : resultText;
-  const speakerSetupActionLabel = "Скачать";
+  const speakerSetupActionLabel = t("common.download");
   const closeSpeakerSetupModal = (): void => {
     if (speakerSetupInstalling) return;
 
@@ -987,12 +1014,12 @@ export function FileTranscriptionTab({
               letterSpacing: "-0.03em",
             }}
           >
-            Транскрибация
+            {t("fileTab.heading")}
           </h2>
           <div
             style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}
           >
-            Голый текст без дополнительного форматирования.
+            {t("fileTab.subheading")}
           </div>
         </div>
       </section>
@@ -1079,7 +1106,7 @@ export function FileTranscriptionTab({
             <div
               style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)" }}
             >
-              {selectedFile ? selectedFile.name : "Перетащите аудио или видео"}
+              {selectedFile ? selectedFile.name : t("fileTab.dropzone.title")}
             </div>
             <div
               style={{
@@ -1089,8 +1116,8 @@ export function FileTranscriptionTab({
               }}
             >
               {selectedFile
-                ? `${selectedFile.size !== null ? `${formatFileSize(selectedFile.size)} · ` : ""}${statusLabel(status, progress)}${isProcessing ? ` · ${progressPercent}%` : ""}`
-                : "Нажмите на область или перетащите файл. MP3, WAV, M4A, MP4, MOV, WEBM и другие форматы"}
+                ? `${selectedFile.size !== null ? `${formatFileSize(selectedFile.size)} · ` : ""}${statusLabel(status, progress, t)}${isProcessing ? ` · ${progressPercent}%` : ""}`
+                : t("fileTab.dropzone.hint")}
             </div>
             {convertedInfo && (
               <div
@@ -1169,12 +1196,12 @@ export function FileTranscriptionTab({
               marginBottom: 3,
             }}
           >
-            Разделить по говорящим
+            {t("fileTab.speaker.toggleTitle")}
           </div>
           <div
             style={{ fontSize: 12, color: "var(--text-mid)", lineHeight: 1.5 }}
           >
-            Протокол с таймкодами и метками Гость 1, Гость 2.
+            {t("fileTab.speaker.toggleDesc")}
           </div>
         </div>
         <button
@@ -1230,7 +1257,7 @@ export function FileTranscriptionTab({
           <div
             style={{ fontSize: 14, fontWeight: 700, color: "var(--text-hi)" }}
           >
-            Результат
+            {t("fileTab.result.title")}
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1248,7 +1275,21 @@ export function FileTranscriptionTab({
                 ) : (
                   <Clipboard size={13} strokeWidth={2} />
                 )}
-                {copied ? "Скопировано" : "Скопировать"}
+                {copied ? t("fileTab.result.copied") : t("fileTab.result.copy")}
+              </button>
+            )}
+
+            {resultEntry && (
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setSummaryOpen(true)}
+                disabled={!summaryAvailable}
+                title={summaryAvailable ? undefined : t("summary.unavailable.tooltip")}
+                style={{ minHeight: 32, padding: "0 12px", gap: 6, opacity: summaryAvailable ? 1 : 0.5, cursor: summaryAvailable ? "pointer" : "not-allowed" }}
+              >
+                <ListChecks size={13} strokeWidth={2} />
+                {t("summary.button")}
               </button>
             )}
 
@@ -1262,7 +1303,7 @@ export function FileTranscriptionTab({
                   resetResult();
                 }}
                 style={{ width: 32, minWidth: 32, minHeight: 32, padding: 0 }}
-                title="Очистить"
+                title={t("fileTab.result.clear")}
               >
                 <X size={14} strokeWidth={2} />
               </button>
@@ -1270,10 +1311,27 @@ export function FileTranscriptionTab({
           </div>
         </div>
 
-        {resultEntry && (
-          <SummaryPanel
-            key={resultEntry.id}
-            text={transcriptToText(resultEntry)}
+        {resultEntry && !summaryAvailable && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 8,
+              fontSize: 12,
+              lineHeight: 1.55,
+              color: "var(--text-mid)",
+            }}
+          >
+            <AlertCircle size={14} strokeWidth={2} style={{ flexShrink: 0, marginTop: 1, color: "var(--accent)" }} />
+            <span>{t("summary.unavailable.note")}</span>
+          </div>
+        )}
+
+        {summaryOpen && resultEntry && summaryAvailable && (
+          <SummaryModal
+            entry={resultEntry}
+            onClose={() => setSummaryOpen(false)}
+            onEntryChange={setResultEntry}
           />
         )}
 
@@ -1300,7 +1358,7 @@ export function FileTranscriptionTab({
                         fontSize: 12,
                         fontWeight: 650,
                       }}
-                      aria-label={`Имя ${speaker.label}`}
+                      aria-label={t("fileTab.speaker.nameAria", { name: speaker.label })}
                     />
                   ))}
                 </div>
@@ -1357,8 +1415,8 @@ export function FileTranscriptionTab({
             <table className="b-table" style={{ background: "transparent" }}>
               <thead>
                 <tr>
-                  <th style={{ width: 92 }}>Время</th>
-                  <th style={{ paddingLeft: 8 }}>Текст</th>
+                  <th style={{ width: 92 }}>{t("fileTab.table.time")}</th>
+                  <th style={{ paddingLeft: 8 }}>{t("fileTab.table.text")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1393,7 +1451,7 @@ export function FileTranscriptionTab({
                           letterSpacing: "0.02em",
                         }}
                       >
-                        {resultSourceLabel(resultEntry)}
+                        {resultSourceLabel(resultEntry, t)}
                       </span>
                     </div>
                   </td>
@@ -1428,7 +1486,7 @@ export function FileTranscriptionTab({
                             justifySelf: "start",
                           }}
                         >
-                          {resultExpanded ? "Скрыть" : "Раскрыть"}
+                          {resultExpanded ? t("fileTab.result.collapse") : t("fileTab.result.expand")}
                         </button>
                       )}
                     </div>
@@ -1447,7 +1505,7 @@ export function FileTranscriptionTab({
               fontSize: 13,
             }}
           >
-            После обработки здесь появится текст.
+            {t("fileTab.result.empty")}
           </div>
         )}
       </section>
@@ -1488,7 +1546,7 @@ export function FileTranscriptionTab({
                 marginBottom: 8,
               }}
             >
-              Нужна локальная подготовка
+              {t("fileTab.modal.title")}
             </div>
             <div
               style={{
@@ -1499,8 +1557,8 @@ export function FileTranscriptionTab({
               }}
             >
               {localWhisperDownloaded
-                ? `Для разделения по говорящим Talkis использует ${localWhisperLabel} для распознавания с таймкодами и подготовит локальные компоненты для разметки говорящих.`
-                : `Для разделения по говорящим Talkis подготовит ${RECOMMENDED_LOCAL_WHISPER_LABEL} для распознавания с таймкодами и локальные компоненты для разметки говорящих.`}
+                ? t("fileTab.modal.descDownloaded", { name: localWhisperLabel })
+                : t("fileTab.modal.descNeedDownload", { name: RECOMMENDED_LOCAL_WHISPER_LABEL })}
             </div>
 
             <div style={{ display: "grid", gap: 8, marginBottom: 16 }}>
@@ -1521,8 +1579,8 @@ export function FileTranscriptionTab({
                 )}
                 <span>
                   {localWhisperDownloaded
-                    ? `${localWhisperLabel} готова для разметки`
-                    : `${RECOMMENDED_LOCAL_WHISPER_LABEL} будет скачан`}
+                    ? t("fileTab.modal.whisperReady", { name: localWhisperLabel })
+                    : t("fileTab.modal.whisperWillDownload", { name: RECOMMENDED_LOCAL_WHISPER_LABEL })}
                 </span>
               </div>
               <div
@@ -1542,8 +1600,8 @@ export function FileTranscriptionTab({
                 )}
                 <span>
                   {diarizationInstalled
-                    ? "Компоненты для разметки"
-                    : "Компоненты для разметки говорящих будут скачаны"}
+                    ? t("fileTab.modal.diarizationReady")
+                    : t("fileTab.modal.diarizationWillDownload")}
                 </span>
               </div>
             </div>
@@ -1593,7 +1651,7 @@ export function FileTranscriptionTab({
                   cursor: speakerSetupInstalling ? "not-allowed" : "pointer",
                 }}
               >
-                Отмена
+                {t("common.cancel")}
               </button>
               <button
                 type="button"

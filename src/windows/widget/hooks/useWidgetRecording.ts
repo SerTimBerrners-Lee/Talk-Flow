@@ -3,6 +3,7 @@ import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
 import { AppSettings, getSettings } from "../../../lib/store";
 import { logError, logInfo } from "../../../lib/logger";
+import { useI18n } from "../../../lib/i18n";
 import { formatErrorMessage } from "../../../lib/utils";
 import {
   CALL_STACK_WIDGET_HEIGHT,
@@ -118,6 +119,7 @@ export function useWidgetRecording({
   onRecordingStart,
   onRecordingStartFailed,
 }: UseWidgetRecordingParams): UseWidgetRecordingResult {
+  const { t } = useI18n();
   const runtimeRef = useRef(createRecordingRuntimeController());
   const lowMicMonitorCleanupRef = useRef<(() => void) | null>(null);
   const recordingSettingsRef = useRef<AppSettings | null>(null);
@@ -183,7 +185,7 @@ export function useWidgetRecording({
         lowStartedAt ??= now;
         if (now - lowStartedAt >= LOW_MIC_SUSTAINED_MS) {
           noticeShown = true;
-          showNotice("Микрофон слышит слишком тихо. Поднесите его ближе или проверьте выбранное устройство.", "info");
+          showNotice(t("widget.recording.lowMic"), "info");
         }
       }, LOW_MIC_SAMPLE_INTERVAL_MS);
 
@@ -197,7 +199,7 @@ export function useWidgetRecording({
     } catch (error) {
       logError("RECORDING", `Low mic monitor failed: ${formatErrorMessage(error)}`);
     }
-  }, [showNotice, stopLowMicMonitor]);
+  }, [showNotice, stopLowMicMonitor, t]);
 
   // ── Start recording ─────────────────────────────────────────────────────
   const startRecording = useCallback(async () => {
@@ -213,7 +215,7 @@ export function useWidgetRecording({
 
     if (!activeSettings) {
       logError("RECORDING", "Settings not loaded");
-      showError("Настройки не загружены. Перезапустите приложение.");
+      showError(t("widget.recording.settingsNotLoaded"));
       return;
     }
 
@@ -232,15 +234,13 @@ export function useWidgetRecording({
 
     if (isCloudMode && !isSubscriptionMode) {
       logError("RECORDING", "Cloud mode selected but device token is missing");
-      showError("Войдите в Talkis Cloud заново, чтобы использовать облачный режим.");
+      showError(t("widget.recording.cloudSignInRequired"));
       return;
     }
 
     if (!isSubscriptionMode && !hasKey && !isLocalSttMode) {
       logError("RECORDING", "No transcription model configured");
-      showError(
-        "Сначала установите модель в «Настройки → Модели»: облако, локальная модель или свой API-ключ.",
-      );
+      showError(t("widget.recording.noModelConfigured"));
       return;
     }
 
@@ -300,7 +300,7 @@ export function useWidgetRecording({
             `Mic access denied: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`,
           );
           onRecordingStartFailed?.();
-          showError("Нет доступа к микрофону. Разрешите доступ в системных настройках.");
+          showError(t("widget.recording.micAccessDenied"));
           return;
         }
       }
@@ -335,10 +335,15 @@ export function useWidgetRecording({
       setStream(null);
       logError("RECORDING", `Start error: ${error instanceof Error ? error.message : "unknown"}`);
       showError(
-        `Ошибка запуска записи: ${error instanceof Error ? error.message : "Неизвестная ошибка"}`,
+        t("widget.recording.startError", {
+          error:
+            error instanceof Error
+              ? error.message
+              : t("widget.recording.unknownError"),
+        }),
       );
     }
-  }, [dispatch, hideNotice, machineRef, onRecordingStart, onRecordingStartFailed, resizeWidget, setStream, settings, showError, startLowMicMonitor, stopLowMicMonitor]);
+  }, [dispatch, hideNotice, machineRef, onRecordingStart, onRecordingStartFailed, resizeWidget, setStream, settings, showError, startLowMicMonitor, stopLowMicMonitor, t]);
 
   // ── Stop and process ────────────────────────────────────────────────────
   const stopAndProcess = useCallback(async () => {
@@ -372,7 +377,7 @@ export function useWidgetRecording({
 
       if (!runtimeRef.current.hasAudioChunks()) {
         logError("RECORDING", "No audio chunks recorded");
-        throw new Error("Аудио не записано. Попробуйте еще раз.");
+        throw new Error(t("widget.recording.noAudioRecorded"));
       }
 
       const blob = await runtimeRef.current.getAudioBlob();
@@ -400,7 +405,7 @@ export function useWidgetRecording({
       if (!pipelineResult.hasTranscription) {
         recordingSettingsRef.current = null;
         runtimeRef.current.reset();
-        showNotice("Речь не распознана. Попробуйте еще раз.", "info");
+        showNotice(t("widget.recording.speechNotRecognized"), "info");
         dispatch({ type: "PROCESSING_COMPLETE" });
         await resizeWidget(CALL_STACK_WIDGET_WIDTH, CALL_STACK_WIDGET_HEIGHT);
         return;
@@ -414,13 +419,13 @@ export function useWidgetRecording({
       const errorMessage = formatErrorMessage(error);
       logError("API", `Processing error: ${errorMessage}`);
 
-      const message = errorMessage && errorMessage !== "{}" ? errorMessage : "Ошибка обработки";
+      const message = errorMessage && errorMessage !== "{}" ? errorMessage : t("widget.recording.processingError");
 
       recordingSettingsRef.current = null;
       runtimeRef.current.reset();
       showError(message);
     }
-  }, [dispatch, machineRef, onRecordingProcessing, resizeWidget, setStream, settings, showError, showNotice, stopLowMicMonitor]);
+  }, [dispatch, machineRef, onRecordingProcessing, resizeWidget, setStream, settings, showError, showNotice, stopLowMicMonitor, t]);
 
   // ── Keep stopAndProcessRef current ──────────────────────────────────────
   useEffect(() => {

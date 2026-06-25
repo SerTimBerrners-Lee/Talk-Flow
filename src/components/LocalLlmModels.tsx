@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Check, Download, HardDrive, Loader2, MemoryStick, Trash2, X } from "lucide-react";
+import { AlertCircle, Check, Download, HardDrive, Loader2, MemoryStick, Trash2, X } from "lucide-react";
 
 import { AppSettings } from "../lib/store";
+import { useI18n } from "../lib/i18n";
 import qwenAvatar from "../assets/adapters/qwen.png";
 
 interface LocalLlmModel {
   id: string;
   label: string;
+  description: string;
   file_name: string;
   size_label: string;
   min_ram_gb: number;
@@ -52,10 +54,12 @@ export function LocalLlmModels({
   settings: AppSettings;
   update: (patch: Partial<AppSettings>) => void;
 }) {
+  const { t } = useI18n();
   const [models, setModels] = useState<LocalLlmModel[]>([]);
   const [status, setStatus] = useState<LocalLlmStatus | null>(null);
   const [progress, setProgress] = useState<Record<string, DownloadProgress>>({});
   const [busy, setBusy] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = async (): Promise<void> => {
@@ -143,6 +147,7 @@ export function LocalLlmModels({
 
   const remove = async (model: LocalLlmModel): Promise<void> => {
     setBusy(model.id);
+    setDeleting(model.id);
     setError(null);
     try {
       await invoke("delete_local_llm_model", { modelId: model.id });
@@ -156,6 +161,7 @@ export function LocalLlmModels({
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(null);
+      setDeleting(null);
     }
   };
 
@@ -182,10 +188,10 @@ export function LocalLlmModels({
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div>
         <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)", marginBottom: 4 }}>
-          Текстовые модели
+          {t("localLlm.title")}
         </div>
         <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>
-          Скачайте локальную модель и используйте ее для summary без облака.
+          {t("localLlm.desc")}
         </div>
       </div>
 
@@ -205,26 +211,51 @@ export function LocalLlmModels({
         </div>
       )}
 
+      {!usingLocalEndpoint && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 8,
+            fontSize: 12,
+            lineHeight: 1.55,
+            padding: "9px 11px",
+            borderRadius: 8,
+            background: "var(--control-muted)",
+            color: "var(--text-hi)",
+            border: "1px solid var(--border-subtle)",
+          }}
+        >
+          <AlertCircle size={15} strokeWidth={2} style={{ flexShrink: 0, marginTop: 1, color: "var(--accent)" }} />
+          <span>{t("localLlm.required")}</span>
+        </div>
+      )}
+
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {models.map((model) => {
           const prog = progress[model.id];
           const isDownloading =
             prog?.status === "downloading" || prog?.status === "starting";
           const isBusy = busy === model.id;
+          const isDeleting = deleting === model.id;
           const isActive = activeModelId === model.id && usingLocalEndpoint;
 
-          const statusLabel = isActive
-            ? "Активна"
-            : model.downloaded
-              ? "Скачана"
-              : isDownloading
-                ? "Загрузка"
-                : "Не скачана";
+          const statusLabel = isDeleting
+            ? t("localLlm.status.deleting")
+            : isDownloading
+              ? t("localLlm.status.downloading")
+              : isActive
+                ? t("localLlm.status.selected")
+                : model.downloaded
+                  ? t("localLlm.status.ready")
+                  : t("localLlm.status.notDownloaded");
           const statusColor = isActive
-            ? "var(--success)"
+            ? "var(--success-bright)"
             : model.downloaded
-              ? "var(--text-hi)"
-              : "var(--text-low)";
+              ? "var(--success-bright)"
+              : isDownloading || isDeleting
+                ? "var(--text-hi)"
+                : "var(--text-low)";
 
           return (
             <div
@@ -290,6 +321,9 @@ export function LocalLlmModels({
                       {statusLabel}
                     </div>
                   </div>
+                  <div style={{ fontSize: 12, lineHeight: 1.45, color: "var(--text-mid)" }}>
+                    {model.description} Runtime: Talkis Local / llama.cpp.
+                  </div>
                   <div
                     style={{
                       display: "flex",
@@ -300,8 +334,8 @@ export function LocalLlmModels({
                     }}
                   >
                     <div
-                      title={`Размер на диске: ${model.size_label}`}
-                      aria-label={`Размер на диске: ${model.size_label}`}
+                      title={t("localLlm.diskSize", { size: model.size_label })}
+                      aria-label={t("localLlm.diskSize", { size: model.size_label })}
                       style={{ display: "flex", alignItems: "center", gap: 6 }}
                     >
                       <HardDrive size={14} strokeWidth={1.9} color="var(--text-hi)" />
@@ -310,13 +344,13 @@ export function LocalLlmModels({
                       </span>
                     </div>
                     <div
-                      title={`Требуется ОЗУ: от ${model.min_ram_gb} ГБ`}
-                      aria-label={`Требуется ОЗУ: от ${model.min_ram_gb} ГБ`}
+                      title={t("localLlm.ramRequired", { ram: model.min_ram_gb })}
+                      aria-label={t("localLlm.ramRequired", { ram: model.min_ram_gb })}
                       style={{ display: "flex", alignItems: "center", gap: 6 }}
                     >
                       <MemoryStick size={14} strokeWidth={1.9} color="var(--text-hi)" />
                       <span style={{ fontSize: 12, fontWeight: 650, color: "var(--text-hi)", lineHeight: 1 }}>
-                        ≥ {model.min_ram_gb} ГБ
+                        {t("localLlm.ramShort", { ram: model.min_ram_gb })}
                       </span>
                     </div>
                   </div>
@@ -345,9 +379,9 @@ export function LocalLlmModels({
                         fontWeight: 650,
                       }}
                     >
-                      <span>Загрузка модели</span>
+                      <span>{t("localLlm.downloadingModel")}</span>
                       <span style={{ color: "var(--text-hi)" }}>
-                        {prog?.percent != null ? `${prog.percent}%` : "Подготовка"}
+                        {prog?.percent != null ? `${prog.percent}%` : t("localLlm.preparing")}
                       </span>
                     </div>
                     <div
@@ -382,22 +416,6 @@ export function LocalLlmModels({
                     flexWrap: "wrap",
                   }}
                 >
-                  {isActive && (
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        color: "var(--success)",
-                        fontSize: 12,
-                        fontWeight: 600,
-                      }}
-                    >
-                      <Check size={15} strokeWidth={2.5} />
-                      Выбрана
-                    </div>
-                  )}
-
                   <div
                     style={{
                       display: "flex",
@@ -408,44 +426,31 @@ export function LocalLlmModels({
                     }}
                   >
                     {!model.downloaded ? (
-                      <>
+                      isDownloading ? (
+                        <button
+                          onClick={() => void cancelDownload(model)}
+                          style={{
+                            ...ACTION_BUTTON_BASE,
+                            background: "var(--control-muted)",
+                            color: "var(--text-hi)",
+                          }}
+                        >
+                          <X size={14} strokeWidth={2.2} />
+                          {t("localLlm.cancel")}
+                        </button>
+                      ) : (
                         <button
                           onClick={() => void download(model)}
-                          disabled={isDownloading}
                           style={{
                             ...ACTION_BUTTON_BASE,
                             background: "var(--accent)",
                             color: "var(--accent-contrast)",
-                            opacity: isDownloading ? 0.85 : 1,
                           }}
                         >
-                          {isDownloading ? (
-                            <Loader2
-                              size={14}
-                              strokeWidth={2.2}
-                              style={{ animation: "spin 1s linear infinite" }}
-                            />
-                          ) : (
-                            <Download size={14} strokeWidth={2.2} />
-                          )}
-                          {isDownloading
-                            ? `Загрузка${prog?.percent != null ? ` ${prog.percent}%` : ""}`
-                            : "Скачать"}
+                          <Download size={14} strokeWidth={2.2} />
+                          {t("localLlm.download")}
                         </button>
-                        {isDownloading && (
-                          <button
-                            onClick={() => void cancelDownload(model)}
-                            style={{
-                              ...ACTION_BUTTON_BASE,
-                              background: "var(--control-muted)",
-                              color: "var(--text-hi)",
-                            }}
-                          >
-                            <X size={14} strokeWidth={2.2} />
-                            Отмена
-                          </button>
-                        )}
-                      </>
+                      )
                     ) : (
                       <>
                         {!isActive && (
@@ -468,7 +473,7 @@ export function LocalLlmModels({
                             ) : (
                               <Check size={14} strokeWidth={2.5} />
                             )}
-                            Выбрать
+                            {t("localLlm.select")}
                           </button>
                         )}
                         <button
@@ -477,11 +482,11 @@ export function LocalLlmModels({
                           style={{
                             ...ACTION_BUTTON_BASE,
                             background: "var(--control-muted)",
-                            color: "var(--danger)",
+                            color: "var(--text-hi)",
                           }}
                         >
                           <Trash2 size={14} strokeWidth={2.2} />
-                          Удалить
+                          {t("localLlm.delete")}
                         </button>
                       </>
                     )}

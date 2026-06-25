@@ -6,8 +6,9 @@ import { fetchCloudProfile } from "./cloudAuth";
 import { logError, logInfo } from "./logger";
 import { beginProcessing, finishProcessing } from "./processingControl";
 import { formatErrorMessage } from "./utils";
+import { tn } from "./i18n";
 
-const FILE_INTERRUPTED_MESSAGE = "Обработка остановлена. Можно запустить повторно.";
+const fileInterruptedMessage = (): string => tn("fileTranscription.interrupted");
 
 const PROXY_BASE_URL = "https://proxy.talkis.ru";
 const TRANSCRIPTION_MAX_BYTES = 25 * 1024 * 1024;
@@ -128,7 +129,7 @@ function fileExtension(fileName: string): string {
 export function fileNameFromPath(filePath: string): string {
   const normalized = filePath.replace(/\\/g, "/");
   const name = normalized.split("/").filter(Boolean).pop();
-  return name || "Файл";
+  return name || tn("fileTranscription.fallbackFileName");
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
@@ -276,18 +277,18 @@ function getDiarizedWhisperModel(settings: AppSettings): string {
 
 export function formatFileSize(bytes: number): string {
   if (bytes <= 0) {
-    return "0 Б";
+    return tn("fileTranscription.sizeBytes", { value: 0 });
   }
 
   if (bytes >= 1024 * 1024) {
-    return `${(bytes / 1024 / 1024).toFixed(1)} МБ`;
+    return tn("fileTranscription.sizeMb", { value: (bytes / 1024 / 1024).toFixed(1) });
   }
 
   if (bytes >= 1024) {
-    return `${Math.round(bytes / 1024)} КБ`;
+    return tn("fileTranscription.sizeKb", { value: Math.round(bytes / 1024) });
   }
 
-  return `${bytes} Б`;
+  return tn("fileTranscription.sizeBytes", { value: bytes });
 }
 
 export function getFileTranscriptionPercent(
@@ -319,11 +320,11 @@ export function toFileTranscriptionErrorMessage(error: unknown): string {
   const normalized = raw.toLowerCase();
 
   if (normalized.includes("ffmpeg") || normalized.includes("медиаконвертер")) {
-    return "Для этого файла нужно извлечь и сжать аудио, но встроенный медиаконвертер недоступен. Попробуйте поддерживаемый файл до 25 МБ или переустановите приложение.";
+    return tn("fileTranscription.errMediaConverterUnavailable");
   }
 
   if (normalized.includes("больше 25") || normalized.includes("too large")) {
-    return "Файл слишком большой для транскрибации. Попробуйте более короткий фрагмент.";
+    return tn("fileTranscription.errTooLargeShorter");
   }
 
   if (
@@ -332,53 +333,53 @@ export function toFileTranscriptionErrorMessage(error: unknown): string {
     normalized.includes("8 гб") ||
     normalized.includes("8 gb")
   ) {
-    return "Файл слишком большой для транскрибации. Максимальный размер: 8 ГБ.";
+    return tn("fileTranscription.errTooLargeMax8gb");
   }
 
   if (normalized.includes("unsupported") || normalized.includes("не удалось извлечь аудио")) {
-    return "Не удалось прочитать аудио из этого файла. Попробуйте MP3, WAV, M4A, MP4 или MOV.";
+    return tn("fileTranscription.errCannotReadAudio");
   }
 
   if (normalized.includes("talkis cloud session missing")) {
-    return "Войдите в Talkis Cloud заново, чтобы использовать облачный режим.";
+    return tn("fileTranscription.errCloudSessionMissing");
   }
 
   if (normalized.includes("speaker diarization is not configured")) {
-    return "Облачная разметка говорящих пока недоступна. Используйте локальную подготовку в блоке транскрибации файла.";
+    return tn("fileTranscription.errCloudDiarizationNotConfigured");
   }
 
   if (normalized.includes("cloud speaker diarization unavailable")) {
-    return "Облачное разделение по говорящим сейчас недоступно. Проверьте активную подписку PRO или переключитесь на локальный режим.";
+    return tn("fileTranscription.errCloudDiarizationUnavailable");
   }
 
   if (normalized.includes("subscription inactive") || normalized.includes("403")) {
-    return "Для облачной транскрибации нужна активная подписка Talkis.";
+    return tn("fileTranscription.errSubscriptionInactive");
   }
 
   if (normalized.includes("не удалось подготовить аудио для разделения говорящих")) {
-    return "Не удалось подготовить аудио для разметки говорящих. Попробуйте другой аудио- или видеофайл.";
+    return tn("fileTranscription.errCannotPrepareDiarization");
   }
 
   if (normalized.includes("таймкод")) {
-    return "Для разделения по говорящим нужна локальная Whisper-модель с таймкодами.";
+    return tn("fileTranscription.errNeedTimestampModel");
   }
 
   if (
     normalized.includes("разделения говорящих ещё не скачана")
     || normalized.includes("sherpa-diarization-pyannote-titanet-int8") && normalized.includes("ещё не скачана")
   ) {
-    return "Для разделения по говорящим скачайте локальные компоненты в блоке транскрибации файла.";
+    return tn("fileTranscription.errDownloadDiarizationComponents");
   }
 
   if (
     normalized.includes("sherpa-onnx установлен")
     && (normalized.includes("diarization binary") || normalized.includes("binary для разметки говорящих"))
   ) {
-    return "Runtime для разметки установился не полностью. Нажмите «Скачать» в подготовке разметки, чтобы Talkis восстановил его.";
+    return tn("fileTranscription.errRuntimeIncomplete");
   }
 
   if (normalized.includes("sherpa-onnx diarization не вернул сегменты")) {
-    return "Не удалось найти отдельные реплики говорящих в этом файле.";
+    return tn("fileTranscription.errNoSpeakerSegments");
   }
 
   if (normalized.includes("sherpa-onnx diarization завершился с ошибкой")) {
@@ -386,22 +387,32 @@ export function toFileTranscriptionErrorMessage(error: unknown): string {
   }
 
   if (normalized.includes("not installed locally") || normalized.includes("ещё не скачана")) {
-    return "Локальная модель распознавания не установлена. Откройте Настройки -> Модели -> Локально и нажмите «Скачать» для выбранной модели.";
+    return tn("fileTranscription.errLocalModelNotInstalled");
   }
 
   if (normalized.includes("401") || normalized.includes("unauthorized") || normalized.includes("invalid api key")) {
-    return "Не удалось авторизоваться в API. Проверьте ключ доступа.";
+    return tn("fileTranscription.errAuthFailed");
   }
 
   if (normalized.includes("429") || normalized.includes("rate limit") || normalized.includes("quota")) {
-    return "Превышен лимит запросов или закончилась квота API. Попробуйте позже.";
+    return tn("fileTranscription.errRateLimit");
+  }
+
+  if (
+    normalized.includes("proxy diarized")
+    || normalized.includes("502")
+    || normalized.includes("503")
+    || normalized.includes("504")
+    || normalized.includes("gateway")
+  ) {
+    return tn("fileTranscription.errCloudDiarizationTimeout");
   }
 
   if (normalized.includes("network") || normalized.includes("fetch") || normalized.includes("timed out")) {
-    return "Не удалось связаться с сервером. Проверьте интернет и попробуйте снова.";
+    return tn("fileTranscription.errNetwork");
   }
 
-  return "Не удалось транскрибировать файл. Попробуйте другой формат или более короткий фрагмент.";
+  return tn("fileTranscription.errGeneric");
 }
 
 async function prepareFile(
@@ -409,11 +420,11 @@ async function prepareFile(
   onStatus?: (status: FileTranscriptionStatus) => void,
 ): Promise<PreparedTranscriptionFile> {
   if (file.size <= 0) {
-    throw new Error("Пустой файл нельзя транскрибировать.");
+    throw new Error(tn("fileTranscription.errEmptyFile"));
   }
 
   if (file.size > INPUT_MAX_BYTES) {
-    throw new Error("Файл слишком большой. Максимум для подготовки в приложении: 200 МБ.");
+    throw new Error(tn("fileTranscription.errTooLargeForPrep"));
   }
 
   onStatus?.("reading");
@@ -543,7 +554,7 @@ export async function transcribeFileOnly({
   const text = (result.raw || result.cleaned).trim();
 
   if (!text) {
-    throw new Error("В файле не удалось распознать речь.");
+    throw new Error(tn("fileTranscription.errNoSpeech"));
   }
 
   return {
@@ -594,7 +605,7 @@ export async function transcribeFilePathOnly({
       status: "preparing",
       currentChunk: 0,
       totalChunks: 0,
-      message: "Готовим файл",
+      message: tn("fileTranscription.statusPreparing"),
     });
 
     logInfo("FILE_TRANSCRIPTION", `Sending file path ${fileName} through native pipeline`);
@@ -625,7 +636,7 @@ export async function transcribeFilePathOnly({
     const text = (result.raw || result.cleaned).trim();
 
     if (!text) {
-      throw new Error("В файле не удалось распознать речь.");
+      throw new Error(tn("fileTranscription.errNoSpeech"));
     }
 
     return {
@@ -652,7 +663,7 @@ export async function retryFileHistoryEntry(
   settings: AppSettings,
 ): Promise<HistoryEntry> {
   if (!entry.filePath) {
-    throw new Error("У этой записи нет сохраненного файла для повторной обработки.");
+    throw new Error(tn("fileTranscription.errNoSavedFile"));
   }
 
   const startedAt = Date.now();
@@ -669,7 +680,7 @@ export async function retryFileHistoryEntry(
       const interrupted: HistoryEntry = {
         ...entry,
         status: "interrupted",
-        errorMessage: FILE_INTERRUPTED_MESSAGE,
+        errorMessage: fileInterruptedMessage(),
       };
       await finishProcessing(interrupted);
       return interrupted;
@@ -693,7 +704,7 @@ export async function retryFileHistoryEntry(
       const interrupted: HistoryEntry = {
         ...entry,
         status: "interrupted",
-        errorMessage: FILE_INTERRUPTED_MESSAGE,
+        errorMessage: fileInterruptedMessage(),
       };
       await finishProcessing(interrupted);
       return interrupted;
@@ -704,7 +715,7 @@ export async function retryFileHistoryEntry(
     const failed: HistoryEntry = {
       ...entry,
       status: "failed",
-      errorMessage: "Не удалось обработать файл. Попробуйте повторить попытку.",
+      errorMessage: tn("fileTranscription.errProcessFileRetry"),
     };
     await finishProcessing(failed);
     throw new Error(failed.errorMessage);

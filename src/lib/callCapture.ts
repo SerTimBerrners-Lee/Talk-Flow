@@ -4,13 +4,14 @@ import { emit } from "@tauri-apps/api/event";
 import { HISTORY_UPDATED_EVENT } from "./hotkeyEvents";
 import { logError, logInfo } from "./logger";
 import { beginProcessing, finishProcessing } from "./processingControl";
+import { tn } from "./i18n";
 import {
   addHistoryEntry,
   type AppSettings,
   type HistoryEntry,
 } from "./store";
 
-const CALL_INTERRUPTED_MESSAGE = "Обработка остановлена. Можно запустить повторно.";
+const callInterruptedMessage = (): string => tn("callCapture.interrupted");
 import {
   type FileTranscriptionResult,
   transcribeFilePathOnly,
@@ -128,7 +129,7 @@ export async function saveFailedCallCaptureEntry({
     raw: "",
     cleaned: "",
     source: "call",
-    fileName: "Созвон",
+    fileName: tn("callCapture.fileName"),
     status: "failed",
     errorMessage,
     processingTime: startedAt ? Date.now() - startedAt : undefined,
@@ -146,7 +147,7 @@ export async function saveFailedCallCaptureEntry({
 }
 
 function callTrackTitle(track: CallCaptureTrack): string {
-  return track.kind === "mic" ? "Вы" : "Созвон";
+  return track.kind === "mic" ? tn("callCapture.speakerYou") : tn("callCapture.speakerCall");
 }
 
 function formatTrackTranscript(track: CallCaptureTrack, text: string): string {
@@ -154,7 +155,8 @@ function formatTrackTranscript(track: CallCaptureTrack, text: string): string {
 }
 
 function micPlainText(part: string): string {
-  return part.replace(/^Вы:\s*/i, "").trim();
+  const label = tn("callCapture.speakerYou").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return part.replace(new RegExp(`^${label}:\\s*`, "i"), "").trim();
 }
 
 function errorMessage(error: unknown): string {
@@ -214,22 +216,22 @@ function normalizeCallSpeakerResult(
 
   orderedSpeakerIds(result).forEach((speakerId) => {
     if (speakerId === firstMicSpeakerId) {
-      labelsById.set(speakerId, "Вы");
+      labelsById.set(speakerId, tn("callCapture.speakerYou"));
       return;
     }
 
-    labelsById.set(speakerId, `Гость ${guestIndex}`);
+    labelsById.set(speakerId, tn("callCapture.speakerGuestN", { index: guestIndex }));
     guestIndex += 1;
   });
 
   const speakers = orderedSpeakerIds(result).map((speakerId) => ({
     id: speakerId,
-    label: labelsById.get(speakerId) || "Гость 1",
+    label: labelsById.get(speakerId) || tn("callCapture.speakerGuestN", { index: 1 }),
   }));
   const segments = result.segments.map((segment) => ({
     ...segment,
     speakerLabel:
-      labelsById.get(segment.speakerId) || segment.speakerLabel || "Гость 1",
+      labelsById.get(segment.speakerId) || segment.speakerLabel || tn("callCapture.speakerGuestN", { index: 1 }),
   }));
 
   return {
@@ -308,10 +310,10 @@ async function buildCallCaptureHistoryEntry({
         settings,
         onStatus,
       });
-      micPlainPart = `Вы:\n${micResult.text.trim()}`;
+      micPlainPart = `${tn("callCapture.speakerYou")}:\n${micResult.text.trim()}`;
     } catch (error) {
       const message = errorMessage(error);
-      failedTracks.push(`микрофон: ${message}`);
+      failedTracks.push(`${tn("callCapture.trackMic")}: ${message}`);
       void logError(
         "CALL_CAPTURE",
         `Mic track transcription failed: ${message}`,
@@ -351,7 +353,7 @@ async function buildCallCaptureHistoryEntry({
       }
 
       if (shouldDiarizeSystemTrack) {
-        throw new Error("Разделение говорящих не вернуло сегменты.");
+        throw new Error(tn("callCapture.errDiarizationNoSegments"));
       }
 
       if (track.kind === "mic") {
@@ -400,7 +402,7 @@ async function buildCallCaptureHistoryEntry({
         }
       } catch (error) {
         const message = errorMessage(error);
-        failedTracks.push(`микрофон: ${message}`);
+        failedTracks.push(`${tn("callCapture.trackMic")}: ${message}`);
         void logError(
           "CALL_CAPTURE",
           `Mic track diarization fallback failed: ${message}`,
@@ -418,12 +420,12 @@ async function buildCallCaptureHistoryEntry({
 
     if (speakerSegments.length > 0) {
       const selfSpeakerId = "call_self";
-      speakersById.set(selfSpeakerId, { id: selfSpeakerId, label: "Вы" });
+      speakersById.set(selfSpeakerId, { id: selfSpeakerId, label: tn("callCapture.speakerYou") });
       speakerSegments.unshift({
         start: 0,
         end: 0,
         speakerId: selfSpeakerId,
-        speakerLabel: "Вы",
+        speakerLabel: tn("callCapture.speakerYou"),
         text: micPlainText(micPlainPart),
       });
     }
@@ -437,7 +439,7 @@ async function buildCallCaptureHistoryEntry({
     throw new Error(
       failedTracks.length > 0
         ? failedTracks.join("; ")
-        : "В созвоне не удалось распознать речь.",
+        : tn("callCapture.errNoSpeech"),
     );
   }
 
@@ -448,15 +450,16 @@ async function buildCallCaptureHistoryEntry({
     raw: text,
     cleaned: text,
     source: "call",
-    fileName: "Созвон",
+    fileName: tn("callCapture.fileName"),
     status: "completed",
     processingTime: startedAt ? Date.now() - startedAt : undefined,
     mode,
     speakers:
       speakersById.size > 0
         ? Array.from(speakersById.values()).sort((left, right) => {
-            if (left.label === "Вы") return -1;
-            if (right.label === "Вы") return 1;
+            const youLabel = tn("callCapture.speakerYou");
+            if (left.label === youLabel) return -1;
+            if (right.label === youLabel) return 1;
             return 0;
           })
         : undefined,
@@ -490,7 +493,7 @@ export async function transcribeCallCaptureSession(
     raw: "",
     cleaned: "",
     source: "call",
-    fileName: "Созвон",
+    fileName: tn("callCapture.fileName"),
     status: "processing",
     callSessionId: params.session.id,
     callTracks: params.session.tracks.map((track) => ({
@@ -503,7 +506,7 @@ export async function transcribeCallCaptureSession(
   const interruptedEntry = (): HistoryEntry => ({
     ...baseEntry,
     status: "interrupted",
-    errorMessage: CALL_INTERRUPTED_MESSAGE,
+    errorMessage: callInterruptedMessage(),
   });
 
   const handle = await beginProcessing(baseEntry, "add");
@@ -533,7 +536,7 @@ export async function transcribeCallCaptureSession(
     const failed: HistoryEntry = {
       ...baseEntry,
       status: "failed",
-      errorMessage: "Не удалось обработать запись. Попробуйте повторить попытку.",
+      errorMessage: tn("callCapture.errProcessRetry"),
     };
     await finishProcessing(failed);
     return failed;
@@ -565,7 +568,7 @@ export async function retryCallCaptureHistoryEntry(
   settings: AppSettings,
 ): Promise<HistoryEntry> {
   if (!entry.callTracks?.length) {
-    throw new Error("У этой записи нет сохраненных дорожек созвона для повторной обработки.");
+    throw new Error(tn("callCapture.errNoSavedTracks"));
   }
 
   const session = sessionFromHistoryEntry(entry);
@@ -589,7 +592,7 @@ export async function retryCallCaptureHistoryEntry(
       const interrupted: HistoryEntry = {
         ...entry,
         status: "interrupted",
-        errorMessage: CALL_INTERRUPTED_MESSAGE,
+        errorMessage: callInterruptedMessage(),
       };
       await finishProcessing(interrupted);
       return interrupted;
@@ -602,14 +605,13 @@ export async function retryCallCaptureHistoryEntry(
       const interrupted: HistoryEntry = {
         ...entry,
         status: "interrupted",
-        errorMessage: CALL_INTERRUPTED_MESSAGE,
+        errorMessage: callInterruptedMessage(),
       };
       await finishProcessing(interrupted);
       return interrupted;
     }
 
-    const userFacingMessage =
-      "Не удалось обработать запись. Попробуйте повторить попытку.";
+    const userFacingMessage = tn("callCapture.errProcessRetry");
     const failedEntry: HistoryEntry = {
       ...entry,
       status: "failed",

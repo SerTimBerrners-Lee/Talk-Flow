@@ -39,6 +39,7 @@ import {
   transcribeFilePathOnly,
 } from "../../lib/fileTranscription";
 import { logError, logInfo } from "../../lib/logger";
+import { tn, useI18n } from "../../lib/i18n";
 import {
   requestSystemAudioPermission,
   requiresSystemAudioPermission,
@@ -170,22 +171,22 @@ function isSelectedMicUnavailableError(error: unknown): boolean {
 
 function microphoneStartErrorMessage(error: unknown): string {
   if (isPermissionDeniedError(error)) {
-    return "Разрешите микрофон для записи созвона.";
+    return tn("widget.mic.permissionDenied");
   }
 
   if (error instanceof DOMException && error.name === "NotReadableError") {
-    return "Микрофон занят или недоступен. Закройте приложения, которые могут использовать микрофон, и попробуйте снова.";
+    return tn("widget.mic.busy");
   }
 
   if (isSelectedMicUnavailableError(error)) {
-    return "Выбранный микрофон недоступен. Проверьте микрофон в настройках Talkis.";
+    return tn("widget.mic.unavailable");
   }
 
   if (error instanceof DOMException && error.name === "AbortError") {
-    return "Микрофон не успел запуститься. Попробуйте ещё раз.";
+    return tn("widget.mic.startTimeout");
   }
 
-  return "Не удалось получить доступ к микрофону для записи созвона.";
+  return tn("widget.mic.accessFailed");
 }
 
 function formatCallCaptureRawError(error: unknown): string {
@@ -256,15 +257,15 @@ function callCaptureStartErrorMessage(error: unknown): string {
   const normalized = rawMessage.toLowerCase();
 
   if (normalized.includes("pipewire")) {
-    return "Не удалось начать запись системного звука Linux. Убедитесь, что PipeWire запущен и есть активное устройство вывода.";
+    return tn("widget.call.pipewireFailed");
   }
 
   if (normalized.includes("не поддерживается")) {
-    return "Запись системного звука не поддерживается на этой платформе.";
+    return tn("widget.call.systemAudioUnsupported");
   }
 
   if (normalized.includes("устройство вывода windows")) {
-    return "Не найдено устройство вывода Windows для записи системного звука.";
+    return tn("widget.call.windowsOutputMissing");
   }
 
   if (
@@ -272,7 +273,7 @@ function callCaptureStartErrorMessage(error: unknown): string {
     normalized.includes("windows loopback") ||
     normalized.includes("запись системного звука windows")
   ) {
-    return "Не удалось начать запись системного звука Windows.";
+    return tn("widget.call.windowsCaptureFailed");
   }
 
   if (
@@ -281,10 +282,10 @@ function callCaptureStartErrorMessage(error: unknown): string {
     normalized.includes("звука системы") ||
     normalized.includes("system audio")
   ) {
-    return "Разрешите запись звука системы для созвона.";
+    return tn("widget.call.systemAudioPermission");
   }
 
-  return "Не удалось начать запись созвона. Проверьте разрешения микрофона и звука системы.";
+  return tn("widget.call.startFailed");
 }
 
 function isCallCapturePermissionError(error: unknown): boolean {
@@ -307,6 +308,7 @@ function isCallCapturePermissionError(error: unknown): boolean {
 }
 
 export function Widget() {
+  const { t } = useI18n();
   const widgetWindow = getCurrentWindow();
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const dragTriggeredRef = useRef(false);
@@ -616,7 +618,7 @@ export function Widget() {
 
         if (!granted) {
           throw new CallCaptureStartError(
-            "Разрешите запись звука системы для созвона.",
+            t("widget.call.systemAudioPermission"),
             true,
           );
         }
@@ -762,8 +764,7 @@ export function Widget() {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logError("CALL_CAPTURE", `Call capture stop/process failed: ${message}`);
-      const userFacingMessage =
-        "Не удалось обработать запись. Попробуйте повторить попытку.";
+      const userFacingMessage = t("widget.call.processFailed");
 
       try {
         await saveFailedCallCaptureEntry({
@@ -839,7 +840,7 @@ export function Widget() {
         await finishProcessing({
           ...baseEntry,
           status: "interrupted",
-          errorMessage: "Обработка остановлена. Можно запустить повторно.",
+          errorMessage: t("widget.processing.interrupted"),
         });
         return;
       }
@@ -870,7 +871,7 @@ export function Widget() {
         await finishProcessing({
           ...baseEntry,
           status: "interrupted",
-          errorMessage: "Обработка остановлена. Можно запустить повторно.",
+          errorMessage: t("widget.processing.interrupted"),
         });
         return;
       }
@@ -908,7 +909,7 @@ export function Widget() {
         fileDragDepthRef.current += 1;
         clearFileResetTimer();
         setFileDropState("drag-over");
-        setFileDropName("Отпустите файл");
+        setFileDropName(t("widget.fileDrop.release"));
         void resizeWidgetForFileDrop(true);
         return;
       }
@@ -919,7 +920,7 @@ export function Widget() {
         clearFileCloseTimer();
         fileDragDepthRef.current = Math.max(1, fileDragDepthRef.current);
         setFileDropState("drag-over");
-        setFileDropName("Отпустите файл");
+        setFileDropName(t("widget.fileDrop.release"));
         return;
       }
 
@@ -1239,6 +1240,7 @@ function FileDropPill({
   progress: FileTranscriptionProgress | null;
   onOpenResult: () => void;
 }) {
+  const { t } = useI18n();
   const isProcessing = state === "processing";
   const isSuccess = state === "success";
   const isError = state === "error";
@@ -1323,7 +1325,11 @@ function FileDropPill({
             color: isError ? "#ffb4b4" : "rgba(255,255,255,0.94)",
           }}
         >
-          {showPercent ? `Транскрибация ${progressPercent}%` : "Транскрибация"}
+          {showPercent
+            ? t("widget.fileDrop.transcribingPercent", {
+                percent: progressPercent,
+              })
+            : t("widget.fileDrop.transcribing")}
         </span>
       </div>
     </ActiveWidgetShell>
@@ -1345,6 +1351,7 @@ function CallBubble({
   disabled: boolean;
   onClick: () => void;
 }) {
+  const { t } = useI18n();
   const isStarting = state === "starting";
   const isRecording = state === "recording";
   const isProcessing = state === "processing";
@@ -1352,16 +1359,16 @@ function CallBubble({
   const isError = state === "error";
   const copyIconColor = "rgba(255,255,255,0.72)";
   const title = isError
-    ? error || "Ошибка созвона"
+    ? error || t("widget.callBubble.error")
     : isStarting
-      ? "Запрашиваем доступы"
+      ? t("widget.callBubble.requestingAccess")
       : isProcessing
-        ? "Транскрибируем разговор"
+        ? t("widget.callBubble.transcribing")
         : isSuccess
-          ? "Созвон готов"
+          ? t("widget.callBubble.ready")
           : isRecording
-            ? "Завершить и транскрибировать"
-            : "Запись разговора";
+            ? t("widget.callBubble.stopAndTranscribe")
+            : t("widget.callBubble.record");
   const iconColor = disabled
     ? "rgba(255,255,255,0.28)"
     : isRecording || isError
@@ -1452,6 +1459,7 @@ function IdlePill({
   onClick: () => void;
   onRememberPasteTarget: () => void;
 }) {
+  const { t } = useI18n();
   const widgetWindow = getCurrentWindow();
   const [isHovered, setIsHovered] = useState(false);
   const [copySucceeded, setCopySucceeded] = useState(false);
@@ -1548,8 +1556,8 @@ function IdlePill({
       >
         <button
           type="button"
-          aria-label="Начать запись"
-          title="Начать запись"
+          aria-label={t("widget.idle.startRecording")}
+          title={t("widget.idle.startRecording")}
           onPointerDown={(event) => {
             event.stopPropagation();
           }}
@@ -1594,8 +1602,8 @@ function IdlePill({
         {canCopy && (
           <button
             type="button"
-            aria-label="Скопировать последнюю запись"
-            title={copySucceeded ? "Скопировано" : "Скопировать"}
+            aria-label={t("widget.idle.copyLatest")}
+            title={copySucceeded ? t("widget.idle.copied") : t("widget.idle.copy")}
             onPointerDown={(event) => {
               event.stopPropagation();
             }}
@@ -1859,6 +1867,7 @@ function RecordingPill({
   onPointerUp,
   onPointerCancel,
 }: RecordingPillProps & DragHandlers) {
+  const { t } = useI18n();
   return (
     <ActiveWidgetShell
       width={IDLE_HOVER_WIDGET_WIDTH}
@@ -1880,8 +1889,8 @@ function RecordingPill({
       {locked && (
         <button
           type="button"
-          aria-label="Закончить запись"
-          title="Закончить запись"
+          aria-label={t("widget.recording.stopRecording")}
+          title={t("widget.recording.stopRecording")}
           onPointerDown={(event) => {
             event.stopPropagation();
           }}

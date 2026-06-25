@@ -4,6 +4,7 @@ import { Widget } from "./windows/widget/Widget";
 import { WidgetNoticeOverlay } from "./windows/widget/WidgetNoticeOverlay";
 import { SettingsApp } from "./windows/settings/SettingsApp";
 import { applySavedTheme, applyThemePreference } from "./lib/theme";
+import { I18nProvider } from "./lib/i18n";
 
 // Route based on Tauri window label passed via URL hash or query
 // Widget window opens at "/" — Settings window opens at "/settings"
@@ -18,5 +19,7 @@ if (isSettings) {
 }
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
-  isSettings ? <SettingsApp /> : isWidgetNotice ? <WidgetNoticeOverlay /> : <Widget />
+  <I18nProvider>
+    {isSettings ? <SettingsApp /> : isWidgetNotice ? <WidgetNoticeOverlay /> : <Widget />}
+  </I18nProvider>
 );
