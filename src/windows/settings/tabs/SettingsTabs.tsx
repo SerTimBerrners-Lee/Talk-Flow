@@ -720,18 +720,18 @@ function SubscriptionGuestCard({ onActivate }: { onActivate: () => void }) {
   const { t } = useI18n();
   return (
     <div className="card" style={{ padding: "22px 20px", borderRadius: 10, background: "var(--control-muted)", color: "var(--text-hi)" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
         <Crown size={16} strokeWidth={2.2} />
         <span style={{ fontWeight: 700, fontSize: 14, letterSpacing: "-0.02em" }}>{t("models.guest.title")}</span>
+      </div>
+      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--accent)", marginBottom: 14 }}>
+        {t("models.cta.freeTrial")}
       </div>
       <ul style={{ listStyle: "none", padding: 0, margin: "0 0 14px", fontSize: 12, lineHeight: 2, opacity: 0.85 }}>
         <li>{t("models.guest.benefit1")}</li>
         <li>{t("models.guest.benefit2")}</li>
         <li>{t("models.guest.benefit3")}</li>
       </ul>
-      <div style={{ fontSize: 14, fontWeight: 700, color: "var(--accent)", marginBottom: 10, textAlign: "center" }}>
-        {t("models.cta.freeTrial")}
-      </div>
       <button onClick={onActivate} style={{ width: "100%", padding: "12px", borderRadius: 10, background: "var(--accent)", color: "var(--accent-contrast)", border: "none", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", cursor: "pointer", transition: "opacity 0.15s", fontFamily: "var(--font-main)" }}>
         {t("models.cta.upgradePro")}
       </button>
@@ -2426,10 +2426,10 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
         <>
           <div>
             <div style={{ fontSize: 17, fontWeight: 700, color: "var(--text-hi)", marginBottom: 4 }}>
-              {t("models.subscription.heading")}
+              {t("models.modeSection.title")}
             </div>
             <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6, marginBottom: 14 }}>
-              {t("models.subscription.headingDesc")}
+              {t("models.modeSection.desc")}
             </div>
 
             <div style={{ display: "flex", background: "var(--control-track)", borderRadius: 10, padding: 3, gap: 2 }}>

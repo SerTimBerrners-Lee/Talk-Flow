@@ -10,8 +10,6 @@ export const settingsModels = {
   "models.guest.benefit3": { ru: "• Синхронизация со всеми устройствами", en: "• Sync across all your devices" },
   "models.subscription.active": { ru: "Подписка активна", en: "Subscription active" },
   "models.subscription.unlimitedUntil": { ru: "Безлимитный доступ до {date}", en: "Unlimited access until {date}" },
-  "models.subscription.heading": { ru: "Подписка Talkis", en: "Talkis subscription" },
-  "models.subscription.headingDesc": { ru: "7 дней бесплатно", en: "7 days free" },
 
   // ── Prompt library ──
   "models.prompt.nameLabel": { ru: "Название", en: "Name" },
