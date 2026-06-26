@@ -27,6 +27,11 @@ export default defineConfig(async () => ({
       : undefined,
     watch: {
       ignored: ["**/src-tauri/**"],
+      // Sources are edited over an sshfs mount, which doesn't emit FSEvents, so
+      // the default native watcher never sees the change and HMR shows stale UI.
+      // Poll mtimes instead so edits hot-reload reliably.
+      usePolling: true,
+      interval: 300,
     },
   },
 }));

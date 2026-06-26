@@ -720,12 +720,10 @@ function SubscriptionGuestCard({ onActivate }: { onActivate: () => void }) {
   const { t } = useI18n();
   return (
     <div className="card" style={{ padding: "22px 20px", borderRadius: 10, background: "var(--control-muted)", color: "var(--text-hi)" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
         <Crown size={16} strokeWidth={2.2} />
         <span style={{ fontWeight: 700, fontSize: 14, letterSpacing: "-0.02em" }}>{t("models.guest.title")}</span>
-      </div>
-      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--accent)", marginBottom: 14 }}>
-        {t("models.cta.freeTrial")}
+        <span style={{ fontSize: 13, fontWeight: 700, color: "var(--accent)" }}>{t("models.cta.freeTrial")}</span>
       </div>
       <ul style={{ listStyle: "none", padding: 0, margin: "0 0 14px", fontSize: 12, lineHeight: 2, opacity: 0.85 }}>
         <li>{t("models.guest.benefit1")}</li>
@@ -2486,10 +2484,11 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                 </div>
               </div>
 
+              {(isCloudSelected || hasActiveSubscription) && (
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, color: isCloudSelected ? "var(--success-bright)" : hasActiveSubscription ? "var(--text-hi)" : "var(--text-low)", fontSize: 12, fontWeight: 600 }}>
-                  {(isCloudSelected || hasActiveSubscription) && <Check size={15} strokeWidth={2.5} />}
-                  {isCloudSelected ? t("models.connection.usedForRecognition") : hasActiveSubscription ? t("models.cloud.proReady") : t("models.cloud.needPro")}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, color: isCloudSelected ? "var(--success-bright)" : "var(--text-hi)", fontSize: 12, fontWeight: 600 }}>
+                  <Check size={15} strokeWidth={2.5} />
+                  {isCloudSelected ? t("models.connection.usedForRecognition") : t("models.cloud.proReady")}
                 </div>
 
                 {isCloudSelected ? (
@@ -2532,6 +2531,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                   </button>
                 ) : null}
               </div>
+              )}
             </div>
             </>
           )}
