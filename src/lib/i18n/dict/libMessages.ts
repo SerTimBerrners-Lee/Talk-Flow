@@ -173,7 +173,7 @@ export const libMessages = {
     en: "The prompt is empty",
   },
   "summarize.errNoModel": {
-    ru: "Нет доступной модели для summary: войдите в Talkis Cloud или укажите текстовую модель во вкладке «Модели».",
+    ru: "Нет доступной модели для саммари: войдите в Talkis Cloud или укажите текстовую модель во вкладке «Модели».",
     en: "No model available for summary: sign in to Talkis Cloud or set a text model in the “Models” tab.",
   },
 

@@ -101,7 +101,7 @@ export const settingsRest = {
   // ===== LocalLlmModels (components/LocalLlmModels.tsx) =====
   "localLlm.title": { ru: "Текстовые модели", en: "Text models" },
   "localLlm.desc": {
-    ru: "Скачайте локальную модель и используйте ее для summary без облака.",
+    ru: "Скачайте локальную модель и используйте ее для саммари без облака.",
     en: "Download a local model and use it for summaries without the cloud.",
   },
   "localLlm.status.deleting": { ru: "Удаляется", en: "Deleting" },

@@ -98,7 +98,7 @@ const TABS: { id: Tab; labelKey: MsgKey; icon: LucideIcon; note: string }[] = [
     icon: Cpu,
     note: "Ключи и подключение модели",
   },
-  { id: "style", labelKey: "settingsApp.tab.style", icon: Sparkles, note: "Стиль обработки и Промпты для summary" },
+  { id: "style", labelKey: "settingsApp.tab.style", icon: Sparkles, note: "Стиль обработки и Промпты для саммари" },
 ];
 
 function TabButton({

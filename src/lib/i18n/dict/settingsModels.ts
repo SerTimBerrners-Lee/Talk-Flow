@@ -20,13 +20,13 @@ export const settingsModels = {
     en: "Pick a text model in the “Models” tab to generate a prompt.",
   },
   "models.prompt.promptPlaceholder": {
-    ru: "Опиши, какое summary нужно сделать по тексту разговора",
+    ru: "Опиши, какое саммари нужно сделать по тексту разговора",
     en: "Describe what kind of summary to make from the conversation text",
   },
   "models.prompt.saving": { ru: "Сохраняем", en: "Saving" },
   "models.prompt.save": { ru: "Сохранить", en: "Save" },
   "models.prompt.libraryHint": {
-    ru: "Выберите промпт для summary. Он предлагается по умолчанию на экране результата транскрибации.",
+    ru: "Выберите промпт для саммари. Он предлагается по умолчанию на экране результата транскрибации.",
     en: "Choose a summary prompt. It is offered by default on the transcription result screen.",
   },
   "models.prompt.create": { ru: "Создать промпт", en: "Create prompt" },
@@ -36,7 +36,7 @@ export const settingsModels = {
   // ── Text (summary) model card ──
   "models.textModel.title": { ru: "Текстовая модель", en: "Text model" },
   "models.textModel.desc": {
-    ru: "OpenAI-совместимый endpoint для summary и обработки текста. Оставьте endpoint пустым, чтобы использовать OpenAI с вашим API-ключом.",
+    ru: "OpenAI-совместимый endpoint для саммари и обработки текста. Оставьте endpoint пустым, чтобы использовать OpenAI с вашим API-ключом.",
     en: "An OpenAI-compatible endpoint for summaries and text processing. Leave the endpoint empty to use OpenAI with your API key.",
   },
   "models.textModel.apiKeyPlaceholder": { ru: "Необязательно для локального endpoint", en: "Optional for a local endpoint" },
@@ -312,7 +312,7 @@ export const settingsModels = {
   "models.styleTab.prompts": { ru: "Промпты", en: "Prompts" },
   "models.textProcessing.title": { ru: "Обработка текста", en: "Text processing" },
   "models.textProcessing.desc": {
-    ru: "Стиль очистки расшифровки и Промпты для summary.",
+    ru: "Стиль очистки расшифровки и Промпты для саммари.",
     en: "Transcript cleanup style and summary prompts.",
   },
 
