@@ -15,6 +15,10 @@ export const settingsModels = {
   "models.prompt.nameLabel": { ru: "Название", en: "Name" },
   "models.prompt.namePlaceholder": { ru: "Например: Протокол встречи", en: "For example: Meeting minutes" },
   "models.prompt.promptLabel": { ru: "Промпт", en: "Prompt" },
+  "models.prompt.noModelHint": {
+    ru: "Выберите текстовую модель во вкладке «Модели», чтобы сгенерировать промпт.",
+    en: "Pick a text model in the “Models” tab to generate a prompt.",
+  },
   "models.prompt.promptPlaceholder": {
     ru: "Опиши, какое summary нужно сделать по тексту разговора",
     en: "Describe what kind of summary to make from the conversation text",

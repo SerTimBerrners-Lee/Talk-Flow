@@ -168,6 +168,17 @@ function localLlmRunner(
   };
 }
 
+// The bundled local text runtime listens on 127.0.0.1:18200–18249 (see
+// src-tauri/src/llm_runtime.rs). It can only auto-start when a model is selected
+// (llmLocalModelId); an endpoint in that range with NO selected model is a dead
+// port, so we must not treat it as a usable backend.
+function isBundledLocalRuntime(endpoint: string): boolean {
+  const match = endpoint.match(/:(\d{4,5})(?:\/|$)/);
+  if (!match) return false;
+  const port = Number(match[1]);
+  return port >= 18200 && port <= 18249;
+}
+
 /**
  * Pick the summary backend from settings: Talkis Cloud subscription, a custom
  * OpenAI-compatible endpoint, or a local runtime (127.0.0.1). Returns null when
@@ -190,6 +201,12 @@ export function resolveSummaryBackend(
   const localModelId = settings.llmLocalModelId?.trim() ?? "";
 
   if (endpoint) {
+    // Bundled runtime referenced but no model selected → nothing will start it
+    // (dead port). Treat as not configured so the UI tells the user to pick a
+    // model instead of failing with a raw "error sending request".
+    if (isLocal && !localModelId && isBundledLocalRuntime(endpoint)) {
+      return null;
+    }
     const run =
       isLocal && localModelId
         ? localLlmRunner(localModelId, endpoint, model, apiKey)

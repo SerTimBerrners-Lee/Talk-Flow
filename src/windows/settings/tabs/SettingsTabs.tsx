@@ -975,7 +975,9 @@ function PromptLibrary({
               {generating ? t("models.prompt.improving") : t("models.prompt.improve")}
             </button>
           ) : (
-            <span />
+            <div style={{ fontSize: 12, color: "var(--text-mid)", lineHeight: 1.45, maxWidth: 360 }}>
+              {t("models.prompt.noModelHint")}
+            </div>
           )}
           <div style={{ display: "flex", gap: 8 }}>
           <button
