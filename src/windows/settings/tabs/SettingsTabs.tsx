@@ -2426,10 +2426,10 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
         <>
           <div>
             <div style={{ fontSize: 17, fontWeight: 700, color: "var(--text-hi)", marginBottom: 4 }}>
-              {t("models.modeSection.title")}
+              {t("models.subscription.heading")}
             </div>
             <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6, marginBottom: 14 }}>
-              {t("models.modeSection.desc")}
+              {t("models.subscription.headingDesc")}
             </div>
 
             <div style={{ display: "flex", background: "var(--control-track)", borderRadius: 10, padding: 3, gap: 2 }}>
@@ -2468,15 +2468,6 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
 
           {isCloudView && (
             <>
-              {/* Подписка Talkis — header + the shared three-state subscription block */}
-              <div>
-                <div style={{ fontSize: 17, fontWeight: 700, color: "var(--text-hi)", marginBottom: 4 }}>
-                  {t("models.subscription.heading")}
-                </div>
-                <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>
-                  {t("models.subscription.headingDesc")}
-                </div>
-              </div>
               <SubscriptionCards
                 profile={cloudProfile}
                 onActivate={handleActivateSubscription}
