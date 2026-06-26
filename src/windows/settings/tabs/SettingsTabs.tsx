@@ -1617,6 +1617,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
   };
 
   if (type === "model") {
+    const isAuthenticated = cloudProfile !== null && cloudProfile !== undefined;
     const hasActiveSubscription = cloudProfile?.subscription.active === true;
     const isCloudMode = !settings.useOwnKey;
     const isCustom = settings.provider === "custom";
@@ -2476,6 +2477,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                 }}
               />
 
+            {isAuthenticated && (
             <div className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div>
                 <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)", marginBottom: 4 }}>{t("models.mode.cloud")}</div>
@@ -2535,6 +2537,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
               </div>
               )}
             </div>
+            )}
             </>
           )}
 
