@@ -5,6 +5,11 @@ import { AlertCircle, Check, Download, HardDrive, Loader2, MemoryStick, Trash2, 
 
 import { AppSettings } from "../lib/store";
 import { useI18n } from "../lib/i18n";
+import {
+  isLocalLlmEndpoint,
+  localLlmDeleteSettingsPatch,
+  selectedLocalLlmModelId,
+} from "../lib/localLlmSelection";
 import qwenAvatar from "../assets/adapters/qwen.png";
 
 interface LocalLlmModel {
@@ -15,12 +20,6 @@ interface LocalLlmModel {
   size_label: string;
   min_ram_gb: number;
   downloaded: boolean;
-}
-
-interface LocalLlmStatus {
-  running: boolean;
-  model_id: string | null;
-  base_url: string | null;
 }
 
 interface DownloadProgress {
@@ -56,7 +55,6 @@ export function LocalLlmModels({
 }) {
   const { t } = useI18n();
   const [models, setModels] = useState<LocalLlmModel[]>([]);
-  const [status, setStatus] = useState<LocalLlmStatus | null>(null);
   const [progress, setProgress] = useState<Record<string, DownloadProgress>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -65,12 +63,8 @@ export function LocalLlmModels({
 
   const refresh = async (): Promise<void> => {
     try {
-      const [list, runtime] = await Promise.all([
-        invoke<LocalLlmModel[]>("list_local_llm_models"),
-        invoke<LocalLlmStatus>("get_local_llm_status"),
-      ]);
+      const list = await invoke<LocalLlmModel[]>("list_local_llm_models");
       setModels(list);
-      setStatus(runtime);
     } catch {
       /* keep last known state */
     }
@@ -152,6 +146,10 @@ export function LocalLlmModels({
     setError(null);
     try {
       await invoke("delete_local_llm_model", { modelId: model.id });
+      const cleanupPatch = localLlmDeleteSettingsPatch(settings, model.id);
+      if (cleanupPatch) {
+        update(cleanupPatch);
+      }
       setProgress((prev) => {
         const next = { ...prev };
         delete next[model.id];
@@ -182,10 +180,8 @@ export function LocalLlmModels({
     }
   };
 
-  const activeModelId = status?.running ? status.model_id : null;
-  const usingLocalEndpoint = Boolean(
-    settings.llmEndpoint?.trim().includes("127.0.0.1"),
-  );
+  const usingLocalEndpoint = isLocalLlmEndpoint(settings.llmEndpoint);
+  const selectedModelId = selectedLocalLlmModelId(settings);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -241,7 +237,7 @@ export function LocalLlmModels({
             prog?.status === "downloading" || prog?.status === "starting";
           const isBusy = busy === model.id;
           const isDeleting = deleting === model.id;
-          const isActive = activeModelId === model.id && usingLocalEndpoint;
+          const isSelected = selectedModelId === model.id && usingLocalEndpoint;
           // Collapsed by default like the recognition cards; force-open while a
           // download runs so its progress bar stays visible.
           const open = expandedId === model.id || isDownloading;
@@ -250,12 +246,12 @@ export function LocalLlmModels({
             ? t("localLlm.status.deleting")
             : isDownloading
               ? t("localLlm.status.downloading")
-              : isActive
+              : isSelected
                 ? t("localLlm.status.selected")
                 : model.downloaded
                   ? t("localLlm.status.ready")
                   : t("localLlm.status.notDownloaded");
-          const statusColor = isActive
+          const statusColor = isSelected
             ? "var(--success-bright)"
             : model.downloaded
               ? "var(--success-bright)"
@@ -464,7 +460,7 @@ export function LocalLlmModels({
                       )
                     ) : (
                       <>
-                        {!isActive && (
+                        {!isSelected && (
                           <button
                             onClick={() => void useForSummary(model)}
                             disabled={isBusy}

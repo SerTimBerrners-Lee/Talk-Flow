@@ -14,8 +14,9 @@ use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
-use llama_cpp_2::model::{AddBos, LlamaModel, Special};
+use llama_cpp_2::model::{AddBos, LlamaModel};
 use llama_cpp_2::sampling::LlamaSampler;
+use llama_cpp_2::TokenToStringError;
 
 const SERVER_NAME: &str = "talkis-llm";
 const ENGINE_NAME: &str = "llama.cpp";
@@ -350,7 +351,18 @@ fn generate(
         // Accumulate raw token bytes and emit only COMPLETE UTF-8 sequences. A
         // single token can carry a partial multibyte char (Cyrillic spans token
         // boundaries), so decoding tokens one-by-one yielded garbled glyphs.
-        if let Ok(bytes) = model.token_to_bytes(token, Special::Tokenize) {
+        let piece_bytes = match model.token_to_piece_bytes(token, 8, true, None) {
+            Err(TokenToStringError::InsufficientBufferSpace(size)) => {
+                let needed = size
+                    .checked_neg()
+                    .and_then(|value| usize::try_from(value).ok())
+                    .unwrap_or(32);
+                model.token_to_piece_bytes(token, needed, true, None)
+            }
+            result => result,
+        };
+
+        if let Ok(bytes) = piece_bytes {
             pending.extend_from_slice(&bytes);
             loop {
                 match std::str::from_utf8(&pending) {

@@ -246,6 +246,11 @@ const MAIN_KEY_ALIASES: Record<string, string> = {
 const FUNCTION_KEY_PATTERN = /^F(?:[1-9]|1[0-2])$/;
 const DEFAULT_MAC_HOTKEY = "Command+Shift+Space";
 const DEFAULT_DESKTOP_HOTKEY = "Control+Alt+Space";
+const BUNDLED_LOCAL_LLM_PORTS = new Set([8011]);
+const BUNDLED_LOCAL_LLM_MODEL_IDS = new Set([
+  "qwen2.5-3b-instruct-q4",
+  "qwen2.5-7b-instruct-q4",
+]);
 
 export function isMacPlatform(): boolean {
   if (typeof navigator === "undefined") return false;
@@ -597,6 +602,20 @@ function parseProvider(value: unknown): ApiProvider | undefined {
   return undefined;
 }
 
+function isBundledLocalLlmEndpoint(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  const match = value.match(/:(\d{4,5})(?:\/|$)/);
+  if (!match) return false;
+  const port = Number(match[1]);
+  return BUNDLED_LOCAL_LLM_PORTS.has(port) || (port >= 18200 && port <= 18249);
+}
+
+function parseBundledLocalLlmModelId(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const modelId = value.trim();
+  return BUNDLED_LOCAL_LLM_MODEL_IDS.has(modelId) ? modelId : undefined;
+}
+
 function parseRealtimeInterpreterSettings(
   value: unknown,
 ): RealtimeInterpreterSettings | undefined {
@@ -630,7 +649,7 @@ function parseRealtimeInterpreterSettings(
   };
 }
 
-function normalizeSavedSettings(saved: unknown): Partial<AppSettings> {
+export function normalizeSavedSettings(saved: unknown): Partial<AppSettings> {
   if (!saved || typeof saved !== "object") {
     return {};
   }
@@ -772,7 +791,11 @@ function normalizeSavedSettings(saved: unknown): Partial<AppSettings> {
     llmEndpoint:
       typeof raw.llmEndpoint === "string" ? raw.llmEndpoint : undefined,
     llmLocalModelId:
-      typeof raw.llmLocalModelId === "string" ? raw.llmLocalModelId : undefined,
+      typeof raw.llmLocalModelId === "string"
+        ? raw.llmLocalModelId
+        : isBundledLocalLlmEndpoint(raw.llmEndpoint)
+          ? parseBundledLocalLlmModelId(raw.llmModel)
+          : undefined,
     useOwnKey: typeof raw.useOwnKey === "boolean" ? raw.useOwnKey : undefined,
     deviceToken:
       typeof raw.deviceToken === "string" ? raw.deviceToken : undefined,
