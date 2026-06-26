@@ -260,7 +260,7 @@ function SubscriptionCTA({ onActivate }: { onActivate: () => void }) {
         <li>{t("userPanel.cta.feature.unlimited")}</li>
         <li>{t("userPanel.cta.feature.noVpn")}</li>
         <li>{t("userPanel.cta.feature.deviceSync")}</li>
-        <li style={{ color: "var(--accent)", fontWeight: 700 }}>{t("userPanel.cta.feature.freeTrial")}</li>
+        <li>{t("userPanel.cta.feature.freeTrial")}</li>
       </ul>
 
       <button onClick={onActivate} style={styles.ctaButton}>
