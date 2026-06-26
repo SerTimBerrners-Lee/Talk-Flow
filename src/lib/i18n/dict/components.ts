@@ -145,4 +145,5 @@ export const components = {
   "userPanel.cta.feature.unlimited": { ru: "Безлимитное использование", en: "Unlimited usage" },
   "userPanel.cta.feature.noVpn": { ru: "Без VPN и Прокси", en: "No VPN or proxy" },
   "userPanel.cta.feature.deviceSync": { ru: "Синхронизация устройств", en: "Device sync" },
+  "userPanel.cta.feature.freeTrial": { ru: "7 дней бесплатно", en: "7 days free" },
 } as const;

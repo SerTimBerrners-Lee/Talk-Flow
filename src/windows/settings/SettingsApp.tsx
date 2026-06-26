@@ -9,7 +9,6 @@ import {
   FileAudio,
   Home,
   Cpu,
-  Crown,
   Languages,
   Loader2,
   Sparkles,
@@ -49,7 +48,7 @@ import {
 } from "../../lib/updater";
 import { useI18n, type MsgKey } from "../../lib/i18n";
 
-type Tab = "main" | "file" | "interpreter" | "settings" | "model" | "subscription" | "style";
+type Tab = "main" | "file" | "interpreter" | "settings" | "model" | "style";
 
 const SHOW_INTERPRETER_TAB = import.meta.env.DEV;
 
@@ -65,7 +64,6 @@ function resolveInitialTab(): Tab {
     requestedTab === "interpreter" ||
     requestedTab === "settings" ||
     requestedTab === "model" ||
-    requestedTab === "subscription" ||
     requestedTab === "style"
   ) {
     return isVisibleTab(requestedTab) ? requestedTab : "main";
@@ -99,12 +97,6 @@ const TABS: { id: Tab; labelKey: MsgKey; icon: LucideIcon; note: string }[] = [
     labelKey: "settingsApp.tab.model",
     icon: Cpu,
     note: "Ключи и подключение модели",
-  },
-  {
-    id: "subscription",
-    labelKey: "settingsApp.tab.subscription",
-    icon: Crown,
-    note: "Подписка Talkis и облачное распознавание",
   },
   { id: "style", labelKey: "settingsApp.tab.style", icon: Sparkles, note: "Стиль обработки и Промпты для summary" },
 ];
@@ -565,13 +557,6 @@ export function SettingsApp() {
                   style={{ display: activeTab === "model" ? "block" : "none" }}
                 >
                   <SettingsTabs type="model" />
-                </div>
-                <div
-                  style={{
-                    display: activeTab === "subscription" ? "block" : "none",
-                  }}
-                >
-                  <SettingsTabs type="subscription" />
                 </div>
                 <div
                   style={{ display: activeTab === "style" ? "block" : "none" }}

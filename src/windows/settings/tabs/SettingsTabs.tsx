@@ -87,7 +87,7 @@ const LOCAL_STT_PRESET_ENDPOINT = LOCAL_RUNTIME_ENDPOINTS.whisper;
 const LOCAL_STT_PRESET_MODEL = "whisper-large-v3-turbo";
 const LOCAL_STT_MODEL_DOWNLOAD_PROGRESS_EVENT = "local-stt-model-download-progress";
 
-interface SettingsTabsProps { type: "model" | "style" | "subscription"; }
+interface SettingsTabsProps { type: "model" | "style"; }
 
 interface PromptPreview {
   prompt: string;
@@ -1615,28 +1615,6 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
     setCloudProfile(null);
     await syncSettings();
   };
-
-  if (type === "subscription") {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-        <div>
-          <div style={{ fontSize: 17, fontWeight: 700, color: "var(--text-hi)", marginBottom: 4 }}>
-            {t("models.subscription.heading")}
-          </div>
-          <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>
-            {t("models.subscription.headingDesc")}
-          </div>
-        </div>
-        <SubscriptionCards
-          profile={cloudProfile}
-          onActivate={handleActivateSubscription}
-          onLogout={() => {
-            void handleCloudLogout();
-          }}
-        />
-      </div>
-    );
-  }
 
   if (type === "model") {
     const hasActiveSubscription = cloudProfile?.subscription.active === true;

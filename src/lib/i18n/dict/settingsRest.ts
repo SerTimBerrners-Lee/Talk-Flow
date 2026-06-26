@@ -77,7 +77,6 @@ export const settingsRest = {
   "settingsApp.tab.interpreter": { ru: "Переводчик (бета)", en: "Interpreter (beta)" },
   "settingsApp.tab.settings": { ru: "Настройки", en: "Settings" },
   "settingsApp.tab.model": { ru: "Модели", en: "Models" },
-  "settingsApp.tab.subscription": { ru: "Подписка Talkis", en: "Talkis subscription" },
   "settingsApp.tab.style": { ru: "Стиль и Промпты", en: "Style and Prompts" },
   "settingsApp.installing": { ru: "Устанавливаем...", en: "Installing..." },
   "settingsApp.installUpdate": {
