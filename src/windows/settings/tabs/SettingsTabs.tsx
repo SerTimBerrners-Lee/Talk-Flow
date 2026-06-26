@@ -87,7 +87,7 @@ const LOCAL_STT_PRESET_ENDPOINT = LOCAL_RUNTIME_ENDPOINTS.whisper;
 const LOCAL_STT_PRESET_MODEL = "whisper-large-v3-turbo";
 const LOCAL_STT_MODEL_DOWNLOAD_PROGRESS_EVENT = "local-stt-model-download-progress";
 
-interface SettingsTabsProps { type: "model" | "style"; }
+interface SettingsTabsProps { type: "model" | "style" | "subscription"; }
 
 interface PromptPreview {
   prompt: string;
@@ -739,6 +739,54 @@ function SubscriptionGuestCard({ onActivate }: { onActivate: () => void }) {
   );
 }
 
+/**
+ * Three-state subscription block, shared by the Models → Cloud section and the
+ * dedicated "Подписка Talkis" tab: active-subscription banner, signed-in account
+ * card (activate / log out), or guest promo (sign in + start the free trial).
+ */
+function SubscriptionCards({
+  profile,
+  onActivate,
+  onLogout,
+}: {
+  profile: CloudProfile | null | undefined;
+  onActivate: () => void;
+  onLogout: () => void;
+}) {
+  const { t, lang } = useI18n();
+
+  if (profile?.subscription.active === true) {
+    return (
+      <div className="card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <div style={{ width: 42, height: 42, borderRadius: 999, background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Crown size={20} strokeWidth={2.2} color="var(--accent-contrast)" />
+          </div>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-hi)" }}>{t("models.subscription.active")}</div>
+            <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>
+              {t("models.subscription.unlimitedUntil", { date: profile.subscription.expiresAt ? new Date(profile.subscription.expiresAt).toLocaleDateString(lang === "ru" ? "ru-RU" : "en-US", { day: "numeric", month: "long" }) : "—" })}
+            </div>
+          </div>
+        </div>
+        <div style={{ width: 10, height: 10, borderRadius: 999, background: "var(--accent)", flexShrink: 0 }} />
+      </div>
+    );
+  }
+
+  if (profile) {
+    return (
+      <CloudSubscriptionAccountCard
+        profile={profile}
+        onActivate={onActivate}
+        onLogout={onLogout}
+      />
+    );
+  }
+
+  return <SubscriptionGuestCard onActivate={onActivate} />;
+}
+
 function extractTokenFromUrl(url: string): string | null {
   try {
     const parsed = new URL(url);
@@ -1170,7 +1218,7 @@ function TextModelCard({
 }
 
 export function SettingsTabs({ type }: SettingsTabsProps) {
-  const { t, lang } = useI18n();
+  const { t } = useI18n();
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [promptPreview, setPromptPreview] = useState<PromptPreview | null>(null);
   const [promptPreviewError, setPromptPreviewError] = useState<string | null>(null);
@@ -1535,8 +1583,62 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
     });
   };
 
+  // Subscription activation / logout — shared by the Models → Cloud section and
+  // the dedicated "Подписка Talkis" tab so both surfaces drive the same flow.
+  const handleActivateSubscription = async () => {
+    try {
+      const authed = cloudProfile !== null && cloudProfile !== undefined;
+      if (authed) {
+        setWaitingForSubscriptionRefresh(true);
+        await openUrl(getAuthLoginUrl().replace("/auth/login?device=true", "/dashboard"));
+        return;
+      }
+
+      const code = generateExchangeCode();
+      exchangeCodeRef.current = code;
+      setWaitingForAuth(true);
+      await openUrl(getAuthLoginUrlWithCode(code));
+    } catch {
+      // Error handled silently
+    }
+  };
+
+  const handleCloudLogout = async () => {
+    if (authPollingRef.current) {
+      clearInterval(authPollingRef.current);
+      authPollingRef.current = null;
+    }
+    exchangeCodeRef.current = null;
+    setWaitingForAuth(false);
+    setWaitingForSubscriptionRefresh(false);
+    await cloudLogout();
+    setCloudProfile(null);
+    await syncSettings();
+  };
+
+  if (type === "subscription") {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+        <div>
+          <div style={{ fontSize: 17, fontWeight: 700, color: "var(--text-hi)", marginBottom: 4 }}>
+            {t("models.subscription.heading")}
+          </div>
+          <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>
+            {t("models.subscription.headingDesc")}
+          </div>
+        </div>
+        <SubscriptionCards
+          profile={cloudProfile}
+          onActivate={handleActivateSubscription}
+          onLogout={() => {
+            void handleCloudLogout();
+          }}
+        />
+      </div>
+    );
+  }
+
   if (type === "model") {
-    const isAuthenticated = cloudProfile !== null && cloudProfile !== undefined;
     const hasActiveSubscription = cloudProfile?.subscription.active === true;
     const isCloudMode = !settings.useOwnKey;
     const isCustom = settings.provider === "custom";
@@ -1912,36 +2014,6 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
       });
       setModelModeView("api");
       resetInstallState();
-    };
-
-    const handleActivateSubscription = async () => {
-      try {
-        if (isAuthenticated) {
-          setWaitingForSubscriptionRefresh(true);
-          await openUrl(getAuthLoginUrl().replace("/auth/login?device=true", "/dashboard"));
-          return;
-        }
-
-        const code = generateExchangeCode();
-        exchangeCodeRef.current = code;
-        setWaitingForAuth(true);
-        await openUrl(getAuthLoginUrlWithCode(code));
-      } catch {
-        // Error handled silently
-      }
-    };
-
-    const handleCloudLogout = async () => {
-      if (authPollingRef.current) {
-        clearInterval(authPollingRef.current);
-        authPollingRef.current = null;
-      }
-      exchangeCodeRef.current = null;
-      setWaitingForAuth(false);
-      setWaitingForSubscriptionRefresh(false);
-      await cloudLogout();
-      setCloudProfile(null);
-      await syncSettings();
     };
 
     const handleModeChange = (mode: typeof modeOptions[number]["id"]) => {
@@ -2418,33 +2490,22 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
 
           {isCloudView && (
             <>
-              {/* Subscription / promo now lives in the Cloud section, above the cloud card */}
-              {hasActiveSubscription ? (
-                <div className="card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                    <div style={{ width: 42, height: 42, borderRadius: 999, background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      <Crown size={20} strokeWidth={2.2} color="var(--accent-contrast)" />
-                    </div>
-                    <div>
-                      <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-hi)" }}>{t("models.subscription.active")}</div>
-                      <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>
-                        {t("models.subscription.unlimitedUntil", { date: cloudProfile?.subscription.expiresAt ? new Date(cloudProfile.subscription.expiresAt).toLocaleDateString(lang === "ru" ? "ru-RU" : "en-US", { day: "numeric", month: "long" }) : "—" })}
-                      </div>
-                    </div>
-                  </div>
-                  <div style={{ width: 10, height: 10, borderRadius: 999, background: "var(--accent)", flexShrink: 0 }} />
+              {/* Подписка Talkis — header + the shared three-state subscription block */}
+              <div>
+                <div style={{ fontSize: 17, fontWeight: 700, color: "var(--text-hi)", marginBottom: 4 }}>
+                  {t("models.subscription.heading")}
                 </div>
-              ) : isAuthenticated ? (
-                <CloudSubscriptionAccountCard
-                  profile={cloudProfile}
-                  onActivate={handleActivateSubscription}
-                  onLogout={() => {
-                    void handleCloudLogout();
-                  }}
-                />
-              ) : (
-                <SubscriptionGuestCard onActivate={handleActivateSubscription} />
-              )}
+                <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>
+                  {t("models.subscription.headingDesc")}
+                </div>
+              </div>
+              <SubscriptionCards
+                profile={cloudProfile}
+                onActivate={handleActivateSubscription}
+                onLogout={() => {
+                  void handleCloudLogout();
+                }}
+              />
 
             <div className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div>
