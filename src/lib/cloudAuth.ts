@@ -16,10 +16,13 @@ import { SETTINGS_UPDATED_EVENT } from "./hotkeyEvents";
 const CLOUD_API_BASE = "https://talkis.ru";
 
 type CloudProfileListener = (profile: CloudProfile | null | undefined) => void;
+export type CloudAuthFlowId = number;
 
 let cachedCloudProfile: CloudProfile | null | undefined;
 let inflightCloudProfileRequest: Promise<CloudProfile | null> | null = null;
 let authRevision = 0;
+let authFlowRevision = 0;
+let activeAuthFlowId: CloudAuthFlowId | null = null;
 const cloudProfileListeners = new Set<CloudProfileListener>();
 
 function notifyCloudProfileListeners(profile: CloudProfile | null | undefined): void {
@@ -64,6 +67,21 @@ export function subscribeCloudProfile(listener: CloudProfileListener): () => voi
   return () => {
     cloudProfileListeners.delete(listener);
   };
+}
+
+export function beginCloudAuthFlow(): CloudAuthFlowId {
+  authFlowRevision += 1;
+  activeAuthFlowId = authFlowRevision;
+  return activeAuthFlowId;
+}
+
+export function cancelCloudAuthFlow(): void {
+  authFlowRevision += 1;
+  activeAuthFlowId = null;
+}
+
+export function isCloudAuthFlowActive(flowId: CloudAuthFlowId | null | undefined): flowId is CloudAuthFlowId {
+  return typeof flowId === "number" && activeAuthFlowId === flowId;
 }
 
 /**
@@ -132,8 +150,20 @@ export async function fetchCloudProfile({ force = false }: { force?: boolean } =
 /**
  * Save device token received from deep link callback.
  */
-export async function handleAuthToken(token: string): Promise<CloudProfile | null> {
+export async function handleAuthToken(
+  token: string,
+  options: { authFlowId?: CloudAuthFlowId | null } = {},
+): Promise<CloudProfile | null> {
+  if (
+    Object.prototype.hasOwnProperty.call(options, "authFlowId") &&
+    !isCloudAuthFlowActive(options.authFlowId)
+  ) {
+    logInfo("CLOUD", "Ignoring auth token from stale or cancelled auth flow");
+    return cachedCloudProfile ?? null;
+  }
+
   logInfo("CLOUD", "Received auth token from deep link");
+  activeAuthFlowId = null;
   authRevision += 1;
   await saveCloudSettings({ deviceToken: token, useOwnKey: false });
   return fetchCloudProfile({ force: true });
@@ -144,6 +174,7 @@ export async function handleAuthToken(token: string): Promise<CloudProfile | nul
  */
 export async function cloudLogout(): Promise<void> {
   logInfo("CLOUD", "Logging out");
+  cancelCloudAuthFlow();
   authRevision += 1;
   inflightCloudProfileRequest = null;
   setCachedCloudProfile(null);

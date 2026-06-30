@@ -38,7 +38,22 @@ import {
   upsertPrompt,
   deletePrompt,
 } from "../../../lib/store";
-import { CloudProfile, fetchCloudProfile, getAuthLoginUrl, cloudLogout, handleAuthToken, generateExchangeCode, getAuthLoginUrlWithCode, pollForToken, getCachedCloudProfile, subscribeCloudProfile } from "../../../lib/cloudAuth";
+import {
+  beginCloudAuthFlow,
+  cancelCloudAuthFlow,
+  CloudProfile,
+  fetchCloudProfile,
+  getAuthLoginUrl,
+  cloudLogout,
+  handleAuthToken,
+  generateExchangeCode,
+  getAuthLoginUrlWithCode,
+  isCloudAuthFlowActive,
+  pollForToken,
+  getCachedCloudProfile,
+  subscribeCloudProfile,
+  type CloudAuthFlowId,
+} from "../../../lib/cloudAuth";
 import { logInfo } from "../../../lib/logger";
 
 import { TRANSCRIPTION_STYLE_OPTIONS } from "../../../lib/transcriptionPrompts";
@@ -608,12 +623,12 @@ function CloudSubscriptionAccountCard({
 }) {
   const { t } = useI18n();
   return (
-    <div className="card" style={{ padding: 12 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "2px 2px 4px" }}>
+    <div className="card" style={{ padding: "22px 20px", borderRadius: 10, background: "var(--control-muted)", color: "var(--text-hi)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, paddingBottom: 16, marginBottom: 16, borderBottom: "1px solid var(--border-subtle)" }}>
         <div
           style={{
-            width: 46,
-            height: 46,
+            width: 42,
+            height: 42,
             borderRadius: "50%",
             background: "var(--avatar-bg)",
             display: "flex",
@@ -681,49 +696,21 @@ function CloudSubscriptionAccountCard({
         </button>
       </div>
 
-      <div style={{ textAlign: "center", marginTop: 10, fontSize: 13, fontWeight: 700, color: "var(--accent)" }}>
-        {t("models.cta.freeTrial")}
-      </div>
-      <button
-        onClick={onActivate}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 6,
-          width: "100%",
-          margin: "8px 0 0",
-          padding: "12px 14px",
-          borderRadius: 8,
-          background: "var(--accent)",
-          color: "var(--accent-contrast)",
-          border: "none",
-          fontSize: 11,
-          fontWeight: 700,
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-          lineHeight: 1,
-          whiteSpace: "nowrap",
-          cursor: "pointer",
-          transition: "opacity 0.15s",
-          fontFamily: "var(--font)",
-        }}
-      >
-        <Crown size={13} strokeWidth={2} color="var(--accent-contrast)" />
-        <span style={{ display: "flex", alignItems: "center", lineHeight: 1, whiteSpace: "nowrap" }}>{t("models.cta.upgradePro")}</span>
-      </button>
+      <SubscriptionPromoContent onActivate={onActivate} />
     </div>
   );
 }
 
-function SubscriptionGuestCard({ onActivate }: { onActivate: () => void }) {
+function SubscriptionPromoContent({ onActivate }: { onActivate: () => void }) {
   const { t } = useI18n();
   return (
-    <div className="card" style={{ padding: "22px 20px", borderRadius: 10, background: "var(--control-muted)", color: "var(--text-hi)" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+    <>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
         <Crown size={16} strokeWidth={2.2} />
-        <span style={{ fontWeight: 700, fontSize: 14, letterSpacing: "-0.02em" }}>{t("models.guest.title")}</span>
-        <span style={{ fontSize: 13, fontWeight: 700, color: "var(--accent)" }}>{t("models.cta.freeTrial")}</span>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 6, minWidth: 0, flexWrap: "wrap" }}>
+          <span style={{ fontWeight: 700, fontSize: 14, letterSpacing: "-0.02em", lineHeight: 1.2 }}>{t("models.guest.title")}</span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-low)", lineHeight: 1.2 }}>{t("models.cta.freeTrial")}</span>
+        </div>
       </div>
       <ul style={{ listStyle: "none", padding: 0, margin: "0 0 14px", fontSize: 12, lineHeight: 2, opacity: 0.85 }}>
         <li>{t("models.guest.benefit1")}</li>
@@ -733,6 +720,14 @@ function SubscriptionGuestCard({ onActivate }: { onActivate: () => void }) {
       <button onClick={onActivate} style={{ width: "100%", padding: "12px", borderRadius: 10, background: "var(--accent)", color: "var(--accent-contrast)", border: "none", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", cursor: "pointer", transition: "opacity 0.15s", fontFamily: "var(--font-main)" }}>
         {t("models.cta.upgradePro")}
       </button>
+    </>
+  );
+}
+
+function SubscriptionGuestCard({ onActivate }: { onActivate: () => void }) {
+  return (
+    <div className="card" style={{ padding: "22px 20px", borderRadius: 10, background: "var(--control-muted)", color: "var(--text-hi)" }}>
+      <SubscriptionPromoContent onActivate={onActivate} />
     </div>
   );
 }
@@ -1243,7 +1238,23 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
   const [localModelActionStates, setLocalModelActionStates] = useState<Partial<Record<string, LocalModelActionState>>>({});
   const authPollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const exchangeCodeRef = useRef<string | null>(null);
+  const authFlowRef = useRef<CloudAuthFlowId | null>(null);
   const settingsSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+
+  const clearLocalAuthPolling = useCallback(() => {
+    if (authPollingRef.current) {
+      clearInterval(authPollingRef.current);
+      authPollingRef.current = null;
+    }
+    exchangeCodeRef.current = null;
+    authFlowRef.current = null;
+    setWaitingForAuth(false);
+  }, []);
+
+  const cancelLocalAuthPolling = useCallback(() => {
+    cancelCloudAuthFlow();
+    clearLocalAuthPolling();
+  }, [clearLocalAuthPolling]);
 
   const syncSettings = useCallback(async () => {
     const nextSettings = await getSettings({ reload: true });
@@ -1257,14 +1268,19 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
   }, []);
 
   const applyCloudToken = useCallback(async (token: string) => {
-    await handleAuthToken(token);
+    const flowId = authFlowRef.current;
+    if (!isCloudAuthFlowActive(flowId)) {
+      logInfo("SETTINGS", "Ignoring auth token without an active local auth flow");
+      return null;
+    }
+
+    await handleAuthToken(token, { authFlowId: flowId });
+    clearLocalAuthPolling();
     await syncSettings();
     const profile = await loadCloudProfile();
-    setWaitingForAuth(false);
-    exchangeCodeRef.current = null;
     setWaitingForSubscriptionRefresh(!profile?.subscription.active);
     return profile;
-  }, [loadCloudProfile, syncSettings]);
+  }, [clearLocalAuthPolling, loadCloudProfile, syncSettings]);
 
   const refreshLocalInstalledModels = useCallback(async () => {
     if (!settings || type !== "model" || !settings.useOwnKey || settings.provider !== "custom") {
@@ -1350,8 +1366,11 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
   useEffect(() => {
     return subscribeCloudProfile((nextProfile) => {
       setCloudProfile(nextProfile);
+      if (nextProfile) {
+        clearLocalAuthPolling();
+      }
     });
-  }, []);
+  }, [clearLocalAuthPolling]);
 
   useEffect(() => {
     const refreshCloudProfile = () => {
@@ -1424,18 +1443,18 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
 
     authPollingRef.current = setInterval(async () => {
       const code = exchangeCodeRef.current;
-      if (!code) return;
+      const flowId = authFlowRef.current;
+      if (!code || !isCloudAuthFlowActive(flowId)) return;
 
       const token = await pollForToken(code);
-      if (!token || exchangeCodeRef.current !== code) return;
+      if (!token || exchangeCodeRef.current !== code || authFlowRef.current !== flowId || !isCloudAuthFlowActive(flowId)) return;
 
       logInfo("SETTINGS", "Auth polling returned device token");
       await applyCloudToken(token);
     }, 3000);
 
     const timeout = setTimeout(() => {
-      setWaitingForAuth(false);
-      exchangeCodeRef.current = null;
+      cancelLocalAuthPolling();
     }, 120_000);
 
     return () => {
@@ -1445,7 +1464,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
       }
       clearTimeout(timeout);
     };
-  }, [applyCloudToken, waitingForAuth]);
+  }, [applyCloudToken, cancelLocalAuthPolling, waitingForAuth]);
 
   useEffect(() => {
     if (!waitingForSubscriptionRefresh) {
@@ -1595,21 +1614,18 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
       }
 
       const code = generateExchangeCode();
+      const flowId = beginCloudAuthFlow();
       exchangeCodeRef.current = code;
+      authFlowRef.current = flowId;
       setWaitingForAuth(true);
       await openUrl(getAuthLoginUrlWithCode(code));
     } catch {
-      // Error handled silently
+      cancelLocalAuthPolling();
     }
   };
 
   const handleCloudLogout = async () => {
-    if (authPollingRef.current) {
-      clearInterval(authPollingRef.current);
-      authPollingRef.current = null;
-    }
-    exchangeCodeRef.current = null;
-    setWaitingForAuth(false);
+    cancelLocalAuthPolling();
     setWaitingForSubscriptionRefresh(false);
     await cloudLogout();
     setCloudProfile(null);
@@ -1617,7 +1633,6 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
   };
 
   if (type === "model") {
-    const isAuthenticated = cloudProfile !== null && cloudProfile !== undefined;
     const hasActiveSubscription = cloudProfile?.subscription.active === true;
     const isCloudMode = !settings.useOwnKey;
     const isCustom = settings.provider === "custom";
@@ -2477,14 +2492,12 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                 }}
               />
 
-            {isAuthenticated && (
+            {hasActiveSubscription && (
             <div className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div>
                 <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)", marginBottom: 4 }}>{t("models.mode.cloud")}</div>
                 <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>
-                  {hasActiveSubscription
-                    ? t("models.cloud.descActive")
-                    : t("models.cloud.descGuest")}
+                  {t("models.cloud.descActive")}
                 </div>
               </div>
 

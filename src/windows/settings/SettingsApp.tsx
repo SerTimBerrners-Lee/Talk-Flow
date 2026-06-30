@@ -87,18 +87,18 @@ const TABS: { id: Tab; labelKey: MsgKey; icon: LucideIcon; note: string }[] = [
     note: "Realtime Interpreter beta",
   },
   {
-    id: "settings",
-    labelKey: "settingsApp.tab.settings",
-    icon: Sliders,
-    note: "Язык, микрофон и горячая клавиша",
-  },
-  {
     id: "model",
     labelKey: "settingsApp.tab.model",
     icon: Cpu,
     note: "Ключи и подключение модели",
   },
   { id: "style", labelKey: "settingsApp.tab.style", icon: Sparkles, note: "Стиль обработки и Промпты для саммари" },
+  {
+    id: "settings",
+    labelKey: "settingsApp.tab.settings",
+    icon: Sliders,
+    note: "Язык, микрофон и горячая клавиша",
+  },
 ];
 
 function TabButton({

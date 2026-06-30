@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 
 import { logError } from "../lib/logger";
@@ -39,6 +39,10 @@ interface StatItem {
   value: string;
 }
 
+interface TranscriptionStatsPanelProps {
+  footer?: ReactNode;
+}
+
 function buildStats(view: TranscriptionStatsView, t: TranslateFn): StatItem[] {
   return [
     {
@@ -59,7 +63,9 @@ function buildStats(view: TranscriptionStatsView, t: TranslateFn): StatItem[] {
   ];
 }
 
-export function TranscriptionStatsPanel(): ReactElement {
+export function TranscriptionStatsPanel({
+  footer,
+}: TranscriptionStatsPanelProps): ReactElement {
   const { t } = useI18n();
   const [view, setView] = useState<TranscriptionStatsView>(() => getEmptyView());
 
@@ -95,31 +101,59 @@ export function TranscriptionStatsPanel(): ReactElement {
 
   return (
     <section
+      className="stats-glass-card"
       style={{
         display: "grid",
-        gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-        gap: 16,
-        padding: "14px 2px 18px",
+        gap: 14,
+        padding: "16px 18px 14px",
+        borderRadius: "var(--radius-lg)",
+        overflow: "hidden",
       }}
     >
-      {stats.map(({ key, label, value }) => (
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+          gap: 14,
+        }}
+      >
+        {stats.map(({ key, label, value }) => (
+          <div
+            key={key}
+            className="stats-glass-metric"
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 4,
+              minWidth: 0,
+              minHeight: 72,
+              padding: "8px 10px",
+              textAlign: "center",
+            }}
+          >
+            <span
+              className="headline-accent"
+              style={{ fontSize: 28, color: "var(--text-hi)" }}
+            >
+              {value}
+            </span>
+            <span className="label">{label}</span>
+          </div>
+        ))}
+      </div>
+
+      {footer ? (
         <div
-          key={key}
           style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: 4,
-            minWidth: 0,
-            textAlign: "center",
+            borderTop: "1px solid var(--border-subtle)",
+            paddingTop: 12,
           }}
         >
-          <span className="headline-accent" style={{ fontSize: 28, color: "var(--text-hi)" }}>
-            {value}
-          </span>
-          <span className="label">{label}</span>
+          {footer}
         </div>
-      ))}
+      ) : null}
     </section>
   );
 }

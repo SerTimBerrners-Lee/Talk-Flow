@@ -21,7 +21,6 @@ use commands::{
 use tauri::{Emitter, Manager};
 use tauri_plugin_deep_link::DeepLinkExt;
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// Bring the already-running instance to front when a second launch is blocked
 /// by the single-instance plugin (Windows/Linux only).
 #[cfg(any(windows, target_os = "linux"))]
@@ -36,11 +35,13 @@ fn focus_existing_instance(app: &tauri::AppHandle) {
     }
 
     if let Some(win) = app.get_webview_window("widget") {
+        let _ = win.unminimize();
         let _ = win.show();
         let _ = win.set_focus();
     }
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default();

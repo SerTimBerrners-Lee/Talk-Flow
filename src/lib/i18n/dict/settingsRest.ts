@@ -26,6 +26,11 @@ export const settingsRest = {
     ru: "Удерживайте горячую клавишу, говорите и отпустите ее, когда закончите. После обработки текст вставится автоматически.",
     en: "Hold the hotkey, speak and release it when you're done. After processing the text is pasted automatically.",
   },
+  "mainTab.hero.supportTitle": {
+    ru: "Нашли ошибку или есть вопрос?",
+    en: "Found a bug or have a question?",
+  },
+  "mainTab.hero.supportAction": { ru: "Написать", en: "Write" },
   "mainTab.combination": { ru: "Комбинация", en: "Combination" },
   "mainTab.historyTitle": { ru: "История записей", en: "Recording history" },
   "mainTab.historyDescFilled": {

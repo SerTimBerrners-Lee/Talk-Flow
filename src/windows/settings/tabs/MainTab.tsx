@@ -1,6 +1,11 @@
-import { useState, useEffect, useMemo } from "react";
-import type { ReactElement } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import type {
+  FocusEvent as ReactFocusEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactElement,
+} from "react";
 import { emit, listen } from "@tauri-apps/api/event";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   clearHistory,
   DEFAULT_HOTKEY,
@@ -60,12 +65,31 @@ type HistorySource = "voice" | "file" | "call";
 type HistoryFilter = "all" | HistorySource;
 
 const HISTORY_TEXT_PREVIEW_LIMIT = 250;
+const SUPPORT_EMAIL = "david.perov60@gmail.com";
+const MAIN_HERO_FIRST_SLIDE_DELAY_MS = 30_000;
+const MAIN_HERO_SLIDE_DELAY_MS = 30_000;
 const HISTORY_FILTER_OPTIONS: { id: HistoryFilter; labelKey: MsgKey }[] = [
   { id: "all", labelKey: "mainTab.filter.all" },
   { id: "voice", labelKey: "mainTab.filter.voice" },
   { id: "file", labelKey: "mainTab.filter.file" },
   { id: "call", labelKey: "mainTab.filter.call" },
 ];
+const MAIN_HERO_SLIDES = [
+  {
+    id: "record",
+    titleKey: "mainTab.howToStart",
+    actionKey: "mainTab.howItWorks",
+  },
+  {
+    id: "support",
+    titleKey: "mainTab.hero.supportTitle",
+    actionKey: "mainTab.hero.supportAction",
+  },
+] as const satisfies readonly {
+  id: "record" | "support";
+  titleKey: MsgKey;
+  actionKey: MsgKey;
+}[];
 
 function getHistorySource(entry: HistoryEntry): HistorySource {
   if (entry.source === "file" || entry.source === "call") {
@@ -282,12 +306,16 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
   const [isClearArmed, setIsClearArmed] = useState(false);
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>("all");
   const [hintHelpOpen, setHintHelpOpen] = useState(false);
+  const [heroSlideIndex, setHeroSlideIndex] = useState(0);
+  const [heroHasAdvanced, setHeroHasAdvanced] = useState(false);
+  const [heroPaused, setHeroPaused] = useState(false);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
   const [editingSpeakerEntryId, setEditingSpeakerEntryId] = useState<
     string | null
   >(null);
   const [summaryEntry, setSummaryEntry] = useState<HistoryEntry | null>(null);
   const [summaryAvailable, setSummaryAvailable] = useState(false);
+  const heroPointerStartX = useRef<number | null>(null);
 
   useEffect(() => {
     const syncHotkeyLabel = async (reload = false) => {
@@ -333,6 +361,24 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
     };
   }, []);
 
+  useEffect(() => {
+    if (heroPaused || MAIN_HERO_SLIDES.length <= 1) {
+      return;
+    }
+
+    const timeout = window.setTimeout(
+      () => {
+        setHeroSlideIndex((current) => (current + 1) % MAIN_HERO_SLIDES.length);
+        setHeroHasAdvanced(true);
+      },
+      heroHasAdvanced
+        ? MAIN_HERO_SLIDE_DELAY_MS
+        : MAIN_HERO_FIRST_SLIDE_DELAY_MS,
+    );
+
+    return () => window.clearTimeout(timeout);
+  }, [heroHasAdvanced, heroPaused, heroSlideIndex]);
+
   const deleteEntry = async (id: string) => {
     await deleteHistoryEntry(id);
     setHistory((h) => h.filter((x) => x.id !== id));
@@ -362,6 +408,33 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
       () => setCopied((current) => (current === id ? null : current)),
       1500,
     );
+  };
+
+  const contactSupport = async (): Promise<void> => {
+    const subject = encodeURIComponent(
+      t("settingsGeneralExtra.support.mailSubject"),
+    );
+    const body = encodeURIComponent(
+      t("settingsGeneralExtra.support.mailBody"),
+    );
+    const mailto = `mailto:${SUPPORT_EMAIL}?subject=${subject}&body=${body}`;
+
+    try {
+      await openUrl(mailto);
+    } catch (error) {
+      void logError(
+        "MAIN",
+        `Failed to open support mail: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      try {
+        await navigator.clipboard.writeText(SUPPORT_EMAIL);
+      } catch (clipboardError) {
+        void logError(
+          "MAIN",
+          `Failed to copy support mail: ${clipboardError instanceof Error ? clipboardError.message : String(clipboardError)}`,
+        );
+      }
+    }
   };
 
   const editEntry = (entry: HistoryEntry): void => {
@@ -543,90 +616,196 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
     return groups;
   }, [filteredHistory, t, lang]);
 
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <section
-        className="card"
+  const activeHeroSlide =
+    MAIN_HERO_SLIDES[heroSlideIndex] ?? MAIN_HERO_SLIDES[0];
+  const isSupportHeroSlide = activeHeroSlide.id === "support";
+
+  const showAdjacentHeroSlide = (direction: 1 | -1): void => {
+    setHeroSlideIndex(
+      (current) =>
+        (current + direction + MAIN_HERO_SLIDES.length) %
+        MAIN_HERO_SLIDES.length,
+    );
+    setHeroHasAdvanced(true);
+  };
+
+  const handleHeroAction = (): void => {
+    if (isSupportHeroSlide) {
+      void contactSupport();
+      return;
+    }
+
+    setHintHelpOpen((value) => !value);
+  };
+
+  const handleHeroPointerDown = (
+    event: ReactPointerEvent<HTMLElement>,
+  ): void => {
+    if (event.pointerType === "mouse" && event.button !== 0) {
+      return;
+    }
+
+    heroPointerStartX.current = event.clientX;
+  };
+
+  const handleHeroPointerUp = (
+    event: ReactPointerEvent<HTMLElement>,
+  ): void => {
+    const startX = heroPointerStartX.current;
+    heroPointerStartX.current = null;
+
+    if (startX === null) {
+      return;
+    }
+
+    const deltaX = event.clientX - startX;
+    if (Math.abs(deltaX) < 48) {
+      return;
+    }
+
+    showAdjacentHeroSlide(deltaX < 0 ? 1 : -1);
+  };
+
+  const handleHeroBlur = (event: ReactFocusEvent<HTMLElement>): void => {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      setHeroPaused(false);
+    }
+  };
+
+  const heroHintFooter = (
+    <div
+      onMouseEnter={() => setHeroPaused(true)}
+      onMouseLeave={() => setHeroPaused(false)}
+      onFocus={() => setHeroPaused(true)}
+      onBlur={handleHeroBlur}
+      onPointerDown={handleHeroPointerDown}
+      onPointerUp={handleHeroPointerUp}
+      onPointerCancel={() => {
+        heroPointerStartX.current = null;
+      }}
+      style={{ display: "grid", gap: 8, touchAction: "pan-y" }}
+    >
+      <div
+        key={activeHeroSlide.id}
+        className="main-hero-slide"
         style={{
-          display: "grid",
-          gap: 12,
-          padding: 18,
-          background: "var(--surface)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 16,
+          flexWrap: "wrap",
+          minWidth: 0,
         }}
       >
         <div
           style={{
             display: "flex",
             alignItems: "center",
-            justifyContent: "space-between",
-            gap: 16,
-            flexWrap: "wrap",
+            gap: 8,
+            flex: "1 1 220px",
+            minWidth: 0,
           }}
         >
-          <div style={{ display: "grid", gap: 6, maxWidth: 560 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span
-                style={{ fontSize: 16, fontWeight: 700, color: "var(--text-hi)" }}
-              >
-                {t("mainTab.howToStart")}
-              </span>
-              <button
-                type="button"
-                onClick={() => setHintHelpOpen((value) => !value)}
-                aria-expanded={hintHelpOpen}
-                aria-label={t("mainTab.howItWorks")}
-                title={t("mainTab.howItWorks")}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  width: 20,
-                  height: 20,
-                  padding: 0,
-                  border: "none",
-                  background: "none",
-                  cursor: "pointer",
-                  flexShrink: 0,
-                  color: hintHelpOpen ? "var(--text-hi)" : "var(--text-low)",
-                }}
-              >
-                <HelpCircle size={16} strokeWidth={2} />
-              </button>
-            </div>
-            {hintHelpOpen && (
-              <div
-                style={{
-                  fontSize: 14,
-                  color: "var(--text-mid)",
-                  lineHeight: 1.7,
-                }}
-              >
-                {t("mainTab.howToStartHint")}
-              </div>
-            )}
-          </div>
-
-          <div
+          <span
+            className="subtle-row-text"
             style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              color: "var(--text-hi)",
-              fontSize: 12,
-              fontWeight: 700,
-              letterSpacing: "0.02em",
               whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
             }}
           >
-            <span style={{ color: "var(--text-low)", letterSpacing: "0.08em" }}>
-              {t("mainTab.combination")}
-            </span>
-            <span>{hotkeyLabel}</span>
-          </div>
+            {t(activeHeroSlide.titleKey)}
+          </span>
+          {!isSupportHeroSlide && (
+            <button
+              type="button"
+              onClick={handleHeroAction}
+              aria-expanded={hintHelpOpen}
+              aria-label={t(activeHeroSlide.actionKey)}
+              title={t(activeHeroSlide.actionKey)}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 20,
+                height: 20,
+                padding: 0,
+                border: "none",
+                background: "none",
+                cursor: "pointer",
+                flexShrink: 0,
+                color: hintHelpOpen ? "var(--text-hi)" : "var(--text-low)",
+              }}
+            >
+              <HelpCircle size={16} strokeWidth={2} />
+            </button>
+          )}
         </div>
-      </section>
 
-      <TranscriptionStatsPanel />
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 14,
+            flexShrink: 0,
+          }}
+        >
+          {isSupportHeroSlide && (
+            <button
+              type="button"
+              className="subtle-row-text subtle-row-link"
+              onClick={handleHeroAction}
+              aria-label={t(activeHeroSlide.actionKey)}
+              title={t(activeHeroSlide.actionKey)}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: 0,
+                border: "none",
+                background: "transparent",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {t(activeHeroSlide.actionKey)}
+            </button>
+          )}
+
+          {!isSupportHeroSlide && (
+            <div
+              className="subtle-row-text"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                whiteSpace: "nowrap",
+              }}
+            >
+              <span>{t("mainTab.combination")}</span>
+              <span>{hotkeyLabel}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {!isSupportHeroSlide && hintHelpOpen && (
+        <div
+          style={{
+            fontSize: 13,
+            color: "var(--text-mid)",
+            lineHeight: 1.65,
+          }}
+        >
+          {t("mainTab.howToStartHint")}
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <TranscriptionStatsPanel footer={heroHintFooter} />
 
       <section style={{ display: "grid", gap: 14 }}>
         <div

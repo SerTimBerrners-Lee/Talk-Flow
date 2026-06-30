@@ -4,7 +4,22 @@ import { listen } from "@tauri-apps/api/event";
 import { onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { LogOut, User, Crown } from "lucide-react";
 
-import { CloudProfile, fetchCloudProfile, cloudLogout, getAuthLoginUrl, handleAuthToken, generateExchangeCode, getAuthLoginUrlWithCode, pollForToken, getCachedCloudProfile, subscribeCloudProfile } from "../lib/cloudAuth";
+import {
+  beginCloudAuthFlow,
+  cancelCloudAuthFlow,
+  CloudProfile,
+  fetchCloudProfile,
+  cloudLogout,
+  getAuthLoginUrl,
+  handleAuthToken,
+  generateExchangeCode,
+  getAuthLoginUrlWithCode,
+  isCloudAuthFlowActive,
+  pollForToken,
+  getCachedCloudProfile,
+  subscribeCloudProfile,
+  type CloudAuthFlowId,
+} from "../lib/cloudAuth";
 import { logError, logInfo } from "../lib/logger";
 import { SETTINGS_UPDATED_EVENT } from "../lib/hotkeyEvents";
 import { useI18n } from "../lib/i18n";
@@ -26,6 +41,34 @@ export function UserPanel() {
   const [waitingForAuth, setWaitingForAuth] = useState(false);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const exchangeCodeRef = useRef<string | null>(null);
+  const authFlowRef = useRef<CloudAuthFlowId | null>(null);
+
+  const clearLocalAuthPolling = useCallback(() => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+    exchangeCodeRef.current = null;
+    authFlowRef.current = null;
+    setWaitingForAuth(false);
+  }, []);
+
+  const cancelLocalAuthPolling = useCallback(() => {
+    cancelCloudAuthFlow();
+    clearLocalAuthPolling();
+  }, [clearLocalAuthPolling]);
+
+  const applyAuthTokenForCurrentFlow = useCallback(async (token: string): Promise<CloudProfile | null> => {
+    const flowId = authFlowRef.current;
+    if (!isCloudAuthFlowActive(flowId)) {
+      logInfo("USER_PANEL", "Ignoring auth token without an active local auth flow");
+      return null;
+    }
+
+    const data = await handleAuthToken(token, { authFlowId: flowId });
+    clearLocalAuthPolling();
+    return data;
+  }, [clearLocalAuthPolling]);
 
   const loadProfile = useCallback(async () => {
     if (getCachedCloudProfile() === undefined) {
@@ -53,10 +96,10 @@ export function UserPanel() {
       setProfile(nextProfile);
       setLoading(false);
       if (nextProfile) {
-        setWaitingForAuth(false);
+        clearLocalAuthPolling();
       }
     });
-  }, []);
+  }, [clearLocalAuthPolling]);
 
   useEffect(() => {
     const unlistenPromise = listen(SETTINGS_UPDATED_EVENT, () => {
@@ -72,14 +115,16 @@ export function UserPanel() {
   useEffect(() => {
     const unlistenPromise = listen<string>("deep-link-auth", async (event) => {
       logInfo("USER_PANEL", "Received auth token via Tauri event");
-      await handleAuthToken(event.payload);
-      await loadProfile();
+      const data = await applyAuthTokenForCurrentFlow(event.payload);
+      if (data) {
+        await loadProfile();
+      }
     });
 
     return () => {
       void unlistenPromise.then((unlisten) => unlisten());
     };
-  }, [loadProfile]);
+  }, [applyAuthTokenForCurrentFlow, loadProfile]);
 
   // ── Deep link: JS plugin API ──────────────────────────────
   useEffect(() => {
@@ -93,8 +138,10 @@ export function UserPanel() {
             logInfo("USER_PANEL", `Deep link (JS): ${url}`);
             const token = extractTokenFromUrl(url);
             if (token) {
-              await handleAuthToken(token);
-              await loadProfile();
+              const data = await applyAuthTokenForCurrentFlow(token);
+              if (data) {
+                await loadProfile();
+              }
             }
           }
         });
@@ -109,7 +156,7 @@ export function UserPanel() {
     return () => {
       cancelled = true;
     };
-  }, [loadProfile]);
+  }, [applyAuthTokenForCurrentFlow, loadProfile]);
 
   // ── Polling fallback via exchange code ──────────────────────
   useEffect(() => {
@@ -124,56 +171,54 @@ export function UserPanel() {
     logInfo("USER_PANEL", `Starting auth polling with code: ${exchangeCodeRef.current?.slice(0, 8)}...`);
     pollingRef.current = setInterval(async () => {
       const code = exchangeCodeRef.current;
-      if (!code) return;
+      const flowId = authFlowRef.current;
+      if (!code || !isCloudAuthFlowActive(flowId)) return;
 
       const token = await pollForToken(code);
-      if (token && exchangeCodeRef.current === code) {
+      if (token && exchangeCodeRef.current === code && authFlowRef.current === flowId && isCloudAuthFlowActive(flowId)) {
         logInfo("USER_PANEL", "Auth polling: token received!");
-        const data = await handleAuthToken(token);
+        const data = await handleAuthToken(token, { authFlowId: flowId });
         if (data) {
           setProfile(data);
         }
-        setWaitingForAuth(false);
-        exchangeCodeRef.current = null;
+        clearLocalAuthPolling();
       }
     }, 3000);
 
     // Stop polling after 2 minutes
     const timeout = setTimeout(() => {
       logInfo("USER_PANEL", "Auth polling timed out");
-      setWaitingForAuth(false);
+      cancelLocalAuthPolling();
     }, 120_000);
 
     return () => {
       if (pollingRef.current) clearInterval(pollingRef.current);
       clearTimeout(timeout);
     };
-  }, [waitingForAuth]);
+  }, [cancelLocalAuthPolling, clearLocalAuthPolling, waitingForAuth]);
 
   const handleActivate = async () => {
     try {
-      // Generate exchange code for polling
-      const code = generateExchangeCode();
-      exchangeCodeRef.current = code;
+      if (profile) {
+        await openUrl(getAuthLoginUrl().replace("/auth/login?device=true", "/dashboard"));
+        return;
+      }
 
-      const url = profile
-        ? `${getAuthLoginUrl().replace('/auth/login?device=true', '/dashboard')}`
-        : getAuthLoginUrlWithCode(code);
-      await openUrl(url);
-      // Start polling for token via exchange code
+      const code = generateExchangeCode();
+      const flowId = beginCloudAuthFlow();
+      exchangeCodeRef.current = code;
+      authFlowRef.current = flowId;
       setWaitingForAuth(true);
+
+      await openUrl(getAuthLoginUrlWithCode(code));
     } catch (error) {
+      cancelLocalAuthPolling();
       logError("USER_PANEL", `Failed to open auth URL: ${error}`);
     }
   };
 
   const handleLogout = async () => {
-    if (pollingRef.current) {
-      clearInterval(pollingRef.current);
-      pollingRef.current = null;
-    }
-    exchangeCodeRef.current = null;
-    setWaitingForAuth(false);
+    cancelLocalAuthPolling();
     setProfile(null);
     await cloudLogout();
     logInfo("USER_PANEL", "User logged out");

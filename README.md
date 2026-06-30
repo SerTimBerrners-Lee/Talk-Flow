@@ -123,6 +123,27 @@ Download the latest build from GitHub Releases:
 - [Windows x64 installer](https://github.com/SerTimBerrners-Lee/talkis/releases/latest/download/Talkis-windows-x64-setup.exe)
 - [Linux x64 AppImage](https://github.com/SerTimBerrners-Lee/talkis/releases/latest/download/Talkis-linux-x64.AppImage)
 
+### If your OS blocks the first launch
+
+Talkis is currently distributed **without paid code signing**, so Gatekeeper (macOS) and SmartScreen (Windows) show an "unverified app" warning. This is **not malware**: the source is open (AGPL-3.0) and the builds are produced by the public GitHub Actions workflow in this repo. How to open it:
+
+**macOS** — "Apple could not verify Talkis is free of malware":
+
+1. In the dialog click **Done** (not "Move to Trash").
+2. Open **System Settings → Privacy & Security**, scroll down to *"Talkis was blocked…"* and click **Open Anyway**.
+3. Confirm with your password or Touch ID and click **Open** again.
+
+Or, in one command in Terminal (after moving it to Applications):
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Talkis.app
+```
+
+**Windows** — the blue *"Windows protected your PC"* dialog:
+
+1. Click **More info**.
+2. Click **Run anyway**.
+
 On first launch, grant the permissions Talkis needs:
 
 - Microphone access for recording.

@@ -269,6 +269,27 @@
             left: 0;
             color: rgba(255,255,255,0.4);
         }
+
+        .first-launch-link {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 16px 0;
+            border-bottom: 1px solid rgba(0,0,0,0.08);
+            font-size: 0.72rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.14em;
+            color: #000;
+        }
+        .first-launch-link:hover { opacity: 0.55; }
+        .first-launch-copy {
+            font-size: 0.85rem;
+            line-height: 1.75;
+            color: #555;
+        }
+        .first-launch-copy strong { color: #000; }
     </style>
 </head>
 <body class="selection:bg-black selection:text-white">
@@ -288,7 +309,7 @@
                     <a href="#speed" class="hover:text-gray-400 transition-colors text-black/50">Скорость</a>
                     <a href="#options" class="hover:text-gray-400 transition-colors text-black/50">Варианты</a>
                 </div>
-                <a href="#" class="btn-black px-4 py-2 md:px-6 md:py-2.5 rounded-full flex items-center space-x-2">
+                <a href="#first-launch" class="btn-black px-4 py-2 md:px-6 md:py-2.5 rounded-full flex items-center space-x-2">
                     <span class="platform-icon"></span>
                     <span class="text-[9px] md:text-[10px]">скачать</span>
                 </a>
@@ -306,15 +327,55 @@
             Мгновенная трансформация ваших мыслей в структурированный текст. Работает везде, где есть курсор.
         </p>
         <div class="flex flex-col items-center justify-center space-y-6 md:space-y-8">
-            <button class="btn-black w-full sm:w-auto px-12 py-5 rounded-full text-[11px] shadow-xl flex items-center justify-center space-x-4">
+            <a href="#first-launch" class="btn-black w-full sm:w-auto px-12 py-5 rounded-full text-[11px] shadow-xl flex items-center justify-center space-x-4">
                 <span class="platform-icon-large"></span>
                 <span>Скачать приложение</span>
-            </button>
+            </a>
             <div class="text-[8px] md:text-[9px] uppercase tracking-[0.3em] md:tracking-[0.4em] text-gray-400 font-bold px-4 text-center leading-loose">
                 macOS &nbsp; Windows &nbsp; Linux &nbsp; Android &nbsp; iOS
             </div>
         </div>
     </header>
+
+    <!-- ПЕРВЫЙ ЗАПУСК -->
+    <section id="first-launch" class="border-t border-b border-black/5 bg-white/45 reveal-node">
+        <div class="max-w-7xl mx-auto px-6 py-14 md:py-20 grid grid-cols-1 lg:grid-cols-[4fr_6fr] gap-12 md:gap-16 items-start">
+            <div>
+                <p class="text-[9px] md:text-[10px] uppercase tracking-[0.3em] text-gray-400 font-bold mb-5">Download</p>
+                <h2 class="text-3xl md:text-5xl font-bold tracking-tighter text-black mb-8">Первый запуск</h2>
+                <div class="border-t border-black/10">
+                    <a class="first-launch-link" href="https://github.com/SerTimBerrners-Lee/talkis/releases/latest/download/Talkis-macos.dmg">
+                        <span>macOS DMG</span>
+                        <span>↓</span>
+                    </a>
+                    <a class="first-launch-link" href="https://github.com/SerTimBerrners-Lee/talkis/releases/latest/download/Talkis-windows-x64-setup.exe">
+                        <span>Windows x64</span>
+                        <span>↓</span>
+                    </a>
+                    <a class="first-launch-link" href="https://github.com/SerTimBerrners-Lee/talkis/releases/latest/download/Talkis-linux-x64.AppImage">
+                        <span>Linux AppImage</span>
+                        <span>↓</span>
+                    </a>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-10 md:gap-12">
+                <div>
+                    <h3 class="text-xs uppercase tracking-widest font-bold text-black mb-4">Почему ОС предупреждает</h3>
+                    <p class="first-launch-copy">
+                        Talkis пока распространяется <strong>без платной подписи кода</strong>, поэтому Gatekeeper и SmartScreen могут показать предупреждение о непроверенном приложении. Это репутационная проверка нового файла, а не признак вируса: исходный код открыт, а сборки создаются публичным GitHub Actions.
+                    </p>
+                </div>
+                <div>
+                    <h3 class="text-xs uppercase tracking-widest font-bold text-black mb-4">Как открыть</h3>
+                    <p class="first-launch-copy">
+                        <strong>macOS:</strong> нажмите «Готово», затем откройте Системные настройки → Конфиденциальность и безопасность → «Всё равно открыть».<br><br>
+                        <strong>Windows:</strong> в окне SmartScreen нажмите «Подробнее» → «Выполнить в любом случае».
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
 
     <!-- ИНТЕГРАЦИИ -->
     <section id="integrations" class="py-12 md:py-16 border-t border-b border-black/5 overflow-hidden reveal-node">
@@ -429,7 +490,7 @@
                         </div>
                     </div>
                 </div>
-                <button class="btn-black w-full py-5 rounded-full shadow-lg text-[10px] mt-8">Скачать приложение</button>
+                <a href="#first-launch" class="btn-black w-full py-5 rounded-full shadow-lg text-[10px] mt-8">Скачать приложение</a>
             </div>
 
             <!-- КОРПОРАЦИЯ (40%) -->

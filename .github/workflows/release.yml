@@ -183,7 +183,14 @@ jobs:
             Automated release for ${{ env.RELEASE_TAG }}.
 
             This release publishes native Tauri bundles built on macOS, Windows, and Linux runners.
-            Windows/Linux builds are unsigned in this workflow.
+
+            ### Первый запуск / First launch
+
+            Сборки пока без платной подписи кода — это **не вирус** (исходники открыты, AGPL-3.0). Если ОС блокирует запуск:
+            The builds are not code-signed yet — this is **not malware** (open source, AGPL-3.0). If your OS blocks it:
+
+            - **macOS** — «не удалось проверить» / "could not verify": нажмите **Готово/Done**, затем **Системные настройки → Конфиденциальность и безопасность → Всё равно открыть** (System Settings → Privacy & Security → Open Anyway). Или: `xattr -dr com.apple.quarantine /Applications/Talkis.app`
+            - **Windows** — SmartScreen «защитил ПК» / "protected your PC": **Подробнее → Выполнить в любом случае** (More info → Run anyway).
           draft: false
           prerelease: ${{ contains(env.RELEASE_TAG, '-') }}
           files: |

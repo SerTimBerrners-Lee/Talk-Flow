@@ -240,6 +240,23 @@ select {
   color: var(--text-low);
 }
 
+.subtle-row-text {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--text-low);
+}
+
+.subtle-row-link {
+  color: var(--text-low);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.subtle-row-link:hover {
+  color: var(--text-hi);
+}
+
 .kicker {
   display: inline-flex;
   align-items: center;
@@ -269,7 +286,7 @@ select {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition:
     background-color 0.18s ease,
@@ -413,6 +430,76 @@ select {
   font-size: 13px;
   color: var(--text-mid);
   line-height: 1.6;
+}
+
+.main-hero-slide {
+  animation: slide-down 0.22s var(--ease-standard);
+}
+
+.stats-glass-card {
+  position: relative;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.26), rgba(255, 255, 255, 0.07));
+  border: 1px solid transparent;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.68),
+    0 3px 10px rgba(39, 34, 27, 0.025);
+  backdrop-filter: blur(26px) saturate(1.28);
+  -webkit-backdrop-filter: blur(26px) saturate(1.28);
+  isolation: isolate;
+}
+
+.stats-glass-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background:
+    linear-gradient(115deg, rgba(255, 255, 255, 0.54), transparent 30%),
+    linear-gradient(250deg, transparent 58%, rgba(255, 255, 255, 0.12));
+  pointer-events: none;
+}
+
+.stats-glass-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.stats-glass-metric {
+  position: relative;
+}
+
+.stats-glass-metric:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 14px;
+  right: 0;
+  bottom: 14px;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.28);
+}
+
+:root[data-theme="dark"] .stats-glass-card {
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.085), rgba(255, 255, 255, 0.025));
+  border-color: transparent;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.13),
+    0 4px 12px rgba(0, 0, 0, 0.14);
+}
+
+:root[data-theme="dark"] .stats-glass-card::before {
+  opacity: 0.12;
+}
+
+:root[data-theme="dark"] .stats-glass-metric:not(:last-child)::after {
+  background: rgba(255, 255, 255, 0.09);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .main-hero-slide {
+    animation: none;
+  }
 }
 
 ::-webkit-scrollbar {
