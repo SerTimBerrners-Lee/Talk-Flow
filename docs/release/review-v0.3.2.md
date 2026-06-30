@@ -18,7 +18,7 @@
 
 - `git diff --check`: passed
 - `bun run check:release`: passed
-- `TAURI_SIGNING_PRIVATE_KEY_PATH=~/.tauri/talkis-updater.key bun run build:release:macos`: failed at DMG bundling in this sandboxed environment after `.app` build; `hdiutil` reports `Cannot start hdiejectd because app is sandboxed` / `Device not configured`.
+- `TAURI_SIGNING_PRIVATE_KEY_PATH=~/.tauri/talkis-updater.key bun run build:release:macos`: rerun outside the sandbox reached `.app`, `.dmg`, and `.app.tar.gz` creation; local updater signing then failed because the password-protected updater key needs `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. GitHub Actions passes this from repository secrets.
 - Native/GitHub Windows build: expected via GitHub Actions after tag
 - Native/GitHub Linux build: expected via GitHub Actions after tag
 - Additional manual checks: release diff reviewed statically; no browser/Playwright pass requested.
@@ -33,11 +33,11 @@
 
 ## Findings
 
-- Blockers: local macOS DMG packaging could not be completed in the current sandboxed environment.
+- Blockers: none for GitHub Actions release if `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets are valid.
 - Non-blocking issues: Windows/Linux release artifacts are validated by GitHub Actions runners, not locally on this macOS machine.
 - Follow-ups after release: continue paid code-signing/certification work to reduce first-launch OS warnings.
 
 ## Decision
 
-- Ready for `main` merge: no, blocked until DMG build is validated outside this sandbox or by CI.
-- Ready for tag publish: no, blocked until release artifacts are validated.
+- Ready for `main` merge: yes
+- Ready for tag publish: yes, with final artifact validation in GitHub Actions.
