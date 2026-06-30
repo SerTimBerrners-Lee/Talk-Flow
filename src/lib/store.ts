@@ -1218,6 +1218,7 @@ async function writeHistory(history: HistoryEntry[]): Promise<void> {
 
 const PERMISSIONS_PASSED_KEY = "permissions_passed";
 const PERMISSIONS_VERSION_KEY = "permissions_version";
+const SYSTEM_AUDIO_PERMISSION_PASSED_KEY = "system_audio_permission_passed";
 const CURRENT_PERMISSIONS_VERSION = 3;
 const WIDGET_POSITION_KEY = "widget_position";
 
@@ -1235,6 +1236,19 @@ export async function setPermissionsPassed(value: boolean): Promise<void> {
     PERMISSIONS_VERSION_KEY,
     value ? CURRENT_PERMISSIONS_VERSION : 0,
   );
+  await store.save();
+}
+
+export async function getSystemAudioPermissionPassed(): Promise<boolean> {
+  const store = await getStore();
+  return (await store.get<boolean>(SYSTEM_AUDIO_PERMISSION_PASSED_KEY)) ?? false;
+}
+
+export async function setSystemAudioPermissionPassed(
+  value: boolean,
+): Promise<void> {
+  const store = await getStore();
+  await store.set(SYSTEM_AUDIO_PERMISSION_PASSED_KEY, value);
   await store.save();
 }
 

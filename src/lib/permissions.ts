@@ -1,5 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 
+import {
+  getSystemAudioPermissionPassed,
+  setSystemAudioPermissionPassed,
+} from "./store";
+
 export type PermissionStatus = "unknown" | "granted" | "denied" | "prompting";
 
 export interface PermissionsState {
@@ -56,7 +61,11 @@ export async function checkAccessibilityPermission(): Promise<PermissionStatus> 
 }
 
 export async function checkSystemAudioPermission(): Promise<PermissionStatus> {
-  return requiresSystemAudioPermission() ? "unknown" : "granted";
+  if (!requiresSystemAudioPermission()) {
+    return "granted";
+  }
+
+  return (await getSystemAudioPermissionPassed()) ? "granted" : "unknown";
 }
 
 export function requiresSystemAudioPermission(): boolean {
@@ -83,8 +92,10 @@ export async function requestSystemAudioPermission(): Promise<boolean> {
         includeSystem: true,
       },
     });
+    await setSystemAudioPermissionPassed(true).catch(() => undefined);
     return true;
   } catch {
+    await setSystemAudioPermissionPassed(false).catch(() => undefined);
     return false;
   } finally {
     if (session) {

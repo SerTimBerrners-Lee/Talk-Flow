@@ -150,6 +150,10 @@ On first launch, grant the permissions Talkis needs:
 - Accessibility permission on macOS for automatic paste.
 - Screen and System Audio Recording permission on macOS for call recording.
 
+After permissions are granted, Talkis stores the completed onboarding state and
+does not reopen native permission prompts on every launch. If an OS permission is
+reset or denied later, Talkis asks again only when that access is needed.
+
 ## File Transcription
 
 The Files tab supports audio and video transcription up to 8 GB. Files are processed through a native path-based pipeline, so large files do not need to be loaded into WebView memory.
@@ -160,12 +164,14 @@ Speaker diarization is available through Talkis Cloud or through local Whisper p
 
 ## Call Recording
 
-macOS call recording captures two tracks:
+Call recording captures two tracks:
 
 - `You` from the microphone.
 - `Call` from system audio.
 
-Windows and Linux system-audio call capture are explicit unsupported placeholders until WASAPI loopback and PipeWire monitor capture are implemented.
+System-audio capture is implemented with Core Audio on macOS, WASAPI loopback on
+Windows, and PipeWire monitor streams on Linux. Linux requires a running PipeWire
+daemon with an active output device.
 
 ## Privacy
 
@@ -181,7 +187,7 @@ Windows and Linux system-audio call capture are explicit unsupported placeholder
 - Nothing is pasted: check macOS System Settings -> Privacy & Security -> Accessibility and make sure Talkis is enabled.
 - Transcription contains unexpected foreign characters: choose a fixed recognition language such as `ru` or `en` instead of auto.
 - Local STT returns model errors: open `Модели` -> `Локально`, make sure the model is installed and selected, then reinstall it if the runtime reports missing files.
-- Call recording cannot start on macOS: grant both Microphone and Screen and System Audio Recording permissions, then restart Talkis.
+- Call recording cannot start: grant Microphone and the OS system-audio permission, then start the call recording again. On Linux, also make sure PipeWire is running and an output device is active.
 - Need deeper diagnostics: open `~/.talkis/talkis.log` or run `bun run logs` during development.
 
 ## Development

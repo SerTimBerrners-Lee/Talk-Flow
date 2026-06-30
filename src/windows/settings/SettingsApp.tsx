@@ -380,7 +380,8 @@ export function SettingsApp() {
       .then(([passed, permissions, history]) => {
         const hasRequiredPermissions =
           permissions.microphone === "granted" &&
-          permissions.accessibility === "granted";
+          permissions.accessibility === "granted" &&
+          (!isMacPlatform() || permissions.systemAudio === "granted");
         setInitialHistory(history);
         setShowPermissions(!(passed && hasRequiredPermissions));
         setLoadError(null);

@@ -103,34 +103,3 @@ pub async fn check_accessibility_permission() -> Result<bool, String> {
         Ok(true)
     }
 }
-
-/// Called once at startup from `lib.rs`.  If the process does not yet
-/// have Accessibility permission, trigger the native macOS prompt that
-/// auto-registers the current binary in System Settings.
-#[cfg(target_os = "macos")]
-pub fn prompt_accessibility_if_needed() {
-    let trusted = unsafe { AXIsProcessTrusted() != 0 };
-    if trusted {
-        crate::logger::log_info("ACCESSIBILITY", "Process is already trusted");
-        return;
-    }
-
-    crate::logger::log_info(
-        "ACCESSIBILITY",
-        "Process is NOT trusted — showing native prompt",
-    );
-    unsafe {
-        let keys = [kAXTrustedCheckOptionPrompt];
-        let values = [kCFBooleanTrue];
-        let options = CFDictionaryCreate(
-            std::ptr::null(),
-            keys.as_ptr(),
-            values.as_ptr(),
-            1,
-            &kCFTypeDictionaryKeyCallBacks as *const _ as *const std::ffi::c_void,
-            &kCFTypeDictionaryValueCallBacks as *const _ as *const std::ffi::c_void,
-        );
-        AXIsProcessTrustedWithOptions(options);
-        CFRelease(options);
-    }
-}

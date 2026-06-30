@@ -76,14 +76,6 @@ pub fn run() {
                 None,
             ))?;
 
-            // Auto-prompt for accessibility if not granted.
-            // AXIsProcessTrustedWithOptions(prompt=true) makes macOS
-            // show its native dialog and auto-register the binary.
-            #[cfg(target_os = "macos")]
-            {
-                accessibility::prompt_accessibility_if_needed();
-            }
-
             let _ = widget::ensure_widget_notice_window(app.handle());
 
             if let Some(win) = app.get_webview_window("widget") {

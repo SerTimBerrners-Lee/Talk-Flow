@@ -22,6 +22,7 @@ import {
   getSettings,
   reconcileInterruptedProcessing,
   setPermissionsPassed,
+  setSystemAudioPermissionPassed,
   type HistoryEntry,
 } from "../../lib/store";
 import {
@@ -652,6 +653,16 @@ export function Widget() {
       callMicPausedForVoiceRef.current = false;
       if (isCallCapturePermissionError(error)) {
         callSystemAudioPermissionReadyRef.current = false;
+        void setSystemAudioPermissionPassed(false).catch((storeError) => {
+          logError(
+            "CALL_CAPTURE",
+            `Failed to reset system audio permissions flag: ${
+              storeError instanceof Error
+                ? storeError.message
+                : String(storeError)
+            }`,
+          );
+        });
         void setPermissionsPassed(false).catch((storeError) => {
           logError(
             "CALL_CAPTURE",
