@@ -3,7 +3,7 @@
 // Kept free of Tauri / store imports so it can be unit-tested in isolation and
 // reused from any window. Persistence and event emission live in `stats.ts`.
 
-export const STATS_VERSION = 1 as const;
+export const STATS_VERSION = 2 as const;
 
 /** How many recent transcription ids we remember to de-duplicate re-counts. */
 export const COUNTED_IDS_LIMIT = 600;
@@ -15,6 +15,8 @@ export interface TranscriptionStats {
   version: number;
   /** Words across every successful transcription, never pruned. */
   allTimeWords: number;
+  /** Words bucketed by calendar day, key format `YYYY-MM-DD`. */
+  dailyWords: Record<string, number>;
   /** Words bucketed by calendar month, key format `YYYY-MM`. */
   monthlyWords: Record<string, number>;
   /** Words spoken via voice dictation only — basis for the speed metric. */
@@ -36,6 +38,7 @@ export interface StatInput {
 }
 
 export interface TranscriptionStatsView {
+  todayWords: number;
   monthWords: number;
   allTimeWords: number;
   /** Average words per minute of voice dictation. */
@@ -48,6 +51,7 @@ export function createEmptyStats(): TranscriptionStats {
   return {
     version: STATS_VERSION,
     allTimeWords: 0,
+    dailyWords: {},
     monthlyWords: {},
     voiceWords: 0,
     voiceDurationSec: 0,
@@ -68,6 +72,8 @@ export function normalizeStats(
   return {
     version: STATS_VERSION,
     allTimeWords: Number.isFinite(raw.allTimeWords) ? Number(raw.allTimeWords) : 0,
+    dailyWords:
+      raw.dailyWords && typeof raw.dailyWords === "object" ? { ...raw.dailyWords } : {},
     monthlyWords:
       raw.monthlyWords && typeof raw.monthlyWords === "object" ? { ...raw.monthlyWords } : {},
     voiceWords: Number.isFinite(raw.voiceWords) ? Number(raw.voiceWords) : 0,
@@ -105,6 +111,14 @@ export function monthKeyOf(value: string | Date): string {
   return `${safe.getFullYear()}-${String(safe.getMonth() + 1).padStart(2, "0")}`;
 }
 
+export function dayKeyOf(value: string | Date): string {
+  const date = value instanceof Date ? value : new Date(value);
+  const safe = Number.isNaN(date.getTime()) ? new Date() : date;
+  return `${safe.getFullYear()}-${String(safe.getMonth() + 1).padStart(2, "0")}-${String(
+    safe.getDate(),
+  ).padStart(2, "0")}`;
+}
+
 function normalizeSource(source: StatSource): "voice" | "file" | "call" {
   return source === "file" || source === "call" ? source : "voice";
 }
@@ -139,6 +153,7 @@ export function applyTranscriptionToStats(
   }
 
   const month = monthKeyOf(input.timestamp);
+  const day = dayKeyOf(input.timestamp);
   const source = normalizeSource(input.source);
   const isVoice = source === "voice" && input.durationSec > 0;
 
@@ -151,6 +166,10 @@ export function applyTranscriptionToStats(
     ...stats,
     version: STATS_VERSION,
     allTimeWords: stats.allTimeWords + words,
+    dailyWords: {
+      ...stats.dailyWords,
+      [day]: (stats.dailyWords[day] || 0) + words,
+    },
     monthlyWords: {
       ...stats.monthlyWords,
       [month]: (stats.monthlyWords[month] || 0) + words,
@@ -164,7 +183,7 @@ export function applyTranscriptionToStats(
 
 /** Zeroed view for first render before persisted stats have loaded. */
 export function getEmptyView(): TranscriptionStatsView {
-  return { monthWords: 0, allTimeWords: 0, averageWpm: 0, hasSpeed: false };
+  return { todayWords: 0, monthWords: 0, allTimeWords: 0, averageWpm: 0, hasSpeed: false };
 }
 
 export function statsToView(
@@ -172,12 +191,14 @@ export function statsToView(
   now: Date = new Date(),
 ): TranscriptionStatsView {
   const month = monthKeyOf(now);
+  const day = dayKeyOf(now);
   const hasSpeed = stats.voiceDurationSec > 0 && stats.voiceWords > 0;
   const averageWpm = hasSpeed
     ? Math.round(stats.voiceWords / (stats.voiceDurationSec / 60))
     : 0;
 
   return {
+    todayWords: stats.dailyWords[day] || 0,
     monthWords: stats.monthlyWords[month] || 0,
     allTimeWords: stats.allTimeWords,
     averageWpm,

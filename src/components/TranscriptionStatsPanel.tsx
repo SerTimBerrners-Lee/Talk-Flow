@@ -46,14 +46,14 @@ interface TranscriptionStatsPanelProps {
 function buildStats(view: TranscriptionStatsView, t: TranslateFn): StatItem[] {
   return [
     {
+      key: "today",
+      label: t("stats.wordsToday"),
+      value: formatStatValue(view.todayWords, t),
+    },
+    {
       key: "month",
       label: t("stats.wordsThisMonth"),
       value: formatStatValue(view.monthWords, t),
-    },
-    {
-      key: "all",
-      label: t("stats.wordsTotal"),
-      value: formatStatValue(view.allTimeWords, t),
     },
     {
       key: "speed",

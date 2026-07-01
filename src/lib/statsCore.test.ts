@@ -4,6 +4,7 @@ import {
   applyTranscriptionToStats,
   countWords,
   createEmptyStats,
+  dayKeyOf,
   monthKeyOf,
   normalizeStats,
   statsToView,
@@ -48,10 +49,19 @@ describe("monthKeyOf", () => {
   });
 });
 
+describe("dayKeyOf", () => {
+  it("formats YYYY-MM-DD and falls back for invalid input", () => {
+    expect(dayKeyOf("2026-06-21T10:00:00.000Z")).toBe("2026-06-21");
+    expect(dayKeyOf("2026-01-02T12:00:00.000Z")).toBe("2026-01-02");
+    expect(typeof dayKeyOf("not-a-date")).toBe("string");
+  });
+});
+
 describe("applyTranscriptionToStats", () => {
-  it("adds words to all-time and the month bucket", () => {
+  it("adds words to all-time, day, and month buckets", () => {
     const next = applyTranscriptionToStats(createEmptyStats(), input());
     expect(next.allTimeWords).toBe(3);
+    expect(next.dailyWords["2026-06-21"]).toBe(3);
     expect(next.monthlyWords["2026-06"]).toBe(3);
     expect(next.countedIds).toContain("id-1");
   });
@@ -112,6 +122,21 @@ describe("applyTranscriptionToStats", () => {
     expect(stats.monthlyWords["2026-06"]).toBe(2);
     expect(stats.allTimeWords).toBe(5);
   });
+
+  it("buckets words by the day of the entry timestamp", () => {
+    let stats = createEmptyStats();
+    stats = applyTranscriptionToStats(
+      stats,
+      input({ id: "d1", timestamp: "2026-06-20T10:00:00.000Z", text: "one two" }),
+    );
+    stats = applyTranscriptionToStats(
+      stats,
+      input({ id: "d2", timestamp: "2026-06-21T10:00:00.000Z", text: "three four five" }),
+    );
+    expect(stats.dailyWords["2026-06-20"]).toBe(2);
+    expect(stats.dailyWords["2026-06-21"]).toBe(3);
+    expect(stats.monthlyWords["2026-06"]).toBe(5);
+  });
 });
 
 describe("statsToView", () => {
@@ -121,6 +146,7 @@ describe("statsToView", () => {
     const view = statsToView(stats, new Date("2026-06-21T12:00:00.000Z"));
     expect(view.hasSpeed).toBe(true);
     expect(view.averageWpm).toBe(4); // 4 words / 1 minute
+    expect(view.todayWords).toBe(4);
     expect(view.monthWords).toBe(4);
     expect(view.allTimeWords).toBe(4);
   });
@@ -131,13 +157,15 @@ describe("statsToView", () => {
     expect(view.averageWpm).toBe(0);
   });
 
-  it("shows only the current month's words", () => {
+  it("shows only today's and the current month's words", () => {
     let stats = createEmptyStats();
     stats = applyTranscriptionToStats(stats, input({ id: "may", timestamp: "2026-05-10T10:00:00.000Z", text: "a b" }));
-    stats = applyTranscriptionToStats(stats, input({ id: "jun", timestamp: "2026-06-10T10:00:00.000Z", text: "c d e" }));
+    stats = applyTranscriptionToStats(stats, input({ id: "jun-old", timestamp: "2026-06-10T10:00:00.000Z", text: "c d e" }));
+    stats = applyTranscriptionToStats(stats, input({ id: "jun-today", timestamp: "2026-06-21T10:00:00.000Z", text: "f g h i" }));
     const view = statsToView(stats, new Date("2026-06-21T12:00:00.000Z"));
-    expect(view.monthWords).toBe(3);
-    expect(view.allTimeWords).toBe(5);
+    expect(view.todayWords).toBe(4);
+    expect(view.monthWords).toBe(7);
+    expect(view.allTimeWords).toBe(9);
   });
 });
 
@@ -146,6 +174,7 @@ describe("normalizeStats", () => {
     expect(normalizeStats(null)).toEqual(createEmptyStats());
     const repaired = normalizeStats({ allTimeWords: 10 } as never);
     expect(repaired.allTimeWords).toBe(10);
+    expect(repaired.dailyWords).toEqual({});
     expect(repaired.monthlyWords).toEqual({});
     expect(repaired.countedIds).toEqual([]);
   });

@@ -128,8 +128,8 @@ export const components = {
   // ── TranscriptionStatsPanel ───────────────────────────────
   "stats.suffix.thousand": { ru: "к", en: "k" },
   "stats.suffix.million": { ru: "М", en: "M" },
+  "stats.wordsToday": { ru: "Слов за сегодня", en: "Words today" },
   "stats.wordsThisMonth": { ru: "Слов за месяц", en: "Words this month" },
-  "stats.wordsTotal": { ru: "Слов всего", en: "Words total" },
   "stats.wordsPerMinute": { ru: "Слов в минуту", en: "Words per minute" },
 
   // ── TitleBar ──────────────────────────────────────────────
