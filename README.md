@@ -38,6 +38,13 @@ It is designed for practical daily work: IDEs, chats, notes, CRM fields, email, 
 - Run managed local runtimes for Whisper, Qwen ASR, NVIDIA Parakeet, and speaker diarization.
 - Build native bundles for macOS, Windows, and Linux.
 
+## Latest Changes
+
+### v0.3.4
+
+- Fixed repeated permission prompts after restarting macOS: startup checks no longer trigger a microphone request, and Accessibility is not reset before re-requesting access.
+- Updated the transcription statistics card to show words today, words this month, and words per minute instead of the less useful all-time words metric.
+
 ## Demo
 
 The repository includes the same GIF demos used on the Talkis website.
