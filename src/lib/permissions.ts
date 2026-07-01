@@ -17,6 +17,9 @@ export async function checkMicrophonePermission(): Promise<PermissionStatus> {
   // Prefer the Permissions API: unlike getUserMedia it does NOT open an audio
   // session, so it can't duck/silence other apps' sound (music, YouTube …) — a
   // known macOS side effect that fired every time we probed the mic at startup.
+  // A permission check must also never trigger the native prompt. When the
+  // WebView cannot report a definitive state, leave the explicit request to
+  // requestMicrophonePermission().
   try {
     const status = await navigator.permissions.query(
       { name: "microphone" } as unknown as PermissionDescriptor,
@@ -27,17 +30,10 @@ export async function checkMicrophonePermission(): Promise<PermissionStatus> {
     if (status.state === "denied") {
       return "denied";
     }
-    // "prompt": undecided — fall through to the legacy probe below.
+    return "unknown";
   } catch {
-    // Permissions API doesn't support "microphone" in this WebView — fall back.
-  }
-
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    stream.getTracks().forEach((t) => t.stop());
-    return "granted";
-  } catch {
-    return "denied";
+    // Permissions API doesn't support "microphone" in this WebView.
+    return "unknown";
   }
 }
 

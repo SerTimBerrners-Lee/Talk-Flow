@@ -297,15 +297,6 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
     }
 
     try {
-      await invoke("reset_accessibility_permission");
-    } catch (e) {
-      void logError(
-        "PERMISSIONS",
-        `Failed to reset accessibility permission: ${e instanceof Error ? e.message : String(e)}`,
-      );
-    }
-
-    try {
       await invoke("open_accessibility_settings");
       setAccStatus("prompting");
     } catch (e) {
@@ -334,12 +325,13 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
       return;
     }
 
-    const { nextMicStatus, nextAccStatus } = await refreshAllPermissions();
+    const { nextMicStatus, nextAccStatus, nextSystemAudioStatus } =
+      await refreshAllPermissions();
 
     if (
       nextMicStatus !== "granted" ||
       (requiresAccessibility && nextAccStatus !== "granted") ||
-      (requiresSystemAudio && systemAudioStatus !== "granted")
+      (requiresSystemAudio && nextSystemAudioStatus !== "granted")
     ) {
       return;
     }

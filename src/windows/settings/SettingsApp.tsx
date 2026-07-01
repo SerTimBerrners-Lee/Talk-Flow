@@ -379,7 +379,7 @@ export function SettingsApp() {
     Promise.all([getPermissionsPassed(), checkAllPermissions(), getHistory()])
       .then(([passed, permissions, history]) => {
         const hasRequiredPermissions =
-          permissions.microphone === "granted" &&
+          permissions.microphone !== "denied" &&
           permissions.accessibility === "granted" &&
           (!isMacPlatform() || permissions.systemAudio === "granted");
         setInitialHistory(history);
