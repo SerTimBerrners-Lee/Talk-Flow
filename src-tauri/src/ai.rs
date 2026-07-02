@@ -586,8 +586,13 @@ async fn transcribe_audio_bytes_internal(
     let whisper_key = req
         .whisper_api_key
         .as_ref()
+        .map(|s| s.trim())
         .filter(|s| !s.is_empty())
-        .unwrap_or(&req.api_key);
+        .or_else(|| {
+            (!is_local_endpoint)
+                .then_some(req.api_key.trim())
+                .filter(|s| !s.is_empty())
+        });
 
     let stt_client = if is_local_endpoint {
         reqwest::Client::builder()
@@ -600,10 +605,12 @@ async fn transcribe_audio_bytes_internal(
         (*client).clone()
     };
 
-    let whisper_res = stt_client
-        .post(&whisper_url)
-        .bearer_auth(whisper_key)
-        .multipart(form)
+    let mut whisper_request = stt_client.post(&whisper_url).multipart(form);
+    if let Some(whisper_key) = whisper_key {
+        whisper_request = whisper_request.bearer_auth(whisper_key);
+    }
+
+    let whisper_res = whisper_request
         .send()
         .await
         .map_err(|e| {

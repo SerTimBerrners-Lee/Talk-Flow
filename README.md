@@ -40,6 +40,12 @@ It is designed for practical daily work: IDEs, chats, notes, CRM fields, email, 
 
 ## Latest Changes
 
+### v0.3.5
+
+- Fixed local STT mode so managed localhost runtimes are called without a stale API bearer token and no longer show an API-key error for local runtime failures.
+- Improved widget notice layout so the status icon stays visually centered next to long messages.
+- Prevented call-capture startup errors from resetting the completed permissions onboarding state after restart.
+
 ### v0.3.4
 
 - Fixed repeated permission prompts after restarting macOS: startup checks no longer trigger a microphone request, and Accessibility is not reset before re-requesting access.

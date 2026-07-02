@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { AlertCircle, Info } from "lucide-react";
 
 import { NOTICE_AREA_HEIGHT, NOTICE_WIDGET_WIDTH, WIDGET_NOTICE_EVENT, type WidgetNoticeState } from "./widgetConstants";
 
@@ -49,6 +50,8 @@ export function WidgetNoticeOverlay(): ReactElement | null {
   const toggleExpanded = () => {
     setExpanded((value) => !value);
   };
+  const Icon = notice.tone === "error" ? AlertCircle : Info;
+  const iconColor = notice.tone === "error" ? "rgba(184,52,52,0.9)" : "rgba(0,0,0,0.58)";
 
   return (
     <div
@@ -100,20 +103,36 @@ export function WidgetNoticeOverlay(): ReactElement | null {
         }}
       >
         <div
-          style={
-            expanded
-              ? { paddingRight: 4, whiteSpace: "pre-wrap", wordBreak: "break-word" }
-              : {
-                  display: "-webkit-box",
-                  WebkitLineClamp: 2,
-                  WebkitBoxOrient: "vertical",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  paddingRight: 4,
-                }
-          }
+          style={{
+            minHeight: NOTICE_AREA_HEIGHT - 20,
+            display: "grid",
+            gridTemplateColumns: "16px minmax(0, 1fr)",
+            alignItems: "center",
+            gap: 8,
+          }}
         >
-          {notice.message}
+          <Icon
+            size={15}
+            strokeWidth={2.1}
+            aria-hidden="true"
+            style={{ flexShrink: 0, color: iconColor }}
+          />
+          <div
+            style={
+              expanded
+                ? { paddingRight: 4, whiteSpace: "pre-wrap", wordBreak: "break-word" }
+                : {
+                    display: "-webkit-box",
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: "vertical",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    paddingRight: 4,
+                  }
+            }
+          >
+            {notice.message}
+          </div>
         </div>
       </div>
     </div>

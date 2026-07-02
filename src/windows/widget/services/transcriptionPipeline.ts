@@ -37,9 +37,18 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   return btoa(binary);
 }
 
-function toUserFacingErrorMessage(error: unknown): string {
+function isLocalSttSettings(settings: AppSettings): boolean {
+  return (
+    settings.useOwnKey &&
+    settings.provider === "custom" &&
+    /127\.0\.0\.1|localhost/i.test(settings.whisperEndpoint || "")
+  );
+}
+
+function toUserFacingErrorMessage(error: unknown, settings: AppSettings): string {
   const raw = formatErrorMessage(error);
   const normalized = raw.toLowerCase();
+  const isLocalStt = isLocalSttSettings(settings);
 
   const missingModelMatch = raw.match(/Model ['"]([^'"]+)['"] is not installed locally/i);
   if (missingModelMatch) {
@@ -63,6 +72,10 @@ function toUserFacingErrorMessage(error: unknown): string {
   }
 
   if (normalized.includes("403") || normalized.includes("forbidden")) {
+    if (isLocalStt) {
+      return tn("widget.error.localRuntimeRejected");
+    }
+
     if (normalized.includes("subscription inactive") || normalized.includes("активная подписка") || normalized.includes("cloud mode")) {
       return tn("widget.error.subscriptionRequired");
     }
@@ -87,6 +100,10 @@ function toUserFacingErrorMessage(error: unknown): string {
   }
 
   if (normalized.includes("401") || normalized.includes("unauthorized") || normalized.includes("invalid api key")) {
+    if (isLocalStt) {
+      return tn("widget.error.localRuntimeRejected");
+    }
+
     return tn("widget.error.authFailed");
   }
 
@@ -358,7 +375,7 @@ export async function processRecordingBlob({
       : String(error);
     logError("API", `Pipeline raw error: ${rawErrorMessage}`);
 
-    const userFacingErrorMessage = toUserFacingErrorMessage(error);
+    const userFacingErrorMessage = toUserFacingErrorMessage(error, settings);
     await finishProcessing({
       ...baseEntry,
       status: "failed",
@@ -449,7 +466,7 @@ export async function retryHistoryEntry(
       return { hasTranscription: false, updatedEntry: interrupted };
     }
 
-    const userFacingErrorMessage = toUserFacingErrorMessage(error);
+    const userFacingErrorMessage = toUserFacingErrorMessage(error, retrySettings);
     const failedEntry: HistoryEntry = {
       ...entry,
       status: "failed",

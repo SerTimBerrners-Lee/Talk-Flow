@@ -14,9 +14,14 @@ function detectPlatform() {
 
 const platform = process.argv[2] || process.env.TALKIS_RELEASE_PLATFORM || detectPlatform();
 const bundleTargets = {
-  macos: ["app", "dmg"],
+  macos: ["app"],
   windows: ["nsis"],
   linux: ["appimage", "deb"],
+};
+const releaseOutputs = {
+  macos: ["app", "dmg"],
+  windows: bundleTargets.windows,
+  linux: bundleTargets.linux,
 };
 
 if (!Object.hasOwn(bundleTargets, platform)) {
@@ -57,4 +62,4 @@ if (platform === "macos" && process.env.TALKIS_POSTPROCESS_MACOS_RELEASE !== "0"
   run("bun", ["run", "postprocess:macos-release"]);
 }
 
-console.log(`Built ${platform} release bundles: ${bundleTargets[platform].join(", ")}`);
+console.log(`Built ${platform} release bundles: ${releaseOutputs[platform].join(", ")}`);

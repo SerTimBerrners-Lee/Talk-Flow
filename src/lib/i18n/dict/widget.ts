@@ -128,6 +128,10 @@ export const widget = {
     ru: "Не удалось запустить локальный runtime распознавания. Откройте Настройки -> Модели -> Локально и нажмите «Скачать» для нужной Whisper-модели.",
     en: "Couldn't start the local recognition runtime. Open Settings -> Models -> Local and click “Download” for the Whisper model you need.",
   },
+  "widget.error.localRuntimeRejected": {
+    ru: "Локальный runtime распознавания отклонил запрос. Перезапустите локальную модель или выберите её заново в Настройки -> Модели -> Локально.",
+    en: "The local recognition runtime rejected the request. Restart the local model or select it again in Settings -> Models -> Local.",
+  },
   "widget.error.regionUnsupported": {
     ru: "Сервис распознавания сейчас недоступен в вашем регионе. Попробуйте другой endpoint или VPN.",
     en: "The recognition service is currently unavailable in your region. Try a different endpoint or a VPN.",
