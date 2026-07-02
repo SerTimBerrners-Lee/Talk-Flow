@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { X } from "lucide-react";
+import { IconX } from "../lib/icons";
 
 import { useI18n } from "../lib/i18n";
 
@@ -98,7 +98,7 @@ export function SlideOverModal({
             aria-label={t("summary.close")}
             style={{ width: 32, minWidth: 32, minHeight: 32, padding: 0, justifyContent: "center", flexShrink: 0 }}
           >
-            <X size={14} strokeWidth={2} />
+            <IconX size={14} stroke={2} />
           </button>
         </div>
 

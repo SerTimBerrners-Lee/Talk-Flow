@@ -5,29 +5,29 @@ import { emit } from "@tauri-apps/api/event";
 import { onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
-  Briefcase,
-  Check,
-  Cloud,
-  Code,
-  Crown,
-  Download,
-  Gauge,
-  HardDrive,
-  LogOut,
-  LucideIcon,
-  MessageSquare,
-  Mic,
-  Pencil,
-  Plus,
-  Server,
-  Sparkles,
-  Target,
-  Trash2,
-  Type,
-  User,
-  X,
-  Zap,
-} from "lucide-react";
+  IconBriefcase,
+  IconCheck,
+  IconCloud,
+  IconCode,
+  IconCrown,
+  IconDownload,
+  IconGauge,
+  IconDeviceDesktopCog,
+  IconLogout,
+  Icon,
+  IconMessage,
+  IconMicrophone,
+  IconPencil,
+  IconPlus,
+  IconServer,
+  IconSparkles,
+  IconTargetArrow,
+  IconTrash,
+  IconTypography,
+  IconUser,
+  IconX,
+  IconBolt,
+} from "../../../lib/icons";
 
 import {
   AppSettings,
@@ -605,7 +605,7 @@ function OptionCard({ active = false, icon, title, description, badge, onClick, 
 
       {active && (
         <div style={{ position: "absolute", top: 16, right: 16, color: "var(--text-hi)" }}>
-          <Check size={18} strokeWidth={2.6} />
+          <IconCheck size={18} stroke={2.6} />
         </div>
       )}
     </div>
@@ -645,7 +645,7 @@ function CloudSubscriptionAccountCard({
               style={{ width: "100%", height: "100%", borderRadius: "50%", objectFit: "cover" }}
             />
           ) : (
-            <User size={22} strokeWidth={1.5} color="var(--text-low)" />
+            <IconUser size={22} stroke={1.5} color="var(--text-low)" />
           )}
         </div>
 
@@ -692,7 +692,7 @@ function CloudSubscriptionAccountCard({
           }}
           title={t("models.account.logout")}
         >
-          <LogOut size={16} strokeWidth={1.8} />
+          <IconLogout size={16} stroke={1.8} />
         </button>
       </div>
 
@@ -706,7 +706,7 @@ function SubscriptionPromoContent({ onActivate }: { onActivate: () => void }) {
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-        <Crown size={16} strokeWidth={2.2} />
+        <IconCrown size={16} stroke={2.2} />
         <div style={{ display: "flex", alignItems: "baseline", gap: 6, minWidth: 0, flexWrap: "wrap" }}>
           <span style={{ fontWeight: 700, fontSize: 14, letterSpacing: "-0.02em", lineHeight: 1.2 }}>{t("models.guest.title")}</span>
           <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-low)", lineHeight: 1.2 }}>{t("models.cta.freeTrial")}</span>
@@ -733,7 +733,7 @@ function SubscriptionGuestCard({ onActivate }: { onActivate: () => void }) {
 }
 
 /**
- * Three-state subscription block, shared by the Models → Cloud section and the
+ * Three-state subscription block, shared by the Models → IconCloud section and the
  * dedicated "Подписка Talkis" tab: active-subscription banner, signed-in account
  * card (activate / log out), or guest promo (sign in + start the free trial).
  */
@@ -753,7 +753,7 @@ function SubscriptionCards({
       <div className="card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
           <div style={{ width: 42, height: 42, borderRadius: 999, background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <Crown size={20} strokeWidth={2.2} color="var(--accent-contrast)" />
+            <IconCrown size={20} stroke={2.2} color="var(--accent-contrast)" />
           </div>
           <div>
             <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-hi)" }}>{t("models.subscription.active")}</div>
@@ -1032,7 +1032,7 @@ function PromptLibrary({
           <OptionCard
             key={preset.id}
             active={active}
-            icon={<MessageSquare size={20} strokeWidth={active ? 2.4 : 1.8} />}
+            icon={<IconMessage size={20} stroke={active ? 2.4 : 1.8} />}
             title={preset.name}
             description={<CollapsibleCardText text={preset.prompt} />}
             onClick={() => update({ defaultSummaryPromptId: preset.id })}
@@ -1067,7 +1067,7 @@ function PromptLibrary({
             fontFamily: "var(--font-main)",
           }}
         >
-          <Plus size={16} strokeWidth={2} />
+          <IconPlus size={16} stroke={2} />
           {t("models.prompt.create")}
         </button>
 
@@ -1090,7 +1090,7 @@ function PromptLibrary({
                 fontFamily: "var(--font-main)",
               }}
             >
-              <Pencil size={15} strokeWidth={2} />
+              <IconPencil size={15} stroke={2} />
               {t("models.common.edit")}
             </button>
             <button
@@ -1111,7 +1111,7 @@ function PromptLibrary({
                 fontFamily: "var(--font-main)",
               }}
             >
-              <Trash2 size={15} strokeWidth={2} />
+              <IconTrash size={15} stroke={2} />
               {t("models.common.delete")}
             </button>
           </>
@@ -1153,7 +1153,7 @@ function TextModelCard({
         style={{ width: "100%", border: "none", background: "transparent", padding: "12px 14px", display: "flex", alignItems: "center", gap: 12, cursor: "pointer", textAlign: "left", fontFamily: "var(--font-main)" }}
       >
         <div style={{ width: 36, height: 36, borderRadius: 999, background: "var(--icon-soft-bg)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-          <Sparkles size={18} strokeWidth={1.9} color="var(--text-hi)" />
+          <IconSparkles size={18} stroke={1.9} color="var(--text-hi)" />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 3 }}>
@@ -1356,7 +1356,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
     void syncSettings().catch(() => {});
   }, [syncSettings]);
 
-  // Cloud profile — always fetch (regardless of tab) so hooks are stable
+  // IconCloud profile — always fetch (regardless of tab) so hooks are stable
   useEffect(() => {
     if (getCachedCloudProfile() === undefined) {
       loadCloudProfile().catch(() => {});
@@ -1602,7 +1602,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
     });
   };
 
-  // Subscription activation / logout — shared by the Models → Cloud section and
+  // Subscription activation / logout — shared by the Models → IconCloud section and
   // the dedicated "Подписка Talkis" tab so both surfaces drive the same flow.
   const handleActivateSubscription = async () => {
     try {
@@ -1657,22 +1657,22 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
     const modeOptions: Array<{
       id: ModelMode;
       label: string;
-      Icon: LucideIcon;
+      Icon: Icon;
     }> = [
       {
         id: "cloud",
         label: t("models.mode.cloud"),
-        Icon: Cloud,
+        Icon: IconCloud,
       },
       {
         id: "api",
         label: "API",
-        Icon: Code,
+        Icon: IconCode,
       },
       {
         id: "local",
         label: t("models.mode.local"),
-        Icon: Server,
+        Icon: IconServer,
       },
     ];
 
@@ -2054,7 +2054,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
       return (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "10px 12px", borderRadius: 10, background: "var(--control-muted)", border: "1px solid var(--border-subtle)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 650, color: isActive ? "var(--success-bright)" : "var(--text-mid)" }}>
-            {isActive && <Check size={15} strokeWidth={2.5} />}
+            {isActive && <IconCheck size={15} stroke={2.5} />}
             <span>{isActive ? t("models.modeCommit.active") : t("models.modeCommit.label", { mode: modeLabel })}</span>
           </div>
           {!isActive && (
@@ -2252,9 +2252,9 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
     const renderLocalModelStats = (model: LocalModelOption) => {
       const speedValueLabel = translateSpeedValue(model.speed);
       const accuracyValueLabel = translateAccuracyValue(model.accuracy);
-      const stats: { key: string; title: string; label: string; Icon: LucideIcon; level: number }[] = [
-        { key: "speed", title: t("models.stat.speedTitle", { value: speedValueLabel }), label: t("models.stat.speed"), Icon: Gauge, level: getLocalModelLevel("speed", model.speed) },
-        { key: "accuracy", title: t("models.stat.accuracyTitle", { value: accuracyValueLabel }), label: t("models.stat.accuracy"), Icon: Target, level: getLocalModelLevel("accuracy", model.accuracy) },
+      const stats: { key: string; title: string; label: string; Icon: Icon; level: number }[] = [
+        { key: "speed", title: t("models.stat.speedTitle", { value: speedValueLabel }), label: t("models.stat.speed"), Icon: IconGauge, level: getLocalModelLevel("speed", model.speed) },
+        { key: "accuracy", title: t("models.stat.accuracyTitle", { value: accuracyValueLabel }), label: t("models.stat.accuracy"), Icon: IconTargetArrow, level: getLocalModelLevel("accuracy", model.accuracy) },
       ];
       const storageLabel = getLocalModelStorageLabel(model);
 
@@ -2265,7 +2265,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
             aria-label={t("models.stat.downloadSizeTitle", { value: storageLabel })}
             style={{ display: "flex", alignItems: "center", gap: 6 }}
           >
-            <HardDrive size={14} strokeWidth={1.9} color="var(--text-hi)" />
+            <IconDeviceDesktopCog size={14} stroke={1.9} color="var(--text-hi)" />
             <span style={{ fontSize: 12, fontWeight: 650, color: "var(--text-hi)", lineHeight: 1 }}>
               {storageLabel}
             </span>
@@ -2278,7 +2278,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
               aria-label={title}
               style={{ display: "flex", alignItems: "center", gap: 6 }}
             >
-              <Icon size={14} strokeWidth={1.9} color="var(--text-hi)" />
+              <Icon size={14} stroke={1.9} color="var(--text-hi)" />
               <span style={{ fontSize: 12, fontWeight: 650, color: "var(--text-hi)", lineHeight: 1 }}>
                 {label}
               </span>
@@ -2356,7 +2356,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         if (message.includes("отменена")) {
-          // User cancelled — reset to the not-downloaded state silently.
+          // IconUser cancelled — reset to the not-downloaded state silently.
           setLocalModelActionStates((prev) => {
             const next = { ...prev };
             delete next[model.id];
@@ -2474,7 +2474,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                       gap: 7,
                     }}
                   >
-                    <Icon size={15} strokeWidth={active ? 2.2 : 1.7} />
+                    <Icon size={15} stroke={active ? 2.2 : 1.7} />
                     <span>{label}</span>
                   </button>
                 );
@@ -2504,7 +2504,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
               {(isCloudSelected || hasActiveSubscription) && (
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, color: isCloudSelected ? "var(--success-bright)" : "var(--text-hi)", fontSize: 12, fontWeight: 600 }}>
-                  <Check size={15} strokeWidth={2.5} />
+                  <IconCheck size={15} stroke={2.5} />
                   {isCloudSelected ? t("models.connection.usedForRecognition") : t("models.cloud.proReady")}
                 </div>
 
@@ -2521,7 +2521,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                     alignItems: "center",
                     gap: 8,
                   }}>
-                    <Check size={14} strokeWidth={2.5} />
+                    <IconCheck size={14} stroke={2.5} />
                     {t("models.common.selected")}
                   </div>
                 ) : hasActiveSubscription ? (
@@ -2543,7 +2543,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                       gap: 8,
                     }}
                   >
-                    <Check size={14} strokeWidth={2.5} />
+                    <IconCheck size={14} stroke={2.5} />
                     {t("models.common.select")}
                   </button>
                 ) : null}
@@ -2558,8 +2558,8 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div style={{ display: "flex", background: "var(--control-track)", borderRadius: 10, padding: 3, gap: 2 }}>
                 {([
-                  { id: "transcription", label: t("models.local.tabTranscription"), Icon: Mic },
-                  { id: "text", label: t("models.local.tabText"), Icon: MessageSquare },
+                  { id: "transcription", label: t("models.local.tabTranscription"), Icon: IconMicrophone },
+                  { id: "text", label: t("models.local.tabText"), Icon: IconMessage },
                 ] as const).map(({ id, label, Icon }) => {
                   const active = apiModelKind === id;
 
@@ -2585,7 +2585,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                         gap: 7,
                       }}
                     >
-                      <Icon size={15} strokeWidth={active ? 2.2 : 1.7} />
+                      <Icon size={15} stroke={active ? 2.2 : 1.7} />
                       <span>{label}</span>
                       {id === "text" && !apiTextModelConfigured && (
                         <span
@@ -2744,7 +2744,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
 
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 8, color: adapterStatus.color, fontSize: 12, fontWeight: 600 }}>
-                              {adapterStatus.status === "success" && <Check size={15} strokeWidth={2.5} />}
+                              {adapterStatus.status === "success" && <IconCheck size={15} stroke={2.5} />}
                               {adapterStatus.connectionLabel}
                             </div>
                             {isAdapterSelected ? (
@@ -2760,7 +2760,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                                 alignItems: "center",
                                 gap: 8,
                               }}>
-                                <Check size={14} strokeWidth={2.5} />
+                                <IconCheck size={14} stroke={2.5} />
                                 {t("models.common.selected")}
                               </div>
                             ) : (
@@ -2784,7 +2784,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                                       gap: 8,
                                     }}
                                   >
-                                    <Check size={14} strokeWidth={2.5} />
+                                    <IconCheck size={14} stroke={2.5} />
                                     {t("models.common.select")}
                                   </button>
                                 )}
@@ -2814,7 +2814,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                                     </>
                                   ) : (
                                     <>
-                                      <Zap size={14} strokeWidth={2.2} />
+                                      <IconBolt size={14} stroke={2.2} />
                                       {adapter.testable ? t("models.test.testAndSave") : t("models.test.saveButton")}
                                     </>
                                   )}
@@ -2839,8 +2839,8 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div style={{ display: "flex", background: "var(--control-track)", borderRadius: 10, padding: 3, gap: 2 }}>
                 {([
-                  { id: "transcription", label: t("models.local.tabTranscription"), Icon: Mic },
-                  { id: "text", label: t("models.local.tabText"), Icon: MessageSquare },
+                  { id: "transcription", label: t("models.local.tabTranscription"), Icon: IconMicrophone },
+                  { id: "text", label: t("models.local.tabText"), Icon: IconMessage },
                 ] as const).map(({ id, label, Icon }) => {
                   const active = localModelKind === id;
 
@@ -2866,7 +2866,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                         gap: 7,
                       }}
                     >
-                      <Icon size={15} strokeWidth={active ? 2.2 : 1.7} />
+                      <Icon size={15} stroke={active ? 2.2 : 1.7} />
                       <span>{label}</span>
                       {id === "text" && !localTextModelSelected && (
                         <span
@@ -3005,7 +3005,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
                             {modelStatus.connectionLabel && (
                               <div style={{ display: "flex", alignItems: "center", gap: 8, color: modelStatus.color, fontSize: 12, fontWeight: 600 }}>
-                                {(modelStatus.status === "installed" || modelStatus.status === "selected") && <Check size={15} strokeWidth={2.5} />}
+                                {(modelStatus.status === "installed" || modelStatus.status === "selected") && <IconCheck size={15} stroke={2.5} />}
                                 {modelStatus.connectionLabel}
                               </div>
                             )}
@@ -3029,7 +3029,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                                     gap: 8,
                                   }}
                                 >
-                                  <Check size={14} strokeWidth={2.5} />
+                                  <IconCheck size={14} stroke={2.5} />
                                   {t("models.common.select")}
                                 </button>
                               )}
@@ -3062,12 +3062,12 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                                 >
                                   {isDownloaded ? (
                                     <>
-                                      <Trash2 size={14} strokeWidth={2.2} />
+                                      <IconTrash size={14} stroke={2.2} />
                                       {t("models.common.delete")}
                                     </>
                                   ) : (
                                     <>
-                                      <Download size={14} strokeWidth={2.2} />
+                                      <IconDownload size={14} stroke={2.2} />
                                       {isRuntimeReady ? t("models.common.download") : t("models.common.unavailable")}
                                     </>
                                   )}
@@ -3092,7 +3092,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                                     gap: 8,
                                   }}
                                 >
-                                  <X size={14} strokeWidth={2.2} />
+                                  <IconX size={14} stroke={2.2} />
                                   {t("models.common.cancel")}
                                 </button>
                               )}
@@ -3189,19 +3189,19 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
     );
   }
 
-  const STYLE_ICONS: Record<AppSettings["style"], LucideIcon> = {
-    classic: MessageSquare,
-    business: Briefcase,
-    tech: Code,
+  const STYLE_ICONS: Record<AppSettings["style"], Icon> = {
+    classic: IconMessage,
+    business: IconBriefcase,
+    tech: IconCode,
   };
 
   const styleTabOptions: Array<{
     id: "style" | "prompts";
     label: string;
-    Icon: LucideIcon;
+    Icon: Icon;
   }> = [
-    { id: "style", label: t("models.styleTab.style"), Icon: Type },
-    { id: "prompts", label: t("models.styleTab.prompts"), Icon: MessageSquare },
+    { id: "style", label: t("models.styleTab.style"), Icon: IconTypography },
+    { id: "prompts", label: t("models.styleTab.prompts"), Icon: IconMessage },
   ];
 
   return (
@@ -3239,7 +3239,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                 gap: 7,
               }}
             >
-              <Icon size={15} strokeWidth={active ? 2.2 : 1.7} />
+              <Icon size={15} stroke={active ? 2.2 : 1.7} />
               <span>{label}</span>
             </button>
           );
@@ -3256,7 +3256,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
               <OptionCard
                 key={st.id}
                 active={isActive}
-                icon={<Icon size={20} strokeWidth={isActive ? 2.4 : 1.8} />}
+                icon={<Icon size={20} stroke={isActive ? 2.4 : 1.8} />}
                 title={st.title}
                 description={st.description}
                 onClick={() =>

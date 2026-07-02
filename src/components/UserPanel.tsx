@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { listen } from "@tauri-apps/api/event";
 import { onOpenUrl } from "@tauri-apps/plugin-deep-link";
-import { LogOut, User, Crown } from "lucide-react";
+import { IconLogout, IconUser, IconCrown } from "../lib/icons";
 
 import {
   beginCloudAuthFlow,
@@ -221,7 +221,7 @@ export function UserPanel() {
     cancelLocalAuthPolling();
     setProfile(null);
     await cloudLogout();
-    logInfo("USER_PANEL", "User logged out");
+    logInfo("USER_PANEL", "IconUser logged out");
   };
 
   if (loading) {
@@ -247,7 +247,7 @@ export function UserPanel() {
       <div style={styles.container}>
         <ProfileRow profile={profile} onLogout={handleLogout} />
         <button onClick={handleActivate} style={styles.compactCta}>
-          <Crown size={13} strokeWidth={2} color="var(--accent-contrast)" />
+          <IconCrown size={13} stroke={2} color="var(--accent-contrast)" />
           <span style={styles.compactCtaLabel}>{t("userPanel.upgradeToPro")}</span>
         </button>
       </div>
@@ -274,7 +274,7 @@ function ProfileRow({ profile, onLogout }: { profile: CloudProfile; onLogout: ()
             style={{ width: "100%", height: "100%", borderRadius: "50%", objectFit: "cover" }}
           />
         ) : (
-          <User size={16} strokeWidth={1.5} color="var(--text-low)" />
+          <IconUser size={16} stroke={1.5} color="var(--text-low)" />
         )}
       </div>
       <div style={styles.profileInfo}>
@@ -284,7 +284,7 @@ function ProfileRow({ profile, onLogout }: { profile: CloudProfile; onLogout: ()
         <div style={styles.profileEmail}>{profile.user.email}</div>
       </div>
       <button onClick={onLogout} style={styles.logoutButton} title={t("userPanel.logout")}>
-        <LogOut size={14} strokeWidth={1.8} />
+        <IconLogout size={14} stroke={1.8} />
       </button>
     </div>
   );
@@ -295,7 +295,7 @@ function SubscriptionCTA({ onActivate }: { onActivate: () => void }) {
   return (
     <div style={styles.ctaBox}>
       <div style={styles.ctaHeader}>
-        <Crown size={14} strokeWidth={2} color="var(--text-hi)" />
+        <IconCrown size={14} stroke={2} color="var(--text-hi)" />
         <span style={{ fontWeight: 700, fontSize: 12, letterSpacing: "-0.02em", color: "var(--text-hi)" }}>
           {t("userPanel.cta.title")}
         </span>

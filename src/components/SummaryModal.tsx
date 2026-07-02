@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Check, Clipboard, Pencil, Trash2 } from "lucide-react";
+import { IconCheck, IconClipboard, IconPencil, IconTrash } from "../lib/icons";
 
 import { SETTINGS_UPDATED_EVENT } from "../lib/hotkeyEvents";
 import {
@@ -295,9 +295,9 @@ export function SummaryModal({
                           <RowActionsMenu
                             label={t("summary.actions")}
                             items={[
-                              { key: "copy", label: copiedId === item.id ? t("summary.copied") : t("summary.copy"), icon: copiedId === item.id ? <Check size={14} strokeWidth={2.5} /> : <Clipboard size={14} strokeWidth={2} />, onSelect: () => void copy(item) },
-                              { key: "edit", label: t("summary.edit"), icon: <Pencil size={14} strokeWidth={2} />, onSelect: () => startEdit(item) },
-                              { key: "delete", label: t("summary.delete"), icon: <Trash2 size={14} strokeWidth={2} />, danger: true, onSelect: () => void remove(item) },
+                              { key: "copy", label: copiedId === item.id ? t("summary.copied") : t("summary.copy"), icon: copiedId === item.id ? <IconCheck size={14} stroke={2.5} /> : <IconClipboard size={14} stroke={2} />, onSelect: () => void copy(item) },
+                              { key: "edit", label: t("summary.edit"), icon: <IconPencil size={14} stroke={2} />, onSelect: () => startEdit(item) },
+                              { key: "delete", label: t("summary.delete"), icon: <IconTrash size={14} stroke={2} />, danger: true, onSelect: () => void remove(item) },
                             ] as RowActionItem[]}
                           />
                         </div>

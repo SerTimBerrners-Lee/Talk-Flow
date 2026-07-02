@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { IconCheck, IconChevronDown } from "../lib/icons";
 
 export interface DropdownOption {
   value: string;
@@ -59,9 +59,9 @@ export function Dropdown({
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {current?.label ?? value}
         </span>
-        <ChevronDown
+        <IconChevronDown
           size={14}
-          strokeWidth={2}
+          stroke={2}
           style={{ flexShrink: 0, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}
         />
       </button>
@@ -113,7 +113,7 @@ export function Dropdown({
                 onMouseLeave={(e) => (e.currentTarget.style.background = active ? "var(--dropdown-active)" : "transparent")}
               >
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{option.label}</span>
-                {active && <Check size={14} strokeWidth={2.5} style={{ flexShrink: 0, color: "var(--text-hi)" }} />}
+                {active && <IconCheck size={14} stroke={2.5} style={{ flexShrink: 0, color: "var(--text-hi)" }} />}
               </button>
             );
           })}

@@ -2,17 +2,17 @@ import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties, ReactElement } from "react";
 import { emit, listen } from "@tauri-apps/api/event";
 import {
-  AlertTriangle,
-  Headphones,
-  Languages,
-  Mic,
-  Play,
-  Radio,
-  RefreshCcw,
-  Speaker,
-  Square,
-  Volume2,
-} from "lucide-react";
+  IconAlertTriangle,
+  IconHeadphones,
+  IconLanguage,
+  IconMicrophone,
+  IconPlayerPlay,
+  IconBroadcast,
+  IconRefresh,
+  IconSpeakerphone,
+  IconSquare,
+  IconVolume,
+} from "../../../lib/icons";
 
 import {
   addHistoryEntry,
@@ -691,7 +691,7 @@ export function RealtimeInterpreterTab(): ReactElement {
               className="label"
               style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
             >
-              <Languages size={14} strokeWidth={2} />
+              <IconLanguage size={14} stroke={2} />
               Beta
             </div>
             <div
@@ -719,7 +719,7 @@ export function RealtimeInterpreterTab(): ReactElement {
           >
             <Metric label={t("realtime.metric.status")} value={statusLabel(status, t)} />
             <Metric label={t("realtime.metric.languages")} value={pairDefinition.label} />
-            <Metric label={t("realtime.metric.route")} value="Talkis Cloud" />
+            <Metric label={t("realtime.metric.route")} value="Talkis IconCloud" />
           </div>
         </div>
 
@@ -733,7 +733,7 @@ export function RealtimeInterpreterTab(): ReactElement {
             fontWeight: 700,
           }}
         >
-          <Radio size={14} strokeWidth={2.2} />
+          <IconBroadcast size={14} stroke={2.2} />
           {status?.message || t("realtime.statusMessage.off")}
         </div>
       </div>
@@ -831,7 +831,7 @@ export function RealtimeInterpreterTab(): ReactElement {
               background: "var(--control-muted)",
             }}
           >
-            <span style={{ fontWeight: 700 }}>Cloud proxy</span>
+            <span style={{ fontWeight: 700 }}>IconCloud proxy</span>
             <span
               style={{
                 color: hasCloudToken
@@ -868,7 +868,7 @@ export function RealtimeInterpreterTab(): ReactElement {
             }}
             style={{ width: 16, height: 16, accentColor: "var(--accent)" }}
           />
-          <Headphones size={16} strokeWidth={2} />
+          <IconHeadphones size={16} stroke={2} />
           <span>{t("realtime.headphonesConfirm")}</span>
         </label>
       </div>
@@ -884,7 +884,7 @@ export function RealtimeInterpreterTab(): ReactElement {
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <Mic size={16} strokeWidth={2} />
+            <IconMicrophone size={16} stroke={2} />
             <div
               style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)" }}
             >
@@ -903,7 +903,7 @@ export function RealtimeInterpreterTab(): ReactElement {
               }}
               style={{ minHeight: 36, borderRadius: 10, padding: "0 12px" }}
             >
-              <RefreshCcw size={14} strokeWidth={2} />
+              <IconRefresh size={14} stroke={2} />
               {t("realtime.button.refresh")}
             </button>
             <button
@@ -920,7 +920,7 @@ export function RealtimeInterpreterTab(): ReactElement {
               }}
               style={{ minHeight: 36, borderRadius: 10, padding: "0 12px" }}
             >
-              <Volume2 size={14} strokeWidth={2} />
+              <IconVolume size={14} stroke={2} />
               {t("realtime.button.test")}
             </button>
             {status?.active ? (
@@ -934,7 +934,7 @@ export function RealtimeInterpreterTab(): ReactElement {
                 }}
                 style={{ minHeight: 36, borderRadius: 10, padding: "0 12px" }}
               >
-                <Square size={13} strokeWidth={2.4} />
+                <IconSquare size={13} stroke={2.4} />
                 {t("realtime.button.stop")}
               </button>
             ) : (
@@ -948,7 +948,7 @@ export function RealtimeInterpreterTab(): ReactElement {
                 }}
                 style={{ minHeight: 36, borderRadius: 10, padding: "0 12px" }}
               >
-                <Play size={13} strokeWidth={2.4} />
+                <IconPlayerPlay size={13} stroke={2.4} />
                 {t("realtime.button.start")}
               </button>
             )}
@@ -973,9 +973,9 @@ export function RealtimeInterpreterTab(): ReactElement {
                   lineHeight: 1.5,
                 }}
               >
-                <AlertTriangle
+                <IconAlertTriangle
                   size={15}
-                  strokeWidth={2}
+                  stroke={2}
                   style={{ flexShrink: 0 }}
                 />
                 <span>{error}</span>
@@ -1026,7 +1026,7 @@ export function RealtimeInterpreterTab(): ReactElement {
         >
           <div style={{ display: "grid", gap: 10, minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <Speaker size={15} strokeWidth={2} />
+              <IconSpeakerphone size={15} stroke={2} />
               <div style={{ fontSize: 14, fontWeight: 700 }}>{t("realtime.panel.youToCall")}</div>
             </div>
             <LevelMeter
@@ -1053,7 +1053,7 @@ export function RealtimeInterpreterTab(): ReactElement {
 
           <div style={{ display: "grid", gap: 10, minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <Headphones size={15} strokeWidth={2} />
+              <IconHeadphones size={15} stroke={2} />
               <div style={{ fontSize: 14, fontWeight: 700 }}>{t("realtime.panel.callToYou")}</div>
             </div>
             <LevelMeter

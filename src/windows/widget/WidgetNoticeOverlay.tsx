@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { AlertCircle, Info } from "lucide-react";
+import { IconAlertCircle, IconInfoCircle } from "../../lib/icons";
 
 import { NOTICE_AREA_HEIGHT, NOTICE_WIDGET_WIDTH, WIDGET_NOTICE_EVENT, type WidgetNoticeState } from "./widgetConstants";
 
@@ -50,7 +50,7 @@ export function WidgetNoticeOverlay(): ReactElement | null {
   const toggleExpanded = () => {
     setExpanded((value) => !value);
   };
-  const Icon = notice.tone === "error" ? AlertCircle : Info;
+  const Icon = notice.tone === "error" ? IconAlertCircle : IconInfoCircle;
   const iconColor = notice.tone === "error" ? "rgba(184,52,52,0.9)" : "rgba(0,0,0,0.58)";
 
   return (
@@ -113,7 +113,7 @@ export function WidgetNoticeOverlay(): ReactElement | null {
         >
           <Icon
             size={15}
-            strokeWidth={2.1}
+            stroke={2.1}
             aria-hidden="true"
             style={{ flexShrink: 0, color: iconColor }}
           />

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openPath } from "@tauri-apps/plugin-opener";
-import { Mic, Keyboard, Check, AlertCircle, Volume2 } from "lucide-react";
+import { IconMicrophone, IconKeyboard, IconCheck, IconAlertCircle, IconVolume } from "../lib/icons";
 import {
   PermissionStatus,
   checkAccessibilityPermission,
@@ -66,7 +66,7 @@ function PermissionRow({
           flexShrink: 0,
         }}
       >
-        {isGranted ? <Check size={16} strokeWidth={2.5} /> : icon}
+        {isGranted ? <IconCheck size={16} stroke={2.5} /> : icon}
       </div>
 
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -452,7 +452,7 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
                   border: "1px solid var(--danger-border)",
                 }}
               >
-                <AlertCircle
+                <IconAlertCircle
                   size={16}
                   style={{
                     color: "var(--danger)",
@@ -484,7 +484,7 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
             )}
 
             <PermissionRow
-              icon={<Mic size={16} strokeWidth={1.8} />}
+              icon={<IconMicrophone size={16} stroke={1.8} />}
               title={t("permission.mic.title")}
               description={t("permission.mic.desc")}
               status={micStatus}
@@ -493,7 +493,7 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
 
             {requiresSystemAudio && (
               <PermissionRow
-                icon={<Volume2 size={16} strokeWidth={1.8} />}
+                icon={<IconVolume size={16} stroke={1.8} />}
                 title={t("permission.systemAudio.title")}
                 description={t("permission.systemAudio.desc")}
                 status={systemAudioStatus}
@@ -503,7 +503,7 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
             )}
 
             <PermissionRow
-              icon={<Keyboard size={16} strokeWidth={1.8} />}
+              icon={<IconKeyboard size={16} stroke={1.8} />}
               title={pastePermissionTitle}
               description={pastePermissionDescription}
               status={
@@ -540,7 +540,7 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
                 border: "1px solid var(--border-subtle)",
               }}
             >
-              <AlertCircle
+              <IconAlertCircle
                 size={14}
                 style={{
                   color: "var(--text-low)",

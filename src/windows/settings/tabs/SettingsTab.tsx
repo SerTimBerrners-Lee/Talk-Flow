@@ -4,7 +4,7 @@ import { emit, listen } from "@tauri-apps/api/event";
 import { disable as disableAutostart, enable as enableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Check, ChevronDown, Mail, Monitor, Moon, Search, Sun, type LucideIcon } from "lucide-react";
+import { IconCheck, IconChevronDown, IconMail, IconDeviceDesktop, IconMoon, IconSearch, IconSun, type Icon } from "../../../lib/icons";
 
 import {
   getSettings,
@@ -56,10 +56,10 @@ const SETTINGS_CARD_STYLE = {
   backdropFilter: "none",
   WebkitBackdropFilter: "none",
 } as const;
-const THEME_OPTIONS: Array<{ id: AppSettings["theme"]; Icon: LucideIcon }> = [
-  { id: "system", Icon: Monitor },
-  { id: "light", Icon: Sun },
-  { id: "dark", Icon: Moon },
+const THEME_OPTIONS: Array<{ id: AppSettings["theme"]; Icon: Icon }> = [
+  { id: "system", Icon: IconDeviceDesktop },
+  { id: "light", Icon: IconSun },
+  { id: "dark", Icon: IconMoon },
 ];
 
 export function SettingsTab() {
@@ -340,7 +340,7 @@ export function SettingsTab() {
         setMicStatus("ready");
         setMicMessage(t("settingsGeneralExtra.mic.inUse", { label: activeLabel }));
       } catch (err) {
-        void logError("SETTINGS", `Mic enumeration error: ${err instanceof Error ? err.message : String(err)}`);
+        void logError("SETTINGS", `IconMicrophone enumeration error: ${err instanceof Error ? err.message : String(err)}`);
         setMicStatus("empty");
         setMicMessage(t("settingsGeneralExtra.mic.enumFailed"));
       }
@@ -734,7 +734,7 @@ export function SettingsTab() {
                     gap: 4,
                   }}
                 >
-                  <Icon size={13} strokeWidth={active ? 2.2 : 1.7} style={{ flexShrink: 0 }} />
+                  <Icon size={13} stroke={active ? 2.2 : 1.7} style={{ flexShrink: 0 }} />
                   <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t(`settings.theme.${id}`)}</span>
                 </button>
               );
@@ -754,12 +754,12 @@ export function SettingsTab() {
             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {currentLang ? `${currentLang.native} (${currentLang.name})` : settings.language}
             </span>
-            <ChevronDown size={13} strokeWidth={2} style={{ flexShrink: 0, transform: langOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
+            <IconChevronDown size={13} stroke={2} style={{ flexShrink: 0, transform: langOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
           </button>
           {langOpen && (
             <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, width: 320, maxHeight: 320, background: "var(--dropdown-bg)", border: "1px solid var(--border)", borderRadius: 24, boxShadow: "var(--shadow-panel)", zIndex: 100, display: "flex", flexDirection: "column", overflow: "hidden" }}>
               <div style={{ padding: 12, borderBottom: "1px solid var(--border-subtle)", display: "flex", alignItems: "center", gap: 8 }}>
-                <Search size={13} style={{ color: "var(--text-low)", flexShrink: 0 }} />
+                <IconSearch size={13} style={{ color: "var(--text-low)", flexShrink: 0 }} />
                 <input autoFocus value={langSearch} onChange={(e) => setLangSearch(e.target.value)} placeholder={t("settings.recognitionLang.searchPlaceholder")} style={{ border: "none", outline: "none", background: "transparent", fontSize: 12, color: "var(--text-hi)", flex: 1 }} />
               </div>
               <div style={{ overflow: "auto", flex: 1 }}>
@@ -789,7 +789,7 @@ export function SettingsTab() {
                     <span style={{ minWidth: 28, fontSize: 10, color: "var(--text-low)", fontFamily: "monospace" }}>{lang.code}</span>
                     <span style={{ flex: 1 }}>{lang.native}</span>
                     <span style={{ fontSize: 10, color: "var(--text-low)" }}>{lang.name}</span>
-                    {settings.language === lang.code && <Check size={12} strokeWidth={2.5} style={{ color: "var(--text-hi)", flexShrink: 0 }} />}
+                    {settings.language === lang.code && <IconCheck size={12} stroke={2.5} style={{ color: "var(--text-hi)", flexShrink: 0 }} />}
                   </button>
                 ))}
               </div>
@@ -817,7 +817,7 @@ export function SettingsTab() {
             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {microphones.length === 0 ? t("settings.mic.systemDefault") : visibleMicrophoneLabel}
             </span>
-            <ChevronDown size={13} strokeWidth={2} style={{ flexShrink: 0, transform: micOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
+            <IconChevronDown size={13} stroke={2} style={{ flexShrink: 0, transform: micOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
           </button>
 
           {micOpen && microphones.length > 0 && (
@@ -830,7 +830,7 @@ export function SettingsTab() {
                   onMouseLeave={(e) => e.currentTarget.style.background = settings.micId === "" ? "var(--dropdown-active)" : "transparent"}
                 >
                   <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t("settings.mic.systemDefault")}</span>
-                  {settings.micId === "" && <Check size={12} strokeWidth={2.5} style={{ color: "var(--text-hi)", flexShrink: 0 }} />}
+                  {settings.micId === "" && <IconCheck size={12} stroke={2.5} style={{ color: "var(--text-hi)", flexShrink: 0 }} />}
                 </button>
                 {microphones.map((m, i) => (
                   <button
@@ -841,7 +841,7 @@ export function SettingsTab() {
                     onMouseLeave={(e) => e.currentTarget.style.background = settings.micId === m.deviceId ? "var(--dropdown-active)" : "transparent"}
                   >
                     <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{getMicrophoneLabel(m, i)}</span>
-                    {settings.micId === m.deviceId && <Check size={12} strokeWidth={2.5} style={{ color: "var(--text-hi)", flexShrink: 0 }} />}
+                    {settings.micId === m.deviceId && <IconCheck size={12} stroke={2.5} style={{ color: "var(--text-hi)", flexShrink: 0 }} />}
                   </button>
                 ))}
               </div>
@@ -1103,7 +1103,7 @@ export function SettingsTab() {
             className="btn"
             style={{ minHeight: CONTROL_HEIGHT, width: "100%", justifySelf: "end", justifyContent: "center", gap: 8, padding: "0 10px", borderRadius: CONTROL_RADIUS, fontSize: CONTROL_FONT_SIZE }}
           >
-            <Mail size={14} strokeWidth={2} />
+            <IconMail size={14} stroke={2} />
             {t("settings.support.button")}
           </button>
         </div>

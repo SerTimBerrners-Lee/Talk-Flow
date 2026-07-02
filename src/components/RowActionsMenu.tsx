@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { MoreHorizontal } from "lucide-react";
+import { IconDots } from "../lib/icons";
 
 export interface RowActionItem {
   key: string;
@@ -51,7 +51,7 @@ export function RowActionsMenu({
         }}
         style={{ width: 32, minWidth: 32, height: 32, minHeight: 32, padding: 0, borderRadius: 8, flexShrink: 0, justifyContent: "center" }}
       >
-        <MoreHorizontal size={15} strokeWidth={2} />
+        <IconDots size={15} stroke={2} />
       </button>
 
       {open && (

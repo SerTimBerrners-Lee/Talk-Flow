@@ -4,17 +4,17 @@ import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
-  Download,
-  ExternalLink,
-  FileAudio,
-  Home,
-  Cpu,
-  Languages,
-  Loader2,
-  Sparkles,
-  Sliders,
-  LucideIcon,
-} from "lucide-react";
+  IconDownload,
+  IconExternalLink,
+  IconFileMusic,
+  IconHome,
+  IconCpu,
+  IconLanguage,
+  IconLoader2,
+  IconSparkles,
+  IconAdjustmentsHorizontal,
+  Icon,
+} from "../../lib/icons";
 import { TitleBar } from "../../components/TitleBar";
 import { MainTab } from "./tabs/MainTab";
 import { FileTranscriptionTab } from "./tabs/FileTranscriptionTab";
@@ -72,31 +72,31 @@ function resolveInitialTab(): Tab {
   return "main";
 }
 
-const TABS: { id: Tab; labelKey: MsgKey; icon: LucideIcon; note: string }[] = [
-  { id: "main", labelKey: "settingsApp.tab.main", icon: Home, note: "История записей" },
+const TABS: { id: Tab; labelKey: MsgKey; icon: Icon; note: string }[] = [
+  { id: "main", labelKey: "settingsApp.tab.main", icon: IconHome, note: "История записей" },
   {
     id: "file",
     labelKey: "settingsApp.tab.file",
-    icon: FileAudio,
+    icon: IconFileMusic,
     note: "Транскрибация",
   },
   {
     id: "interpreter",
     labelKey: "settingsApp.tab.interpreter",
-    icon: Languages,
+    icon: IconLanguage,
     note: "Realtime Interpreter beta",
   },
   {
     id: "model",
     labelKey: "settingsApp.tab.model",
-    icon: Cpu,
+    icon: IconCpu,
     note: "Ключи и подключение модели",
   },
-  { id: "style", labelKey: "settingsApp.tab.style", icon: Sparkles, note: "Стиль обработки и Промпты для саммари" },
+  { id: "style", labelKey: "settingsApp.tab.style", icon: IconSparkles, note: "Стиль обработки и Промпты для саммари" },
   {
     id: "settings",
     labelKey: "settingsApp.tab.settings",
-    icon: Sliders,
+    icon: IconAdjustmentsHorizontal,
     note: "Язык, микрофон и горячая клавиша",
   },
 ];
@@ -119,7 +119,7 @@ function TabButton({
       className={`nav-item ${isActive ? "active" : ""}`}
       style={{ width: "100%", textAlign: "left", font: "inherit" }}
     >
-      <Icon size={18} strokeWidth={isActive ? 2.2 : 1.6} />
+      <Icon size={18} stroke={isActive ? 2.2 : 1.6} />
       <span>{t(tab.labelKey)}</span>
     </button>
   );
@@ -267,16 +267,16 @@ function AppUpdateFooter(): ReactElement | null {
             }}
           >
             {installing ? (
-              <Loader2
+              <IconLoader2
                 className="loading-soft-icon"
                 size={13}
-                strokeWidth={2}
+                stroke={2}
                 style={{
                   flexShrink: 0,
                 }}
               />
             ) : (
-              <Download size={13} strokeWidth={2} style={{ flexShrink: 0 }} />
+              <IconDownload size={13} stroke={2} style={{ flexShrink: 0 }} />
             )}
             <span>
               {installing
@@ -329,9 +329,9 @@ function AppUpdateFooter(): ReactElement | null {
         <span style={{ display: "inline-flex", alignItems: "center" }}>
           v{version}
         </span>
-        <ExternalLink
+        <IconExternalLink
           size={10}
-          strokeWidth={2}
+          stroke={2}
           style={{ display: "block", marginTop: -1 }}
         />
       </div>
@@ -377,13 +377,21 @@ export function SettingsApp() {
 
   useEffect(() => {
     Promise.all([getPermissionsPassed(), checkAllPermissions(), getHistory()])
-      .then(([passed, permissions, history]) => {
-        const hasRequiredPermissions =
+      .then(async ([passed, permissions, history]) => {
+        const hasRequiredStartupPermissions =
           permissions.microphone !== "denied" &&
-          permissions.accessibility === "granted" &&
-          (!isMacPlatform() || permissions.systemAudio === "granted");
+          (!isMacPlatform() || permissions.accessibility === "granted");
+        const shouldRecoverExistingInstall =
+          !passed && history.length > 0 && hasRequiredStartupPermissions;
+
+        if (shouldRecoverExistingInstall) {
+          await setPermissionsPassed(true);
+        }
+
         setInitialHistory(history);
-        setShowPermissions(!(passed && hasRequiredPermissions));
+        setShowPermissions(
+          !((passed || shouldRecoverExistingInstall) && hasRequiredStartupPermissions),
+        );
         setLoadError(null);
       })
       .catch((error) => {

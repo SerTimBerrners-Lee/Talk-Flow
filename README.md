@@ -40,6 +40,13 @@ It is designed for practical daily work: IDEs, chats, notes, CRM fields, email, 
 
 ## Latest Changes
 
+### v0.3.6
+
+- Fixed permissions onboarding recovery for existing installs so updates do not reopen the full permissions screen when required macOS access is already granted.
+- Switched the app icon set from Lucide to Phosphor through a local icon facade for softer, more consistent product UI icons.
+- Added a macOS Vite/esbuild runner workaround for development and release builds from external drives.
+- Kept local STT failures separate from API-key authentication errors when a local model is selected.
+
 ### v0.3.5
 
 - Fixed local STT mode so managed localhost runtimes are called without a stale API bearer token and no longer show an API-key error for local runtime failures.

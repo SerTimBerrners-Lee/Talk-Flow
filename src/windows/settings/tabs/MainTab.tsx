@@ -19,17 +19,17 @@ import {
   type SpeakerTranscriptSegment,
 } from "../../../lib/store";
 import {
-  AlertCircle,
-  Check,
-  Copy,
-  HelpCircle,
-  Loader2,
-  ListChecks,
-  Pencil,
-  RotateCcw,
-  Square,
-  Trash2,
-} from "lucide-react";
+  IconAlertCircle,
+  IconCheck,
+  IconCopy,
+  IconHelpCircle,
+  IconLoader2,
+  IconListCheck,
+  IconPencil,
+  IconRotate2,
+  IconSquare,
+  IconTrash,
+} from "../../../lib/icons";
 import {
   HISTORY_CLEARED_EVENT,
   HISTORY_DELETED_EVENT,
@@ -737,7 +737,7 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                 color: hintHelpOpen ? "var(--text-hi)" : "var(--text-low)",
               }}
             >
-              <HelpCircle size={16} strokeWidth={2} />
+              <IconHelpCircle size={16} stroke={2} />
             </button>
           )}
         </div>
@@ -854,7 +854,7 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                   : t("mainTab.clearAllTitle")
               }
             >
-              <Trash2 size={12} strokeWidth={2} />{" "}
+              <IconTrash size={12} stroke={2} />{" "}
               {isClearArmed ? t("mainTab.confirm") : t("mainTab.clear")}
             </button>
           )}
@@ -1087,10 +1087,10 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                                         width: "fit-content",
                                       }}
                                     >
-                                      <Loader2
+                                      <IconLoader2
                                         className="loading-soft-icon"
                                         size={13}
-                                        strokeWidth={2}
+                                        stroke={2}
                                       />
                                       <span>{t("mainTab.processing")}</span>
                                     </div>
@@ -1113,9 +1113,9 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                                           width: "fit-content",
                                         }}
                                       >
-                                        <AlertCircle
+                                        <IconAlertCircle
                                           size={13}
-                                          strokeWidth={2}
+                                          stroke={2}
                                         />
                                         <span>
                                           {item.status === "interrupted"
@@ -1180,9 +1180,9 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                                       }}
                                       title={t("mainTab.stopProcessing")}
                                     >
-                                      <Square
+                                      <IconSquare
                                         size={11}
-                                        strokeWidth={2}
+                                        stroke={2}
                                         fill="currentColor"
                                       />
                                     </button>
@@ -1210,13 +1210,13 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                                       title={t("mainTab.retryProcess")}
                                     >
                                       {retryingId === item.id ? (
-                                        <Loader2
+                                        <IconLoader2
                                           className="loading-soft-icon"
                                           size={12}
-                                          strokeWidth={2}
+                                          stroke={2}
                                         />
                                       ) : (
-                                        <RotateCcw size={12} strokeWidth={2} />
+                                        <IconRotate2 size={12} stroke={2} />
                                       )}
                                     </button>
                                   ) : (
@@ -1228,7 +1228,7 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                                           key: "edit",
                                           label: t("rowMenu.edit"),
                                           icon: (
-                                            <Pencil size={14} strokeWidth={2} />
+                                            <IconPencil size={14} stroke={2} />
                                           ),
                                           onSelect: () => editEntry(item),
                                         },
@@ -1242,12 +1242,12 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                                           icon:
                                             copied === item.id ||
                                             retrySucceededId === item.id ? (
-                                              <Check
+                                              <IconCheck
                                                 size={14}
-                                                strokeWidth={2.5}
+                                                stroke={2.5}
                                               />
                                             ) : (
-                                              <Copy size={14} strokeWidth={2} />
+                                              <IconCopy size={14} stroke={2} />
                                             ),
                                           onSelect: () =>
                                             copyText(item.id, item.cleaned),
@@ -1256,9 +1256,9 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                                           key: "summarize",
                                           label: t("rowMenu.summarize"),
                                           icon: (
-                                            <ListChecks
+                                            <IconListCheck
                                               size={14}
-                                              strokeWidth={2}
+                                              stroke={2}
                                             />
                                           ),
                                           disabled: !summaryAvailable,
@@ -1283,7 +1283,7 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                                       }}
                                       title={t("mainTab.delete")}
                                     >
-                                      <Trash2 size={12} strokeWidth={2} />
+                                      <IconTrash size={12} stroke={2} />
                                     </button>
                                   )}
                                 </div>

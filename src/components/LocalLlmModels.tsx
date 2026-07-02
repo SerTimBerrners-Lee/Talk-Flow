@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { AlertCircle, Check, Download, HardDrive, Loader2, MemoryStick, Trash2, X } from "lucide-react";
+import { IconAlertCircle, IconCheck, IconDownload, IconDeviceDesktopCog, IconLoader2, IconCpu, IconTrash, IconX } from "../lib/icons";
 
 import { AppSettings } from "../lib/store";
 import { useI18n } from "../lib/i18n";
@@ -225,7 +225,7 @@ export function LocalLlmModels({
             border: "1px solid var(--border-subtle)",
           }}
         >
-          <AlertCircle size={15} strokeWidth={2} style={{ flexShrink: 0, marginTop: 1, color: "var(--accent)" }} />
+          <IconAlertCircle size={15} stroke={2} style={{ flexShrink: 0, marginTop: 1, color: "var(--accent)" }} />
           <span>{t("localLlm.required")}</span>
         </div>
       )}
@@ -344,7 +344,7 @@ export function LocalLlmModels({
                       aria-label={t("localLlm.diskSize", { size: model.size_label })}
                       style={{ display: "flex", alignItems: "center", gap: 6 }}
                     >
-                      <HardDrive size={14} strokeWidth={1.9} color="var(--text-hi)" />
+                      <IconDeviceDesktopCog size={14} stroke={1.9} color="var(--text-hi)" />
                       <span style={{ fontSize: 12, fontWeight: 650, color: "var(--text-hi)", lineHeight: 1 }}>
                         {model.size_label}
                       </span>
@@ -354,7 +354,7 @@ export function LocalLlmModels({
                       aria-label={t("localLlm.ramRequired", { ram: model.min_ram_gb })}
                       style={{ display: "flex", alignItems: "center", gap: 6 }}
                     >
-                      <MemoryStick size={14} strokeWidth={1.9} color="var(--text-hi)" />
+                      <IconCpu size={14} stroke={1.9} color="var(--text-hi)" />
                       <span style={{ fontSize: 12, fontWeight: 650, color: "var(--text-hi)", lineHeight: 1 }}>
                         {t("localLlm.ramShort", { ram: model.min_ram_gb })}
                       </span>
@@ -442,7 +442,7 @@ export function LocalLlmModels({
                             color: "var(--text-hi)",
                           }}
                         >
-                          <X size={14} strokeWidth={2.2} />
+                          <IconX size={14} stroke={2.2} />
                           {t("localLlm.cancel")}
                         </button>
                       ) : (
@@ -454,7 +454,7 @@ export function LocalLlmModels({
                             color: "var(--accent-contrast)",
                           }}
                         >
-                          <Download size={14} strokeWidth={2.2} />
+                          <IconDownload size={14} stroke={2.2} />
                           {t("localLlm.download")}
                         </button>
                       )
@@ -472,13 +472,13 @@ export function LocalLlmModels({
                             }}
                           >
                             {isBusy ? (
-                              <Loader2
+                              <IconLoader2
                                 size={14}
-                                strokeWidth={2.2}
+                                stroke={2.2}
                                 style={{ animation: "spin 1s linear infinite" }}
                               />
                             ) : (
-                              <Check size={14} strokeWidth={2.5} />
+                              <IconCheck size={14} stroke={2.5} />
                             )}
                             {t("localLlm.select")}
                           </button>
@@ -492,7 +492,7 @@ export function LocalLlmModels({
                             color: "var(--text-hi)",
                           }}
                         >
-                          <Trash2 size={14} strokeWidth={2.2} />
+                          <IconTrash size={14} stroke={2.2} />
                           {t("localLlm.delete")}
                         </button>
                       </>

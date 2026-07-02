@@ -5,7 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { Check, Copy, FileAudio, Loader2, PhoneCall } from "lucide-react";
+import { IconCheck, IconCopy, IconFileMusic, IconLoader2, IconPhoneCall } from "../../lib/icons";
 
 import {
   HISTORY_CLEARED_EVENT,
@@ -1292,15 +1292,15 @@ function FileDropPill({
           }}
         >
           {isProcessing ? (
-            <Loader2
+            <IconLoader2
               className="loading-soft-icon"
               size={20}
-              strokeWidth={2}
+              stroke={2}
             />
           ) : isSuccess ? (
-            <Check size={20} strokeWidth={2.4} />
+            <IconCheck size={20} stroke={2.4} />
           ) : (
-            <FileAudio size={20} strokeWidth={2} />
+            <IconFileMusic size={20} stroke={2} />
           )}
         </span>
         <span
@@ -1401,13 +1401,13 @@ function CallBubble({
         }}
       >
         {isStarting || isProcessing ? (
-          <Loader2
+          <IconLoader2
             className="loading-soft-icon"
             size={iconSize}
-            strokeWidth={2.2}
+            stroke={2.2}
           />
         ) : isSuccess ? (
-          <Check size={iconSize} strokeWidth={2.6} />
+          <IconCheck size={iconSize} stroke={2.6} />
         ) : isError ? (
           <span
             style={{
@@ -1419,7 +1419,7 @@ function CallBubble({
             !
           </span>
         ) : (
-          <PhoneCall size={iconSize} strokeWidth={isRecording ? 2.4 : 2} />
+          <IconPhoneCall size={iconSize} stroke={isRecording ? 2.4 : 2} />
         )}
       </div>
     </ActiveWidgetShell>
@@ -1627,9 +1627,9 @@ function IdlePill({
             }}
           >
             {copySucceeded ? (
-              <Check size={12} strokeWidth={2.4} />
+              <IconCheck size={12} stroke={2.4} />
             ) : (
-              <Copy size={12} strokeWidth={2} />
+              <IconCopy size={12} stroke={2} />
             )}
           </button>
         )}
@@ -1783,8 +1783,8 @@ function FlowRecordingWidget({
       )}
       {state === "long" && (
         <span className={`flow-widget-long-mark is-${longMark}`}>
-          {longMark === "phone" && <PhoneCall size={9} strokeWidth={2.2} />}
-          {longMark === "success" && <Check size={9} strokeWidth={2.6} />}
+          {longMark === "phone" && <IconPhoneCall size={9} stroke={2.2} />}
+          {longMark === "success" && <IconCheck size={9} stroke={2.6} />}
           {longMark === "error" && "!"}
         </span>
       )}

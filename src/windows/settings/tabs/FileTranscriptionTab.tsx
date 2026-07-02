@@ -5,14 +5,14 @@ import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
-  AlertCircle,
-  Check,
-  Clipboard,
-  FileAudio,
-  ListChecks,
-  Loader2,
-  X,
-} from "lucide-react";
+  IconAlertCircle,
+  IconCheck,
+  IconClipboard,
+  IconFileMusic,
+  IconListCheck,
+  IconLoader2,
+  IconX,
+} from "../../../lib/icons";
 
 import {
   addHistoryEntry,
@@ -585,7 +585,7 @@ export function FileTranscriptionTab({
       if (speakerMode && !settings.useOwnKey && !cloudSpeakerReady) {
         setSpeakerDiarization(false);
         await saveSettings({ fileSpeakerDiarization: false });
-        throw new Error("Cloud speaker diarization unavailable");
+        throw new Error("IconCloud speaker diarization unavailable");
       }
 
       if (speakerMode && settings.useOwnKey && !isSpeakerSetupReady(settings)) {
@@ -945,7 +945,7 @@ export function FileTranscriptionTab({
           setSpeakerSetupIntent(null);
           setError(
             toFileTranscriptionErrorMessage(
-              new Error("Cloud speaker diarization unavailable"),
+              new Error("IconCloud speaker diarization unavailable"),
             ),
           );
           setSpeakerDiarization(false);
@@ -1092,13 +1092,13 @@ export function FileTranscriptionTab({
             }}
           >
             {isProcessing ? (
-              <Loader2
+              <IconLoader2
                 className="loading-soft-icon"
                 size={24}
-                strokeWidth={1.8}
+                stroke={1.8}
               />
             ) : (
-              <FileAudio size={25} strokeWidth={1.8} />
+              <IconFileMusic size={25} stroke={1.8} />
             )}
           </div>
 
@@ -1166,9 +1166,9 @@ export function FileTranscriptionTab({
                 textAlign: "left",
               }}
             >
-              <AlertCircle
+              <IconAlertCircle
                 size={16}
-                strokeWidth={2}
+                stroke={2}
                 style={{ flexShrink: 0, marginTop: 2 }}
               />
               <span>{error}</span>
@@ -1271,9 +1271,9 @@ export function FileTranscriptionTab({
                 style={{ minHeight: 32, padding: "0 12px" }}
               >
                 {copied ? (
-                  <Check size={13} strokeWidth={2.2} />
+                  <IconCheck size={13} stroke={2.2} />
                 ) : (
-                  <Clipboard size={13} strokeWidth={2} />
+                  <IconClipboard size={13} stroke={2} />
                 )}
                 {copied ? t("fileTab.result.copied") : t("fileTab.result.copy")}
               </button>
@@ -1288,7 +1288,7 @@ export function FileTranscriptionTab({
                 title={summaryAvailable ? undefined : t("summary.unavailable.tooltip")}
                 style={{ minHeight: 32, padding: "0 12px", gap: 6, opacity: summaryAvailable ? 1 : 0.5, cursor: summaryAvailable ? "pointer" : "not-allowed" }}
               >
-                <ListChecks size={13} strokeWidth={2} />
+                <IconListCheck size={13} stroke={2} />
                 {t("summary.button")}
               </button>
             )}
@@ -1305,7 +1305,7 @@ export function FileTranscriptionTab({
                 style={{ width: 32, minWidth: 32, minHeight: 32, padding: 0 }}
                 title={t("fileTab.result.clear")}
               >
-                <X size={14} strokeWidth={2} />
+                <IconX size={14} stroke={2} />
               </button>
             )}
           </div>
@@ -1322,7 +1322,7 @@ export function FileTranscriptionTab({
               color: "var(--text-mid)",
             }}
           >
-            <AlertCircle size={14} strokeWidth={2} style={{ flexShrink: 0, marginTop: 1, color: "var(--accent)" }} />
+            <IconAlertCircle size={14} stroke={2} style={{ flexShrink: 0, marginTop: 1, color: "var(--accent)" }} />
             <span>{t("summary.unavailable.note")}</span>
           </div>
         )}
@@ -1573,9 +1573,9 @@ export function FileTranscriptionTab({
                 }}
               >
                 {localWhisperDownloaded ? (
-                  <Check size={15} strokeWidth={2.2} />
+                  <IconCheck size={15} stroke={2.2} />
                 ) : (
-                  <AlertCircle size={15} strokeWidth={2} />
+                  <IconAlertCircle size={15} stroke={2} />
                 )}
                 <span>
                   {localWhisperDownloaded
@@ -1594,9 +1594,9 @@ export function FileTranscriptionTab({
                 }}
               >
                 {diarizationInstalled ? (
-                  <Check size={15} strokeWidth={2.2} />
+                  <IconCheck size={15} stroke={2.2} />
                 ) : (
-                  <AlertCircle size={15} strokeWidth={2} />
+                  <IconAlertCircle size={15} stroke={2} />
                 )}
                 <span>
                   {diarizationInstalled
@@ -1675,10 +1675,10 @@ export function FileTranscriptionTab({
                 }}
               >
                 {speakerSetupInstalling ? (
-                  <Loader2
+                  <IconLoader2
                     className="loading-soft-icon"
                     size={15}
-                    strokeWidth={2}
+                    stroke={2}
                   />
                 ) : null}
                 {speakerSetupActionLabel}

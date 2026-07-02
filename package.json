@@ -1,7 +1,7 @@
 {
   "name": "talkis",
   "private": true,
-  "version": "0.3.5",
+  "version": "0.3.6",
   "license": "AGPL-3.0-or-later",
   "type": "module",
   "packageManager": "bun@1.2.13",
@@ -9,8 +9,8 @@
     "prepare:ffmpeg-sidecar": "bun scripts/prepare-ffmpeg-sidecar.mjs",
     "prepare:stt-sidecar": "bun scripts/prepare-stt-sidecar.mjs",
     "prepare:sidecars": "bun run prepare:ffmpeg-sidecar && bun run prepare:stt-sidecar",
-    "dev": "vite",
-    "build": "tsc && vite build",
+    "dev": "bun scripts/run-vite.mjs",
+    "build": "tsc && bun scripts/run-vite.mjs build",
     "check": "bun run prepare:sidecars && bunx tsc --noEmit && cargo check --manifest-path src-tauri/Cargo.toml",
     "test": "bun test",
     "smoke:hotkey": "bun test ./src/windows/widget/services/hotkeyFsm.test.js",
@@ -21,12 +21,13 @@
     "build:release:macos": "bun scripts/build-release.mjs macos",
     "build:release:windows": "bun scripts/build-release.mjs windows",
     "build:release:linux": "bun scripts/build-release.mjs linux",
-    "preview": "vite preview",
+    "preview": "bun scripts/run-vite.mjs preview",
     "tauri": "tauri",
     "logs": "tail -f ~/.talkis/talkis.log",
     "logs:clear": "rm -f ~/.talkis/talkis.log"
   },
   "dependencies": {
+    "@phosphor-icons/react": "^2.1.10",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-autostart": "^2.5.1",
     "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
@@ -37,7 +38,6 @@
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-store": "^2.4.2",
     "@tauri-apps/plugin-updater": "^2.10.1",
-    "lucide-react": "^0.577.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },
