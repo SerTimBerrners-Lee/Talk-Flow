@@ -35,10 +35,17 @@ It is designed for practical daily work: IDEs, chats, notes, CRM fields, email, 
 - Transcribe audio and video files from the Files tab or by dropping files onto the widget.
 - Record macOS calls with separate microphone and system-audio tracks.
 - Keep local history for voice recordings and file transcriptions.
-- Run managed local runtimes for Whisper, Qwen ASR, NVIDIA Parakeet, and speaker diarization.
+- Run managed local STT through one native `transcribe.cpp` runtime for Whisper, Qwen ASR, NVIDIA Parakeet, plus speaker diarization.
 - Build native bundles for macOS, Windows, and Linux.
 
 ## Latest Changes
+
+### v0.3.7
+
+- Migrated managed local file transcription to a unified native `transcribe.cpp` runtime for Whisper, Qwen ASR, and NVIDIA Parakeet.
+- Removed the old Qwen/Parakeet MLX/Python sidecars from the desktop bundle and release build.
+- Fixed local STT settings migration so old Qwen/Parakeet endpoints move to `http://127.0.0.1:8000` and do not require an API key.
+- Fixed selecting a local transcription model so it no longer clears the selected text model used for summarization.
 
 ### v0.3.6
 
@@ -124,13 +131,11 @@ Supported STT model names include:
 
 ### Local Models
 
-Install and run Talkis-managed local runtimes from Settings. Local mode is transcription-only unless you also configure a separate LLM endpoint.
+Install and run Talkis-managed local models from Settings. Local mode is transcription-only unless you also configure a separate LLM endpoint.
 
 Managed local runtimes:
 
-- Whisper, default endpoint `http://127.0.0.1:8000`
-- NVIDIA Parakeet MLX, default endpoint `http://127.0.0.1:8001`
-- Qwen ASR, default endpoint `http://127.0.0.1:8002`
+- Whisper, NVIDIA Parakeet GGUF, and Qwen ASR GGUF through the unified `transcribe.cpp` runtime, default endpoint `http://127.0.0.1:8000`
 - Speaker diarization, default endpoint `http://127.0.0.1:8003`
 
 If a default port is busy, Talkis starts the managed runtime on a fallback port and saves the actual endpoint in settings.

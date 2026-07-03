@@ -14,6 +14,7 @@ import {
 const callInterruptedMessage = (): string => tn("callCapture.interrupted");
 import {
   type FileTranscriptionResult,
+  toFileTranscriptionErrorMessage,
   transcribeFilePathOnly,
   transcribeFileOnly,
   type FileTranscriptionProgress,
@@ -312,11 +313,11 @@ async function buildCallCaptureHistoryEntry({
       });
       micPlainPart = `${tn("callCapture.speakerYou")}:\n${micResult.text.trim()}`;
     } catch (error) {
-      const message = errorMessage(error);
+      const message = toFileTranscriptionErrorMessage(error, { settings });
       failedTracks.push(`${tn("callCapture.trackMic")}: ${message}`);
       void logError(
         "CALL_CAPTURE",
-        `Mic track transcription failed: ${message}`,
+        `Mic track transcription failed: ${errorMessage(error)}`,
       );
     }
   }
@@ -362,13 +363,13 @@ async function buildCallCaptureHistoryEntry({
         parts.push(formatTrackTranscript(track, result.text));
       }
     } catch (error) {
-      const message = errorMessage(error);
+      const message = toFileTranscriptionErrorMessage(error, { settings });
       failedTracks.push(`${callTrackTitle(track).toLowerCase()}: ${message}`);
       requiredSystemDiarizationFailed =
         requiredSystemDiarizationFailed || shouldDiarizeSystemTrack;
       void logError(
         "CALL_CAPTURE",
-        `${track.kind} track transcription failed: ${message}`,
+        `${track.kind} track transcription failed: ${errorMessage(error)}`,
       );
     }
   }
@@ -401,11 +402,11 @@ async function buildCallCaptureHistoryEntry({
           );
         }
       } catch (error) {
-        const message = errorMessage(error);
+        const message = toFileTranscriptionErrorMessage(error, { settings });
         failedTracks.push(`${tn("callCapture.trackMic")}: ${message}`);
         void logError(
           "CALL_CAPTURE",
-          `Mic track diarization fallback failed: ${message}`,
+          `Mic track diarization fallback failed: ${errorMessage(error)}`,
         );
       }
     }
@@ -611,7 +612,7 @@ export async function retryCallCaptureHistoryEntry(
       return interrupted;
     }
 
-    const userFacingMessage = tn("callCapture.errProcessRetry");
+    const userFacingMessage = toFileTranscriptionErrorMessage(error, { settings });
     const failedEntry: HistoryEntry = {
       ...entry,
       status: "failed",

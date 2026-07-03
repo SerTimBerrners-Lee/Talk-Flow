@@ -491,6 +491,50 @@ export const BUILTIN_PROMPTS: PromptPreset[] = [
 
 const BUILTIN_PROMPT_ID_SET = new Set(BUILTIN_PROMPTS.map((preset) => preset.id));
 
+function isLocalSttEndpoint(endpoint?: string): boolean {
+  return /127\.0\.0\.1|localhost/i.test(endpoint || "");
+}
+
+function normalizeLocalSttEndpoint(endpoint?: string): string | undefined {
+  if (!endpoint) return endpoint;
+
+  try {
+    const parsed = new URL(endpoint);
+    if (parsed.hostname !== "127.0.0.1" && parsed.hostname !== "localhost") {
+      return endpoint;
+    }
+
+    if (parsed.port === "8001" || parsed.port === "8002") {
+      parsed.port = "8000";
+      return parsed.toString().replace(/\/$/, "");
+    }
+  } catch {
+    return endpoint;
+  }
+
+  return endpoint;
+}
+
+function needsLocalSttSettingsMigration(saved: unknown): boolean {
+  if (!saved || typeof saved !== "object") {
+    return false;
+  }
+
+  const raw = saved as Record<string, unknown>;
+  const endpoint = typeof raw.whisperEndpoint === "string" ? raw.whisperEndpoint : "";
+  if (!isLocalSttEndpoint(endpoint)) {
+    return false;
+  }
+
+  const normalizedEndpoint = normalizeLocalSttEndpoint(endpoint);
+  return (
+    raw.useOwnKey !== true ||
+    raw.provider !== "custom" ||
+    raw.whisperApiKey !== "" ||
+    normalizedEndpoint !== endpoint
+  );
+}
+
 const DEFAULT_SETTINGS: AppSettings = {
   apiKey: "",
   apiAdapters: {},
@@ -735,7 +779,7 @@ export function normalizeSavedSettings(saved: unknown): Partial<AppSettings> {
       ? DEFAULT_DESKTOP_HOTKEY
       : normalizedHotkey;
 
-  return {
+  const normalized: Partial<AppSettings> = {
     apiKey: typeof raw.apiKey === "string" ? raw.apiKey : undefined,
     apiAdapters: rawApiAdapters,
     selectedApiAdapter:
@@ -807,6 +851,15 @@ export function normalizeSavedSettings(saved: unknown): Partial<AppSettings> {
       raw.realtimeInterpreter,
     ),
   };
+
+  if (isLocalSttEndpoint(normalized.whisperEndpoint)) {
+    normalized.whisperEndpoint = normalizeLocalSttEndpoint(normalized.whisperEndpoint);
+    normalized.useOwnKey = true;
+    normalized.provider = "custom";
+    normalized.whisperApiKey = "";
+  }
+
+  return normalized;
 }
 
 let _store: Awaited<ReturnType<typeof load>> | null = null;
@@ -905,6 +958,20 @@ export async function getSettings(
     Object.entries(normalized).filter(([, v]) => v !== undefined),
   );
   const result = { ...DEFAULT_SETTINGS, ...defined } as AppSettings;
+  if (isLocalSttEndpoint(result.whisperEndpoint)) {
+    result.whisperEndpoint = normalizeLocalSttEndpoint(result.whisperEndpoint) || result.whisperEndpoint;
+    result.useOwnKey = true;
+    result.provider = "custom";
+    result.whisperApiKey = "";
+  }
+  if (needsLocalSttSettingsMigration(saved)) {
+    try {
+      await store.set("settings", result);
+      await store.save();
+    } catch (error) {
+      console.warn("Failed to persist local STT settings migration", error);
+    }
+  }
   return result;
 }
 

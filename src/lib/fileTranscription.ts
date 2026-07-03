@@ -119,6 +119,11 @@ interface CloudTranscriptionCapabilities {
   speakerDiarizationMaxSpeakers?: number;
 }
 
+interface FileTranscriptionErrorContext {
+  settings?: Pick<AppSettings, "useOwnKey" | "provider" | "whisperEndpoint"> | null;
+  localStt?: boolean;
+}
+
 let cloudCapabilitiesCache: { value: CloudTranscriptionCapabilities; expiresAt: number } | null = null;
 
 function fileExtension(fileName: string): string {
@@ -172,18 +177,37 @@ function shouldConvert(file: File): boolean {
   return isVideo || !isDirectFormat || file.size > TRANSCRIPTION_MAX_BYTES;
 }
 
+function isLocalSttSettings(
+  settings: Pick<AppSettings, "useOwnKey" | "provider" | "whisperEndpoint">,
+): boolean {
+  return /127\.0\.0\.1|localhost/i.test(settings.whisperEndpoint || "");
+}
+
+function isAuthFailureLike(normalized: string): boolean {
+  return (
+    normalized.includes("401") ||
+    normalized.includes("unauthorized") ||
+    normalized.includes("invalid api key") ||
+    normalized.includes("api-ключ") ||
+    normalized.includes("ключ доступа") ||
+    (normalized.includes("авторизоваться") && normalized.includes("api"))
+  );
+}
+
 function buildFilePathRequestSettings(
   settings: AppSettings,
   speakerDiarization: boolean,
   useCloudSpeakerDiarization: boolean,
 ): FilePathRequestSettings {
+  const isLocalStt = isLocalSttSettings(settings);
+
   if (!speakerDiarization || useCloudSpeakerDiarization) {
     return {
-      whisperApiKey: settings.whisperApiKey || null,
+      whisperApiKey: isLocalStt ? null : settings.whisperApiKey || null,
       whisperEndpoint: settings.whisperEndpoint || null,
       whisperModel: settings.whisperModel || null,
-      useOwnKey: settings.useOwnKey,
-      deviceToken: settings.deviceToken || null,
+      useOwnKey: isLocalStt ? true : settings.useOwnKey,
+      deviceToken: isLocalStt ? null : settings.deviceToken || null,
     };
   }
 
@@ -315,9 +339,19 @@ export function getFileTranscriptionPercent(
   return 0;
 }
 
-export function toFileTranscriptionErrorMessage(error: unknown): string {
+export function toFileTranscriptionErrorMessage(
+  error: unknown,
+  context: FileTranscriptionErrorContext = {},
+): string {
   const raw = formatErrorMessage(error);
   const normalized = raw.toLowerCase();
+  const isLocalRuntimeError =
+    context.localStt === true ||
+    (context.settings ? isLocalSttSettings(context.settings) : false) ||
+    normalized.includes("локальный stt runtime") ||
+    normalized.includes("local stt runtime") ||
+    normalized.includes("127.0.0.1") ||
+    normalized.includes("localhost");
 
   if (normalized.includes("ffmpeg") || normalized.includes("медиаконвертер")) {
     return tn("fileTranscription.errMediaConverterUnavailable");
@@ -350,6 +384,18 @@ export function toFileTranscriptionErrorMessage(error: unknown): string {
 
   if (normalized.includes("cloud speaker diarization unavailable")) {
     return tn("fileTranscription.errCloudDiarizationUnavailable");
+  }
+
+  if (
+    isLocalRuntimeError &&
+    (
+      normalized.includes("403") ||
+      normalized.includes("forbidden") ||
+      isAuthFailureLike(normalized) ||
+      normalized.includes("отклонил запрос")
+    )
+  ) {
+    return tn("fileTranscription.errLocalRuntimeRejected");
   }
 
   if (normalized.includes("subscription inactive") || normalized.includes("403")) {
@@ -390,7 +436,7 @@ export function toFileTranscriptionErrorMessage(error: unknown): string {
     return tn("fileTranscription.errLocalModelNotInstalled");
   }
 
-  if (normalized.includes("401") || normalized.includes("unauthorized") || normalized.includes("invalid api key")) {
+  if (isAuthFailureLike(normalized)) {
     return tn("fileTranscription.errAuthFailed");
   }
 
@@ -498,12 +544,14 @@ async function transcribeViaBackend(
   prepared: PreparedTranscriptionFile,
   settings: AppSettings,
 ): Promise<NativeTranscriptionResult> {
+  const isLocalStt = isLocalSttSettings(settings);
+
   return invoke<NativeTranscriptionResult>("transcribe_only", {
     req: {
       audio_base64: prepared.audioBase64,
       language: settings.language,
       api_key: settings.apiKey,
-      whisper_api_key: settings.whisperApiKey || null,
+      whisper_api_key: isLocalStt ? null : settings.whisperApiKey || null,
       llm_api_key: null,
       style: settings.style || "classic",
       whisper_endpoint: settings.whisperEndpoint || null,
@@ -522,6 +570,10 @@ async function transcribePreparedFile(
   prepared: PreparedTranscriptionFile,
   settings: AppSettings,
 ): Promise<NativeTranscriptionResult> {
+  if (isLocalSttSettings(settings)) {
+    return transcribeViaBackend(prepared, settings);
+  }
+
   if (!settings.useOwnKey && settings.deviceToken?.trim()) {
     return transcribeViaProxy(prepared, settings);
   }
@@ -609,8 +661,10 @@ export async function transcribeFilePathOnly({
     });
 
     logInfo("FILE_TRANSCRIPTION", `Sending file path ${fileName} through native pipeline`);
-    const useCloudSpeakerDiarization = speakerDiarization && await canUseCloudSpeakerDiarization(settings);
-    if (speakerDiarization && !settings.useOwnKey && !useCloudSpeakerDiarization) {
+    const isLocalStt = isLocalSttSettings(settings);
+    const effectiveUseOwnKey = isLocalStt || settings.useOwnKey;
+    const useCloudSpeakerDiarization = speakerDiarization && !isLocalStt && await canUseCloudSpeakerDiarization(settings);
+    if (speakerDiarization && !effectiveUseOwnKey && !useCloudSpeakerDiarization) {
       throw new Error("Cloud speaker diarization unavailable");
     }
     const requestSettings = buildFilePathRequestSettings(settings, speakerDiarization, useCloudSpeakerDiarization);
@@ -712,12 +766,13 @@ export async function retryFileHistoryEntry(
 
     const message = formatErrorMessage(error);
     void logError("WIDGET_FILE", `File retry failed: ${message}`);
+    const userFacingMessage = toFileTranscriptionErrorMessage(error, { settings });
     const failed: HistoryEntry = {
       ...entry,
       status: "failed",
-      errorMessage: tn("fileTranscription.errProcessFileRetry"),
+      errorMessage: userFacingMessage,
     };
     await finishProcessing(failed);
-    throw new Error(failed.errorMessage);
+    throw new Error(userFacingMessage);
   }
 }

@@ -4,6 +4,7 @@ mod commands;
 mod download_cancel;
 mod history_storage;
 mod hotkey_capture;
+mod hotkey_manager;
 mod llm_runtime;
 mod local_stt;
 mod logger;
@@ -52,9 +53,9 @@ pub fn run() {
     // would otherwise start another process with its own floating widget.
     #[cfg(any(windows, target_os = "linux"))]
     {
-        builder = builder.plugin(tauri_plugin_single_instance::init(
-            |app, _argv, _cwd| focus_existing_instance(app),
-        ));
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            focus_existing_instance(app)
+        }));
     }
 
     builder
@@ -63,12 +64,12 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             logger::log_info("INIT", "Application starting...");
+            hotkey_manager::init(app);
 
             #[cfg(desktop)]
             app.handle().plugin(tauri_plugin_autostart::init(
@@ -188,6 +189,8 @@ pub fn run() {
             get_cleanup_prompt_preview,
             start_native_hotkey_capture,
             stop_native_hotkey_capture,
+            hotkey_manager::register_handy_hotkey,
+            hotkey_manager::unregister_handy_hotkey,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Talkis");

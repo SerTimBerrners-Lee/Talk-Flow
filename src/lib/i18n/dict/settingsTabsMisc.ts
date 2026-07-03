@@ -44,6 +44,10 @@ export const settingsTabsMisc = {
     ru: "Не удалось подготовить локальные компоненты: STT runtime отклонил API-ключ.",
     en: "Could not prepare local components: the STT runtime rejected the API key.",
   },
+  "fileTab.setupError.localRuntimeRejected": {
+    ru: "Не удалось подготовить локальные компоненты: локальный STT runtime отклонил запрос. Это не ошибка API-ключа.",
+    en: "Could not prepare local components: the local STT runtime rejected the request. This is not an API key error.",
+  },
   "fileTab.setupError.forbidden": {
     ru: "Не удалось подготовить локальные компоненты: STT runtime запретил установку модели.",
     en: "Could not prepare local components: the STT runtime forbade installing the model.",

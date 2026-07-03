@@ -119,7 +119,7 @@ function ensureLinuxBuildDependencies(targetTriple) {
 
   console.error("");
   console.error("Missing Linux build dependencies for local STT sidecars.");
-  console.error("whisper-rs-sys needs libclang for bindgen, cmake for whisper.cpp, and xdo for Tauri/global hotkey linking.");
+  console.error("transcribe-cpp needs cmake for native ggml/transcribe.cpp builds, and xdo is needed for Tauri/global hotkey linking.");
   console.error("Install it on Ubuntu/Debian with:");
   console.error("");
   console.error(`  sudo apt update && sudo apt install -y ${missingPackages.join(" ")}`);
@@ -153,7 +153,7 @@ ensureLinuxBuildDependencies(targetTriple);
 
 const extension = targetTriple.includes("windows") ? ".exe" : "";
 const profile = process.env.TALKIS_STT_RELEASE === "1" ? "release" : "debug";
-const sidecars = ["talkis-stt", "talkis-stt-nvidia", "talkis-stt-qwen", "talkis-diarize", "talkis-llm"];
+const sidecars = ["talkis-stt", "talkis-diarize", "talkis-llm"];
 const cargoArgs = ["build", "--manifest-path", join(tauriDir, "Cargo.toml")];
 
 for (const sidecar of sidecars) {

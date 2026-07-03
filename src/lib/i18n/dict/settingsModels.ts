@@ -240,16 +240,16 @@ export const settingsModels = {
     en: "Minimal size and maximum speed, with lower quality than the other Whisper models.",
   },
   "models.local.parakeet-tdt-06b-v3.description": {
-    ru: "Быстрая локальная ASR-модель Parakeet через MLX runtime для Apple Silicon.",
-    en: "A fast local Parakeet ASR model via the MLX runtime for Apple Silicon.",
+    ru: "Быстрая локальная ASR-модель Parakeet через transcribe.cpp GGUF runtime.",
+    en: "A fast local Parakeet ASR model via the transcribe.cpp GGUF runtime.",
   },
   "models.local.parakeet-tdt-06b-v2.description": {
-    ru: "Стабильная английская Parakeet TDT-модель через MLX runtime для Apple Silicon.",
-    en: "A stable English Parakeet TDT model via the MLX runtime for Apple Silicon.",
+    ru: "Стабильная английская Parakeet TDT-модель через transcribe.cpp GGUF runtime.",
+    en: "A stable English Parakeet TDT model via the transcribe.cpp GGUF runtime.",
   },
   "models.local.qwen3-asr-06b.description": {
-    ru: "Компактная ASR-модель Qwen для локального распознавания через совместимый runtime.",
-    en: "A compact Qwen ASR model for local recognition via a compatible runtime.",
+    ru: "Компактная ASR-модель Qwen для локального распознавания через transcribe.cpp GGUF runtime.",
+    en: "A compact Qwen ASR model for local recognition via the transcribe.cpp GGUF runtime.",
   },
 
   // ── Speed / accuracy value labels ──

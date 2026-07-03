@@ -713,6 +713,7 @@ fn validate_sherpa_python_runtime(config: &RuntimeConfig, python: &Path) -> bool
 
 fn prepare_sherpa_venv(venv_dir: &Path) -> Result<(), (u16, String)> {
     let venv_python = venv_python_path(venv_dir);
+    let mut force_portable_python = false;
 
     if venv_dir.is_dir() && !venv_is_usable(&venv_python) {
         fs::remove_dir_all(venv_dir).map_err(|err| {
@@ -724,63 +725,95 @@ fn prepare_sherpa_venv(venv_dir: &Path) -> Result<(), (u16, String)> {
                 ),
             )
         })?;
+        force_portable_python = true;
     }
 
     if !venv_python.is_file() {
-        let python = find_system_python()
-            .map(Ok)
-            .unwrap_or_else(|| install_portable_python(venv_dir))?;
-        let output = Command::new(&python)
-            .args(["-m", "venv"])
-            .arg(venv_dir)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .map_err(|err| {
-                (
+        if let Err(first_error) = create_sherpa_venv(venv_dir, force_portable_python) {
+            if force_portable_python {
+                return Err(first_error);
+            }
+            let _ = fs::remove_dir_all(venv_dir);
+            if let Err(second_error) = create_sherpa_venv(venv_dir, true) {
+                return Err((
                     500,
-                    format!("Не удалось создать Python venv для sherpa-onnx: {}", err),
-                )
-            })?;
-        if !output.status.success() {
+                    format!(
+                        "{}\nПовтор через встроенный Python runtime тоже не удался: {}",
+                        first_error.1, second_error.1
+                    ),
+                ));
+            }
+        }
+    }
+
+    if let Err(first_error) = install_sherpa_dependencies(&venv_python) {
+        let _ = fs::remove_dir_all(venv_dir);
+        create_sherpa_venv(venv_dir, true)?;
+        if let Err(second_error) = install_sherpa_dependencies(&venv_python_path(venv_dir)) {
             return Err((
                 500,
                 format!(
-                    "Не удалось создать Python venv для sherpa-onnx: {}",
-                    command_output_message(
-                        &output,
-                        "python -m venv завершился без диагностического текста. На Debian/Ubuntu установите пакет python3.12-venv."
-                    )
+                    "Не удалось установить sherpa-onnx dependencies: {}\nПовтор через встроенный Python runtime тоже не удался: {}",
+                    first_error, second_error
                 ),
             ));
         }
     }
 
-    let output = Command::new(&venv_python)
-        .args(["-m", "pip", "install", "--upgrade", "pip", "sherpa-onnx"])
+    Ok(())
+}
+
+fn create_sherpa_venv(venv_dir: &Path, force_portable_python: bool) -> Result<(), (u16, String)> {
+    let python = if force_portable_python {
+        install_portable_python(venv_dir)?
+    } else {
+        find_system_python()
+            .map(Ok)
+            .unwrap_or_else(|| install_portable_python(venv_dir))?
+    };
+    let output = Command::new(&python)
+        .args(["-m", "venv"])
+        .arg(venv_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
         .map_err(|err| {
             (
                 500,
-                format!("Не удалось установить sherpa-onnx dependencies: {}", err),
+                format!("Не удалось создать Python venv для sherpa-onnx: {}", err),
             )
         })?;
     if !output.status.success() {
         return Err((
             500,
             format!(
-                "Не удалось установить sherpa-onnx dependencies: {}",
+                "Не удалось создать Python venv для sherpa-onnx: {}",
                 command_output_message(
                     &output,
-                    "python -m pip завершился без диагностического текста. Проверьте, что в Python venv доступен pip."
+                    "python -m venv завершился без диагностического текста. На Debian/Ubuntu установите пакет python3.12-venv."
                 )
             ),
         ));
     }
 
     Ok(())
+}
+
+fn install_sherpa_dependencies(venv_python: &Path) -> Result<(), String> {
+    let output = Command::new(venv_python)
+        .args(["-m", "pip", "install", "--upgrade", "pip", "sherpa-onnx"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|err| format!("Не удалось установить sherpa-onnx dependencies: {}", err))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(command_output_message(
+            &output,
+            "python -m pip завершился без диагностического текста. Проверьте, что в Python venv доступен pip.",
+        ))
+    }
 }
 
 fn command_output_message(output: &std::process::Output, fallback: &str) -> String {
@@ -813,7 +846,7 @@ fn venv_python_path(venv_dir: &Path) -> PathBuf {
 fn venv_is_usable(python: &Path) -> bool {
     python_is_supported_path(python)
         && Command::new(python)
-            .args(["-m", "pip", "--version"])
+            .args(["-c", "import pip, pyexpat, xml.parsers.expat"])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()
@@ -1034,7 +1067,7 @@ fn python_is_supported(name: &str) -> bool {
 
 fn python_supports_venv(name: &str) -> bool {
     Command::new(name)
-        .args(["-c", "import venv, ensurepip"])
+        .args(["-c", "import venv, ensurepip, pyexpat, xml.parsers.expat"])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()

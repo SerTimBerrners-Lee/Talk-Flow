@@ -122,8 +122,8 @@ export const settingsRest = {
   "localLlm.cancel": { ru: "Отмена", en: "Cancel" },
   "localLlm.download": { ru: "Скачать", en: "Download" },
   "localLlm.required": {
-    ru: "Выберите текстовую модель — без неё саммаризация недоступна (распознавание работает и так).",
-    en: "Select a text model — summarization is unavailable without one (transcription still works).",
+    ru: "Выберите текстовую модель. Без неё саммаризация недоступна (распознавание работает и так).",
+    en: "Select a text model. Summarization is unavailable without one (transcription still works).",
   },
   "localLlm.select": { ru: "Выбрать", en: "Select" },
   "localLlm.delete": { ru: "Удалить", en: "Delete" },

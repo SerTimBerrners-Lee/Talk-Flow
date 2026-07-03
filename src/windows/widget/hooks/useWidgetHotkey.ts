@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { register, unregister } from "@tauri-apps/plugin-global-shortcut";
-import type { ShortcutEvent } from "@tauri-apps/plugin-global-shortcut";
 import { emit, listen } from "@tauri-apps/api/event";
 
 import { AppSettings, DEFAULT_HOTKEY, getSettings, normalizeHotkey, saveSettings } from "../../../lib/store";
@@ -10,6 +8,8 @@ import {
   HOTKEY_CAPTURE_STATE_EVENT,
   HOTKEY_CHANGE_REQUEST_EVENT,
   HOTKEY_REGISTRATION_RESULT_EVENT,
+  HANDY_HOTKEY_EVENT,
+  HandyHotkeyEventPayload,
   HotkeyCaptureStatePayload,
   HotkeyChangeRequestPayload,
   HotkeyRegistrationResultPayload,
@@ -53,7 +53,7 @@ export function useWidgetHotkey({
     if (!currentHotkey) return;
 
     logInfo("HOTKEY", `Unregistering: ${currentHotkey}`);
-    await unregister(currentHotkey).catch(() => {});
+    await invoke("unregister_handy_hotkey", { hotkey: currentHotkey }).catch(() => {});
     registeredHotkeyRef.current = null;
   }, [registeredHotkeyRef]);
 
@@ -64,7 +64,7 @@ export function useWidgetHotkey({
   }, []);
 
   const handleHotkeyPress = useCallback(
-    (event: ShortcutEvent) => {
+    (event: HandyHotkeyEventPayload) => {
       if (isHotkeyCaptureActiveRef.current) {
         dispatch({ type: "RESET_HOTKEY_STATE" });
         return;
@@ -111,17 +111,10 @@ export function useWidgetHotkey({
     logInfo("HOTKEY", `Attempting to register: ${nextHotkey}`);
 
     try {
-      await register(nextHotkey, handleHotkeyPress);
-
-      if (currentHotkey && currentHotkey !== nextHotkey) {
-        logInfo("HOTKEY", `Unregistering previous hotkey: ${currentHotkey}`);
-        await unregister(currentHotkey).catch((error) => {
-          logError("HOTKEY", `Failed to unregister previous hotkey: ${error}`);
-        });
-      }
+      await invoke("register_handy_hotkey", { hotkey: nextHotkey });
 
       registeredHotkeyRef.current = nextHotkey;
-      logInfo("HOTKEY", `Registered successfully: ${nextHotkey}`);
+      logInfo("HOTKEY", `Registered successfully via handy-keys: ${nextHotkey}`);
 
       return {
         success: true,
@@ -179,6 +172,10 @@ export function useWidgetHotkey({
       dispatch({ type: "RESET_HOTKEY_STATE" });
     });
 
+    const unlistenHandyHotkey = listen<HandyHotkeyEventPayload>(HANDY_HOTKEY_EVENT, ({ payload }) => {
+      handleHotkeyPress(payload);
+    });
+
     const unlistenHotkeyRequests = listen<HotkeyChangeRequestPayload>(HOTKEY_CHANGE_REQUEST_EVENT, async ({ payload }) => {
       const result = await attemptHotkeyRegistrationRef.current(payload.hotkey);
 
@@ -205,10 +202,11 @@ export function useWidgetHotkey({
     return () => {
       unlistenSettings.then((unlisten) => unlisten());
       unlistenCaptureState.then((unlisten) => unlisten());
+      unlistenHandyHotkey.then((unlisten) => unlisten());
       unlistenHotkeyRequests.then((unlisten) => unlisten());
       void unregisterCurrentHotkey();
     };
-  }, [clearReleaseStopTimer, dispatch, setSettings, settingsRef, unregisterCurrentHotkey]);
+  }, [clearReleaseStopTimer, dispatch, handleHotkeyPress, setSettings, settingsRef, unregisterCurrentHotkey]);
 }
 
 async function attemptHotkeyRegistrationPlaceholder(): Promise<HotkeyRegistrationResultPayload> {

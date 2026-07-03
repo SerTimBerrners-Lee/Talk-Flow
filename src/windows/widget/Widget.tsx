@@ -873,12 +873,12 @@ export function Widget() {
       await finishProcessing({
         ...baseEntry,
         status: "failed",
-        errorMessage: toFileTranscriptionErrorMessage(error),
+        errorMessage: toFileTranscriptionErrorMessage(error, { settings }),
       });
       setFileDropState("error");
       setFileStatus(null);
       setFileProgress(null);
-      setFileDropName(toFileTranscriptionErrorMessage(error));
+      setFileDropName(toFileTranscriptionErrorMessage(error, { settings }));
       scheduleFileDropReset();
     } finally {
       handle.finish();

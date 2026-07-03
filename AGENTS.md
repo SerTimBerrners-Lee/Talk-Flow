@@ -128,6 +128,30 @@ The sidebar CTA is a **light card** (not inverted black):
 
 ## Code Style
 
+## Modularity and AI Context Discipline
+
+Treat module boundaries as part of maintainability. The goal is not just fewer
+lines per file, but fewer reasons to read an entire file before making a safe
+change.
+
+- Prefer small modules with a clear responsibility, public API, and contract.
+- Keep unrelated workflows separated. A diarization change should not require
+  reading the whole STT pipeline, settings UI, and media conversion layer.
+- When a file grows because it owns multiple responsibilities, extract along
+  stable boundaries: parsing/probing, conversion, chunking, runtime lifecycle,
+  request routing, error mapping, and UI state/view composition.
+- Do not create abstractions only to reduce line count. Extract when it reduces
+  coupling, makes behavior easier to test, or limits the context needed for
+  future changes.
+- For frontend code, split large tabs/views into container state, command/data
+  hooks, pure UI sections, and small reusable controls.
+- For Rust code, keep Tauri commands thin where practical and move pipeline
+  logic into focused modules with explicit input/output structs.
+- Preserve behavior during extraction. Prefer small, test-backed refactors over
+  broad rewrites.
+- When touching a large file, consider whether the current change can leave
+  behind a clearer boundary without expanding the task scope.
+
 ### TypeScript/React
 
 **Imports:** Group by external → internal, use explicit file extensions for clarity when needed.

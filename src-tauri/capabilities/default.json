@@ -15,8 +15,6 @@
     "core:window:allow-show",
     "opener:default",
     "dialog:default",
-    "global-shortcut:allow-register",
-    "global-shortcut:allow-unregister",
     "store:allow-load",
     "store:allow-get",
     "store:allow-set",

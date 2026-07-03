@@ -12,8 +12,6 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command as TokioCommand;
 
 const WHISPER_RUNTIME_NAME: &str = "talkis-stt";
-const NVIDIA_RUNTIME_NAME: &str = "talkis-stt-nvidia";
-const QWEN_RUNTIME_NAME: &str = "talkis-stt-qwen";
 const DIARIZATION_RUNTIME_NAME: &str = "talkis-diarize";
 const DEFAULT_RUNTIME_MANIFEST_URL: &str = "https://talkis.ru/downloads/talkis-stt/manifest.json";
 pub const MODEL_DOWNLOAD_PROGRESS_EVENT: &str = "local-stt-model-download-progress";
@@ -22,8 +20,6 @@ pub const LOCAL_DIARIZATION_MODEL_ID: &str = "sherpa-diarization-pyannote-titane
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LocalRuntimeKind {
     Whisper,
-    Nvidia,
-    Qwen,
     Diarization,
 }
 
@@ -31,17 +27,13 @@ impl LocalRuntimeKind {
     fn runtime_name(self) -> &'static str {
         match self {
             LocalRuntimeKind::Whisper => WHISPER_RUNTIME_NAME,
-            LocalRuntimeKind::Nvidia => NVIDIA_RUNTIME_NAME,
-            LocalRuntimeKind::Qwen => QWEN_RUNTIME_NAME,
             LocalRuntimeKind::Diarization => DIARIZATION_RUNTIME_NAME,
         }
     }
 
     fn engine_name(self) -> &'static str {
         match self {
-            LocalRuntimeKind::Whisper => "whisper.cpp",
-            LocalRuntimeKind::Nvidia => "parakeet-mlx",
-            LocalRuntimeKind::Qwen => "qwen-asr",
+            LocalRuntimeKind::Whisper => "transcribe.cpp",
             LocalRuntimeKind::Diarization => "sherpa-onnx",
         }
     }
@@ -49,8 +41,6 @@ impl LocalRuntimeKind {
     fn default_port(self) -> u16 {
         match self {
             LocalRuntimeKind::Whisper => 8000,
-            LocalRuntimeKind::Nvidia => 8001,
-            LocalRuntimeKind::Qwen => 8002,
             LocalRuntimeKind::Diarization => 8003,
         }
     }
@@ -58,8 +48,6 @@ impl LocalRuntimeKind {
     fn label(self) -> &'static str {
         match self {
             LocalRuntimeKind::Whisper => "Whisper",
-            LocalRuntimeKind::Nvidia => "NVIDIA",
-            LocalRuntimeKind::Qwen => "Qwen",
             LocalRuntimeKind::Diarization => "Diarization",
         }
     }
@@ -121,17 +109,6 @@ struct LocalModelInfo {
     url: &'static str,
 }
 
-struct QwenModelFile {
-    file_name: &'static str,
-    size: u64,
-}
-
-struct NvidiaModelInfo {
-    id: &'static str,
-    dir_name: &'static str,
-    files: &'static [QwenModelFile],
-}
-
 const LOCAL_WHISPER_MODELS: &[LocalModelInfo] = &[
     LocalModelInfo {
         id: "whisper-tiny",
@@ -168,132 +145,24 @@ const LOCAL_WHISPER_MODELS: &[LocalModelInfo] = &[
         file_name: "ggml-large-v3-turbo.bin",
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin",
     },
+    LocalModelInfo {
+        id: "nvidia/parakeet-tdt-0.6b-v3",
+        file_name: "parakeet-tdt-0.6b-v3-Q8_0.gguf",
+        url: "https://huggingface.co/handy-computer/parakeet-tdt-0.6b-v3-gguf/resolve/main/parakeet-tdt-0.6b-v3-Q8_0.gguf",
+    },
+    LocalModelInfo {
+        id: "nvidia/parakeet-tdt-0.6b-v2",
+        file_name: "parakeet-tdt-0.6b-v2-Q8_0.gguf",
+        url: "https://huggingface.co/handy-computer/parakeet-tdt-0.6b-v2-gguf/resolve/main/parakeet-tdt-0.6b-v2-Q8_0.gguf",
+    },
+    LocalModelInfo {
+        id: "Qwen/Qwen3-ASR-0.6B",
+        file_name: "Qwen3-ASR-0.6B-Q8_0.gguf",
+        url: "https://huggingface.co/handy-computer/Qwen3-ASR-0.6B-gguf/resolve/main/Qwen3-ASR-0.6B-Q8_0.gguf",
+    },
 ];
 
 const LOCAL_QWEN_MODEL_ID: &str = "Qwen/Qwen3-ASR-0.6B";
-const LOCAL_QWEN_MODEL_DIR: &str = "qwen3-asr-06b";
-const LOCAL_QWEN_MODEL_FILES: &[QwenModelFile] = &[
-    QwenModelFile {
-        file_name: ".gitattributes",
-        size: 1_519,
-    },
-    QwenModelFile {
-        file_name: "README.md",
-        size: 57_456,
-    },
-    QwenModelFile {
-        file_name: "chat_template.json",
-        size: 1_161,
-    },
-    QwenModelFile {
-        file_name: "config.json",
-        size: 6_193,
-    },
-    QwenModelFile {
-        file_name: "generation_config.json",
-        size: 142,
-    },
-    QwenModelFile {
-        file_name: "merges.txt",
-        size: 1_671_853,
-    },
-    QwenModelFile {
-        file_name: "model.safetensors",
-        size: 1_876_091_704,
-    },
-    QwenModelFile {
-        file_name: "preprocessor_config.json",
-        size: 330,
-    },
-    QwenModelFile {
-        file_name: "tokenizer_config.json",
-        size: 12_487,
-    },
-    QwenModelFile {
-        file_name: "vocab.json",
-        size: 2_776_833,
-    },
-];
-
-const LOCAL_NVIDIA_V3_MODEL_ID: &str = "mlx-community/parakeet-tdt-0.6b-v3";
-const LOCAL_NVIDIA_V3_MODEL_DIR: &str = "parakeet-tdt-06b-v3";
-const LOCAL_NVIDIA_V3_MODEL_FILES: &[QwenModelFile] = &[
-    QwenModelFile {
-        file_name: ".gitattributes",
-        size: 1_519,
-    },
-    QwenModelFile {
-        file_name: "README.md",
-        size: 1_081,
-    },
-    QwenModelFile {
-        file_name: "config.json",
-        size: 244_093,
-    },
-    QwenModelFile {
-        file_name: "model.safetensors",
-        size: 2_508_288_736,
-    },
-    QwenModelFile {
-        file_name: "tokenizer.model",
-        size: 360_916,
-    },
-    QwenModelFile {
-        file_name: "tokenizer.vocab",
-        size: 101_024,
-    },
-    QwenModelFile {
-        file_name: "vocab.txt",
-        size: 46_772,
-    },
-];
-
-const LOCAL_NVIDIA_V2_MODEL_ID: &str = "mlx-community/parakeet-tdt-0.6b-v2";
-const LOCAL_NVIDIA_V2_MODEL_DIR: &str = "parakeet-tdt-06b-v2";
-const LOCAL_NVIDIA_V2_MODEL_FILES: &[QwenModelFile] = &[
-    QwenModelFile {
-        file_name: ".gitattributes",
-        size: 1_519,
-    },
-    QwenModelFile {
-        file_name: "README.md",
-        size: 945,
-    },
-    QwenModelFile {
-        file_name: "config.json",
-        size: 36_200,
-    },
-    QwenModelFile {
-        file_name: "model.safetensors",
-        size: 2_469_999_999,
-    },
-    QwenModelFile {
-        file_name: "tokenizer.model",
-        size: 251_000,
-    },
-    QwenModelFile {
-        file_name: "tokenizer.vocab",
-        size: 10_400,
-    },
-    QwenModelFile {
-        file_name: "vocab.txt",
-        size: 5_071,
-    },
-];
-
-const LOCAL_NVIDIA_MODELS: &[NvidiaModelInfo] = &[
-    NvidiaModelInfo {
-        id: LOCAL_NVIDIA_V3_MODEL_ID,
-        dir_name: LOCAL_NVIDIA_V3_MODEL_DIR,
-        files: LOCAL_NVIDIA_V3_MODEL_FILES,
-    },
-    NvidiaModelInfo {
-        id: LOCAL_NVIDIA_V2_MODEL_ID,
-        dir_name: LOCAL_NVIDIA_V2_MODEL_DIR,
-        files: LOCAL_NVIDIA_V2_MODEL_FILES,
-    },
-];
-
 fn resolve_stt_base_url_from_models_url(models_url: &str) -> String {
     models_url
         .trim_end_matches('/')
@@ -322,12 +191,8 @@ fn runtime_kind_for_port(port: u16) -> Option<LocalRuntimeKind> {
         return Some(LocalRuntimeKind::Whisper);
     }
 
-    if port == LocalRuntimeKind::Nvidia.default_port() || (18050..=18099).contains(&port) {
-        return Some(LocalRuntimeKind::Nvidia);
-    }
-
-    if port == LocalRuntimeKind::Qwen.default_port() || (18100..=18149).contains(&port) {
-        return Some(LocalRuntimeKind::Qwen);
+    if port == 8001 || port == 8002 || (18050..=18149).contains(&port) {
+        return Some(LocalRuntimeKind::Whisper);
     }
 
     if port == LocalRuntimeKind::Diarization.default_port() || (18150..=18199).contains(&port) {
@@ -340,8 +205,6 @@ fn runtime_kind_for_port(port: u16) -> Option<LocalRuntimeKind> {
 fn dynamic_port_range(kind: LocalRuntimeKind) -> std::ops::RangeInclusive<u16> {
     match kind {
         LocalRuntimeKind::Whisper => 18000..=18049,
-        LocalRuntimeKind::Nvidia => 18050..=18099,
-        LocalRuntimeKind::Qwen => 18100..=18149,
         LocalRuntimeKind::Diarization => 18150..=18199,
     }
 }
@@ -350,7 +213,11 @@ fn requested_port(base_url: &str, kind: LocalRuntimeKind) -> u16 {
     url::Url::parse(base_url)
         .ok()
         .and_then(|url| url.port())
-        .filter(|port| runtime_kind_for_port(*port) == Some(kind))
+        .filter(|port| {
+            runtime_kind_for_port(*port) == Some(kind)
+                && !(kind == LocalRuntimeKind::Whisper
+                    && (*port == 8001 || *port == 8002 || (18050..=18149).contains(port)))
+        })
         .unwrap_or_else(|| kind.default_port())
 }
 
@@ -454,6 +321,25 @@ fn local_model_info(value: &str) -> Option<&'static LocalModelInfo> {
         | "ggml-large-v3-turbo.bin" => LOCAL_WHISPER_MODELS
             .iter()
             .find(|model| model.id == "whisper-large-v3-turbo"),
+        "nvidia/parakeet-tdt-0.6b-v3"
+        | "mlx-community/parakeet-tdt-0.6b-v3"
+        | "parakeet-tdt-06b-v3"
+        | "parakeet-tdt-0.6b-v3"
+        | "parakeet-tdt-0.6b-v3-q8_0.gguf" => LOCAL_WHISPER_MODELS
+            .iter()
+            .find(|model| model.id == "nvidia/parakeet-tdt-0.6b-v3"),
+        "nvidia/parakeet-tdt-0.6b-v2"
+        | "mlx-community/parakeet-tdt-0.6b-v2"
+        | "parakeet-tdt-06b-v2"
+        | "parakeet-tdt-0.6b-v2"
+        | "parakeet-tdt-0.6b-v2-q8_0.gguf" => LOCAL_WHISPER_MODELS
+            .iter()
+            .find(|model| model.id == "nvidia/parakeet-tdt-0.6b-v2"),
+        "qwen/qwen3-asr-0.6b" | "qwen3-asr-06b" | "qwen3-asr-0.6b" | "qwen3-asr-0.6b-q8_0.gguf" => {
+            LOCAL_WHISPER_MODELS
+                .iter()
+                .find(|model| model.id == LOCAL_QWEN_MODEL_ID)
+        }
         _ => None,
     }
 }
@@ -605,7 +491,7 @@ fn write_model_marker(path: &Path, model: &LocalModelInfo) -> Result<(), String>
     let marker = serde_json::json!({
         "id": model.id,
         "file": model.file_name,
-        "engine": "whisper.cpp"
+        "engine": "transcribe.cpp"
     });
     fs::write(path, marker.to_string()).map_err(|err| {
         format!(
@@ -652,14 +538,6 @@ pub fn installed_model_ids(
         .map(|model| model.id.to_string())
         .collect::<Vec<_>>();
 
-    if qwen_model_is_installed_in_dir(&models_dir) {
-        models.push(LOCAL_QWEN_MODEL_ID.to_string());
-    }
-    for model in LOCAL_NVIDIA_MODELS {
-        if nvidia_model_is_installed_in_dir(&models_dir, model) {
-            models.push(model.id.to_string());
-        }
-    }
     if diarization_model_is_installed_in_dir(&models_dir) {
         models.push(LOCAL_DIARIZATION_MODEL_ID.to_string());
     }
@@ -676,18 +554,6 @@ fn installed_model_ids_for_runtime(kind: LocalRuntimeKind, models_dir: &Path) ->
             .filter(|model| models_dir.join(model.file_name).is_file())
             .map(|model| model.id.to_string())
             .collect::<Vec<_>>(),
-        LocalRuntimeKind::Qwen => {
-            if qwen_model_is_installed_in_dir(models_dir) {
-                vec![LOCAL_QWEN_MODEL_ID.to_string()]
-            } else {
-                Vec::new()
-            }
-        }
-        LocalRuntimeKind::Nvidia => LOCAL_NVIDIA_MODELS
-            .iter()
-            .filter(|model| nvidia_model_is_installed_in_dir(models_dir, model))
-            .map(|model| model.id.to_string())
-            .collect::<Vec<_>>(),
         LocalRuntimeKind::Diarization => {
             if diarization_model_is_installed_in_dir(models_dir) {
                 vec![LOCAL_DIARIZATION_MODEL_ID.to_string()]
@@ -702,83 +568,12 @@ fn installed_model_ids_for_runtime(kind: LocalRuntimeKind, models_dir: &Path) ->
     models
 }
 
-fn qwen_model_is_installed_in_dir(models_dir: &Path) -> bool {
-    let model_dir = models_dir.join(LOCAL_QWEN_MODEL_DIR);
-    LOCAL_QWEN_MODEL_FILES
-        .iter()
-        .all(|file| model_dir.join(file.file_name).is_file())
-}
-
-fn nvidia_model_info(requested: &str) -> Option<&'static NvidiaModelInfo> {
-    LOCAL_NVIDIA_MODELS.iter().find(|model| {
-        model.id.eq_ignore_ascii_case(requested)
-            || model.dir_name.eq_ignore_ascii_case(requested)
-            || (requested.eq_ignore_ascii_case("nvidia/parakeet-tdt-0.6b-v3")
-                && model.id == LOCAL_NVIDIA_V3_MODEL_ID)
-            || (requested.eq_ignore_ascii_case("nvidia/parakeet-tdt-0.6b-v2")
-                && model.id == LOCAL_NVIDIA_V2_MODEL_ID)
-    })
-}
-
-fn nvidia_model_is_installed_in_dir(models_dir: &Path, model: &NvidiaModelInfo) -> bool {
-    let model_dir = models_dir.join(model.dir_name);
-    model
-        .files
-        .iter()
-        .all(|file| model_dir.join(file.file_name).is_file())
-}
-
 fn diarization_model_is_installed_in_dir(models_dir: &Path) -> bool {
     let model_dir = models_dir.join(LOCAL_DIARIZATION_MODEL_ID);
     model_dir
         .join("pyannote-segmentation-3.0.int8.onnx")
         .is_file()
         && model_dir.join("nemo_en_titanet_small.onnx").is_file()
-}
-
-pub fn qwen_model_is_installed(app: &AppHandle, custom_dir: Option<&str>) -> Result<bool, String> {
-    let models_dir = resolve_models_dir(app, custom_dir)?;
-    Ok(qwen_model_is_installed_in_dir(&models_dir))
-}
-
-pub fn nvidia_model_is_installed(
-    app: &AppHandle,
-    custom_dir: Option<&str>,
-    requested: &str,
-) -> Result<bool, String> {
-    let models_dir = resolve_models_dir(app, custom_dir)?;
-    Ok(nvidia_model_info(requested)
-        .map(|model| nvidia_model_is_installed_in_dir(&models_dir, model))
-        .unwrap_or(false))
-}
-
-pub fn qwen_model_progress_snapshot(
-    app: &AppHandle,
-    custom_dir: Option<&str>,
-) -> Result<(u64, Option<u64>), String> {
-    let models_dir = resolve_models_dir(app, custom_dir)?;
-    let model_dir = models_dir.join(LOCAL_QWEN_MODEL_DIR);
-    let total = LOCAL_QWEN_MODEL_FILES
-        .iter()
-        .map(|file| file.size)
-        .sum::<u64>();
-    let downloaded = directory_size(&model_dir).unwrap_or(0).min(total);
-
-    Ok((downloaded, Some(total)))
-}
-
-pub fn nvidia_model_progress_snapshot(
-    app: &AppHandle,
-    custom_dir: Option<&str>,
-    requested: &str,
-) -> Result<(u64, Option<u64>), String> {
-    let models_dir = resolve_models_dir(app, custom_dir)?;
-    let model = nvidia_model_info(requested).unwrap_or(&LOCAL_NVIDIA_MODELS[0]);
-    let model_dir = models_dir.join(model.dir_name);
-    let total = model.files.iter().map(|file| file.size).sum::<u64>();
-    let downloaded = directory_size(&model_dir).unwrap_or(0).min(total);
-
-    Ok((downloaded, Some(total)))
 }
 
 pub fn resolve_installed_model_for_runtime(
@@ -815,28 +610,6 @@ pub fn resolve_installed_model_for_runtime(
 
             Ok(None)
         }
-        LocalRuntimeKind::Qwen => {
-            if qwen_model_is_installed_in_dir(&models_dir) {
-                Ok(Some(LOCAL_QWEN_MODEL_ID.to_string()))
-            } else {
-                Ok(None)
-            }
-        }
-        LocalRuntimeKind::Nvidia => {
-            if let Some(model) = nvidia_model_info(requested) {
-                if nvidia_model_is_installed_in_dir(&models_dir, model) {
-                    return Ok(Some(model.id.to_string()));
-                }
-            }
-
-            for model in LOCAL_NVIDIA_MODELS {
-                if nvidia_model_is_installed_in_dir(&models_dir, model) {
-                    return Ok(Some(model.id.to_string()));
-                }
-            }
-
-            Ok(None)
-        }
         LocalRuntimeKind::Diarization => {
             if requested.eq_ignore_ascii_case(LOCAL_DIARIZATION_MODEL_ID)
                 && diarization_model_is_installed_in_dir(&models_dir)
@@ -847,25 +620,6 @@ pub fn resolve_installed_model_for_runtime(
             }
         }
     }
-}
-
-fn directory_size(path: &Path) -> Result<u64, std::io::Error> {
-    if !path.exists() {
-        return Ok(0);
-    }
-
-    let mut total = 0u64;
-    for entry in fs::read_dir(path)? {
-        let entry = entry?;
-        let metadata = entry.metadata()?;
-        if metadata.is_file() {
-            total = total.saturating_add(metadata.len());
-        } else if metadata.is_dir() {
-            total = total.saturating_add(directory_size(&entry.path())?);
-        }
-    }
-
-    Ok(total)
 }
 
 fn runtime_executable_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -1279,7 +1033,7 @@ pub async fn ensure_runtime(
     custom_models_dir: Option<&str>,
 ) -> Result<String, String> {
     let kind = managed_runtime_kind(models_url).ok_or_else(|| {
-        "Автоматический запуск локального runtime поддержан только для портов Talkis 8000/8001/8002/8003."
+        "Автоматический запуск локального runtime поддержан только для портов Talkis 8000/8003."
             .to_string()
     })?;
 

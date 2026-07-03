@@ -1,3 +1,11 @@
+mod errors;
+mod routing;
+
+use self::routing::{
+    is_likely_local_url, local_runtime_kind_from_endpoint, port_from_url,
+    resolve_chat_completions_url, resolve_managed_models_url, resolve_managed_transcription_url,
+    resolve_whisper_model_download_url, resolve_whisper_models_url, resolve_whisper_url,
+};
 use crate::local_stt;
 use crate::logger;
 use crate::media;
@@ -583,16 +591,15 @@ async fn transcribe_audio_bytes_internal(
         }
     }
 
-    let whisper_key = req
-        .whisper_api_key
-        .as_ref()
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .or_else(|| {
-            (!is_local_endpoint)
-                .then_some(req.api_key.trim())
-                .filter(|s| !s.is_empty())
-        });
+    let whisper_key = if is_local_endpoint {
+        None
+    } else {
+        req.whisper_api_key
+            .as_ref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .or_else(|| Some(req.api_key.trim()).filter(|s| !s.is_empty()))
+    };
 
     let stt_client = if is_local_endpoint {
         reqwest::Client::builder()
@@ -610,20 +617,23 @@ async fn transcribe_audio_bytes_internal(
         whisper_request = whisper_request.bearer_auth(whisper_key);
     }
 
-    let whisper_res = whisper_request
-        .send()
-        .await
-        .map_err(|e| {
-            let err = format!("Whisper request failed: {}", e);
-            logger::log_error("WHISPER", &err);
-            err
-        })?;
+    let whisper_res = whisper_request.send().await.map_err(|e| {
+        let err = format!("Whisper request failed: {}", e);
+        logger::log_error("WHISPER", &err);
+        err
+    })?;
 
     let status = whisper_res.status();
     logger::log_info("WHISPER", &format!("Response status: {}", status));
 
     if !status.is_success() {
         let body = whisper_res.text().await.unwrap_or_default();
+        if is_local_endpoint && matches!(status.as_u16(), 401 | 403) {
+            let err = errors::local_stt_runtime_rejected_message(status.as_u16(), &body);
+            logger::log_error("WHISPER", &err);
+            return Err(err);
+        }
+
         let err = format!("Whisper API error ({}): {}", status, body);
         logger::log_error("WHISPER", &err);
         return Err(err);
@@ -916,18 +926,6 @@ struct DiarizationSegment {
     speaker_id: String,
 }
 
-fn local_runtime_kind_from_endpoint(endpoint: Option<&str>) -> Option<local_stt::LocalRuntimeKind> {
-    let whisper_url = resolve_whisper_url(endpoint);
-    let models_url = resolve_whisper_models_url(&whisper_url);
-    local_stt::managed_runtime_kind(&models_url)
-}
-
-fn port_from_url(value: &str) -> Option<u16> {
-    reqwest::Url::parse(value)
-        .ok()
-        .and_then(|url| url.port_or_known_default())
-}
-
 fn is_repairable_diarization_runtime_error(message: &str) -> bool {
     let normalized = message.to_lowercase();
     normalized.contains("sherpa-onnx установлен")
@@ -936,14 +934,19 @@ fn is_repairable_diarization_runtime_error(message: &str) -> bool {
             || normalized.contains("python runtime для разметки говорящих"))
 }
 
+fn file_transcription_uses_own_key(req: &FilePathTranscriptionRequest) -> bool {
+    let whisper_url = resolve_whisper_url(req.whisper_endpoint.as_deref());
+    req.use_own_key || is_likely_local_url(&whisper_url)
+}
+
 fn ensure_diarized_file_preconditions(req: &FilePathTranscriptionRequest) -> Result<(), String> {
-    if !req.use_own_key {
+    let kind = local_runtime_kind_from_endpoint(req.whisper_endpoint.as_deref());
+    if !req.use_own_key && kind.is_none() {
         return Err(
             "Для разделения по говорящим нужна локальная Whisper-модель с таймкодами.".to_string(),
         );
     }
 
-    let kind = local_runtime_kind_from_endpoint(req.whisper_endpoint.as_deref());
     if kind != Some(local_stt::LocalRuntimeKind::Whisper) {
         return Err(
             "Для разделения по говорящим нужна локальная Whisper-модель с таймкодами.".to_string(),
@@ -986,6 +989,10 @@ async fn diarize_audio_file(
     let form = multipart::Form::new()
         .part("file", file_part)
         .text("model", local_stt::LOCAL_DIARIZATION_MODEL_ID);
+    logger::log_info(
+        "DIARIZATION",
+        &format!("Sending request to {}", diarization_url),
+    );
     let response = client
         .post(&diarization_url)
         .multipart(form)
@@ -993,12 +1000,19 @@ async fn diarize_audio_file(
         .await
         .map_err(|err| format!("Diarization request failed: {}", err))?;
     let status = response.status();
+    logger::log_info("DIARIZATION", &format!("Response status: {}", status));
     let body = response
         .text()
         .await
         .map_err(|err| format!("Diarization response read failed: {}", err))?;
 
     if !status.is_success() {
+        if matches!(status.as_u16(), 401 | 403) {
+            let message = errors::local_stt_runtime_rejected_message(status.as_u16(), &body);
+            logger::log_error("DIARIZATION", &message);
+            return Err(message);
+        }
+
         return Err(format!("Diarization error ({}): {}", status, body));
     }
 
@@ -1172,6 +1186,21 @@ pub async fn transcribe_file_path(
     app: AppHandle,
     req: FilePathTranscriptionRequest,
 ) -> Result<TranscribeResponse, String> {
+    let whisper_url = resolve_whisper_url(req.whisper_endpoint.as_deref());
+    let is_local_stt_endpoint = is_likely_local_url(&whisper_url);
+    let effective_use_own_key = file_transcription_uses_own_key(&req);
+    logger::log_info(
+        "FILE_TRANSCRIPTION",
+        &format!(
+            "Resolved file transcription mode: local_endpoint={}, use_own_key={}, effective_use_own_key={}, speaker_diarization={}, endpoint={}",
+            is_local_stt_endpoint,
+            req.use_own_key,
+            effective_use_own_key,
+            req.speaker_diarization,
+            req.whisper_endpoint.as_deref().unwrap_or("")
+        ),
+    );
+
     let input_path = PathBuf::from(&req.file_path);
     let metadata =
         fs::metadata(&input_path).map_err(|err| format!("Не удалось прочитать файл: {}", err))?;
@@ -1202,12 +1231,12 @@ pub async fn transcribe_file_path(
             "Файл слишком большой. Максимальный размер для транскрибации: 8 ГБ.".to_string(),
         );
     }
-    if req.speaker_diarization && req.use_own_key {
+    if req.speaker_diarization && effective_use_own_key {
         ensure_diarized_file_preconditions(&req)?;
     }
 
     emit_file_progress(&app, &req.request_id, "preparing", 0, 0, "Готовим файл");
-    if req.speaker_diarization && !req.use_own_key {
+    if req.speaker_diarization && !effective_use_own_key {
         let prepared = media::prepare_media_file_for_proxy_transcription(&app, &input_path).await?;
         emit_file_progress(
             &app,
@@ -1247,7 +1276,12 @@ pub async fn transcribe_file_path(
         None
     };
 
-    let prepared = media::prepare_media_file_chunks_for_transcription(&app, &input_path).await?;
+    let prepared = media::prepare_media_file_chunks_for_transcription(
+        &app,
+        &input_path,
+        is_local_stt_endpoint,
+    )
+    .await?;
     let total_chunks = prepared.chunks.len();
     emit_file_progress(
         &app,
@@ -1296,7 +1330,7 @@ pub async fn transcribe_file_path(
             ),
         );
 
-        let text = if !req.use_own_key {
+        let text = if !effective_use_own_key {
             let result = transcribe_file_chunk_via_proxy(&req, chunk).await;
             let result = match result {
                 Ok(result) => result,
@@ -1427,71 +1461,6 @@ struct ModelsListResponse {
 #[derive(Deserialize)]
 struct ModelListItem {
     id: String,
-}
-
-fn is_likely_local_url(value: &str) -> bool {
-    let normalized = value.trim().to_lowercase();
-    normalized.contains("127.0.0.1") || normalized.contains("localhost")
-}
-
-fn resolve_whisper_url(endpoint: Option<&str>) -> String {
-    endpoint
-        .filter(|s| !s.is_empty())
-        .map(|s| {
-            let base = s.trim_end_matches('/');
-            if base.ends_with("/transcriptions") {
-                base.to_string()
-            } else if base.ends_with("/audio") {
-                format!("{}/transcriptions", base)
-            } else {
-                format!("{}/v1/audio/transcriptions", base)
-            }
-        })
-        .unwrap_or_else(|| "https://api.openai.com/v1/audio/transcriptions".to_string())
-}
-
-fn resolve_managed_transcription_url(base_url: &str) -> String {
-    format!("{}/v1/audio/transcriptions", base_url.trim_end_matches('/'))
-}
-
-fn resolve_managed_models_url(base_url: &str) -> String {
-    format!("{}/v1/models", base_url.trim_end_matches('/'))
-}
-
-fn resolve_whisper_models_url(whisper_url: &str) -> String {
-    if let Some(base) = whisper_url.strip_suffix("/v1/audio/transcriptions") {
-        return format!("{}/v1/models", base);
-    }
-
-    if let Some(base) = whisper_url.strip_suffix("/audio/transcriptions") {
-        return format!("{}/models", base);
-    }
-
-    if let Some(base) = whisper_url.strip_suffix("/transcriptions") {
-        return format!("{}/models", base);
-    }
-
-    format!("{}/v1/models", whisper_url.trim_end_matches('/'))
-}
-
-/// Resolve a user/runtime endpoint to an OpenAI-compatible chat-completions URL.
-/// Empty endpoint falls back to OpenAI. Accepts a base, a `/v1` base, or a full
-/// `/chat/completions` URL.
-fn resolve_chat_completions_url(endpoint: Option<&str>) -> String {
-    endpoint
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| {
-            let base = value.trim_end_matches('/');
-            if base.ends_with("/chat/completions") {
-                base.to_string()
-            } else if base.ends_with("/v1") {
-                format!("{}/chat/completions", base)
-            } else {
-                format!("{}/v1/chat/completions", base)
-            }
-        })
-        .unwrap_or_else(|| "https://api.openai.com/v1/chat/completions".to_string())
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -1630,28 +1599,6 @@ pub async fn process_text(req: ProcessTextRequest) -> Result<ProcessTextResponse
     Ok(ProcessTextResponse { result })
 }
 
-fn percent_encode_path_segment(value: &str) -> String {
-    let mut encoded = String::with_capacity(value.len());
-
-    for byte in value.bytes() {
-        let is_unreserved =
-            byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~');
-        if is_unreserved {
-            encoded.push(char::from(byte));
-        } else {
-            encoded.push('%');
-            encoded.push_str(&format!("{:02X}", byte));
-        }
-    }
-
-    encoded
-}
-
-fn resolve_whisper_model_download_url(models_url: &str, model: &str) -> String {
-    let encoded_model = percent_encode_path_segment(model);
-    format!("{}/{}", models_url.trim_end_matches('/'), encoded_model)
-}
-
 async fn test_stt_connection(
     app: &AppHandle,
     client: &reqwest::Client,
@@ -1660,11 +1607,14 @@ async fn test_stt_connection(
     let whisper_url = resolve_whisper_url(req.whisper_endpoint.as_deref());
     let mut models_url = resolve_whisper_models_url(&whisper_url);
     let managed_runtime_kind = local_stt::managed_runtime_kind(&models_url);
-    let whisper_key = req
-        .whisper_api_key
-        .as_deref()
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or(req.api_key.as_str());
+    let whisper_key = if is_likely_local_url(&models_url) {
+        None
+    } else {
+        req.whisper_api_key
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| Some(req.api_key.as_str()).filter(|s| !s.trim().is_empty()))
+    };
 
     if managed_runtime_kind.is_some() {
         let runtime_base_url =
@@ -1674,7 +1624,7 @@ async fn test_stt_connection(
     }
 
     let mut request = client.get(&models_url);
-    if !whisper_key.trim().is_empty() {
+    if let Some(whisper_key) = whisper_key {
         request = request.bearer_auth(whisper_key);
     }
 
@@ -1695,6 +1645,13 @@ async fn test_stt_connection(
     let status = response.status();
     if !status.is_success() {
         let error_text = response.text().await.unwrap_or_default();
+        if is_likely_local_url(&models_url) && matches!(status.as_u16(), 401 | 403) {
+            return Err(errors::local_stt_runtime_rejected_message(
+                status.as_u16(),
+                &error_text,
+            ));
+        }
+
         let message = match status.as_u16() {
             401 => "STT endpoint отклонил API-ключ.".to_string(),
             403 => "STT endpoint запретил доступ. Проверьте ключ и endpoint.".to_string(),
@@ -1813,11 +1770,14 @@ pub async fn list_stt_models(
     let whisper_url = resolve_whisper_url(req.whisper_endpoint.as_deref());
     let mut models_url = resolve_whisper_models_url(&whisper_url);
     let managed_runtime_kind = local_stt::managed_runtime_kind(&models_url);
-    let whisper_key = req
-        .whisper_api_key
-        .as_deref()
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or(req.api_key.as_str());
+    let whisper_key = if is_likely_local_url(&models_url) {
+        None
+    } else {
+        req.whisper_api_key
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| Some(req.api_key.as_str()).filter(|s| !s.trim().is_empty()))
+    };
 
     let client = http_client();
     if managed_runtime_kind.is_some() {
@@ -1830,7 +1790,7 @@ pub async fn list_stt_models(
     }
 
     let mut request = client.get(&models_url);
-    if !whisper_key.trim().is_empty() {
+    if let Some(whisper_key) = whisper_key {
         request = request.bearer_auth(whisper_key);
     }
 
@@ -1954,11 +1914,14 @@ pub async fn install_stt_model(
     let mut models_url = resolve_whisper_models_url(&whisper_url);
     let mut download_url = resolve_whisper_model_download_url(&models_url, requested_model);
     let mut effective_whisper_endpoint: Option<String> = None;
-    let whisper_key = req
-        .whisper_api_key
-        .as_deref()
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or(req.api_key.as_str());
+    let whisper_key = if is_likely_local_url(&models_url) {
+        None
+    } else {
+        req.whisper_api_key
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| Some(req.api_key.as_str()).filter(|s| !s.trim().is_empty()))
+    };
 
     let client = http_client();
     if local_stt::is_managed_whisper_runtime_url(&models_url) {
@@ -2000,10 +1963,8 @@ pub async fn install_stt_model(
     if let Some(kind) = managed_runtime_kind {
         if kind != local_stt::LocalRuntimeKind::Whisper {
             let runtime_label = match kind {
-                local_stt::LocalRuntimeKind::Nvidia => "Parakeet",
-                local_stt::LocalRuntimeKind::Qwen => "Qwen",
                 local_stt::LocalRuntimeKind::Diarization => "Diarization",
-                local_stt::LocalRuntimeKind::Whisper => "Whisper",
+                local_stt::LocalRuntimeKind::Whisper => "Transcribe.cpp",
             };
             local_stt::emit_model_download_progress_message(
                 &app,
@@ -2027,157 +1988,16 @@ pub async fn install_stt_model(
         download_url = resolve_whisper_model_download_url(&models_url, requested_model);
     }
 
-    let already_installed_snapshot = match managed_runtime_kind {
-        Some(local_stt::LocalRuntimeKind::Qwen)
-            if local_stt::qwen_model_is_installed(&app, req.local_models_dir.as_deref())
-                .unwrap_or(false) =>
-        {
-            Some((
-                local_stt::qwen_model_progress_snapshot(&app, req.local_models_dir.as_deref())
-                    .unwrap_or((1, Some(1))),
-                "Модель Qwen уже скачана.",
-            ))
-        }
-        Some(local_stt::LocalRuntimeKind::Nvidia)
-            if local_stt::nvidia_model_is_installed(
-                &app,
-                req.local_models_dir.as_deref(),
-                requested_model,
-            )
-            .unwrap_or(false) =>
-        {
-            Some((
-                local_stt::nvidia_model_progress_snapshot(
-                    &app,
-                    req.local_models_dir.as_deref(),
-                    requested_model,
-                )
-                .unwrap_or((1, Some(1))),
-                "Модель Parakeet уже скачана.",
-            ))
-        }
-        _ => None,
-    };
-    if let Some(((downloaded, total), message)) = already_installed_snapshot {
-        local_stt::emit_model_download_progress_message(
-            &app,
-            requested_model,
-            "downloaded",
-            downloaded,
-            total,
-            message,
-        );
-        return Ok(InstallSttModelResult {
-            success: true,
-            message: format!(
-                "Модель «{}» скачана и готова к локальному распознаванию.",
-                requested_model
-            ),
-            whisper_endpoint: effective_whisper_endpoint.clone(),
-        });
-    }
-
-    let install_client =
-        if managed_runtime_kind.is_some_and(|kind| kind != local_stt::LocalRuntimeKind::Whisper) {
-            reqwest::Client::builder()
-                .pool_max_idle_per_host(0)
-                .connect_timeout(Duration::from_secs(15))
-                .timeout(Duration::from_secs(7200))
-                .build()
-                .unwrap_or_else(|_| (*client).clone())
-        } else {
-            (*client).clone()
-        };
-
-    let local_progress_stop = if matches!(
-        managed_runtime_kind,
-        Some(local_stt::LocalRuntimeKind::Qwen | local_stt::LocalRuntimeKind::Nvidia)
-    ) {
-        let stop = Arc::new(AtomicBool::new(false));
-        let task_stop = Arc::clone(&stop);
-        let task_app = app.clone();
-        let task_model = requested_model.to_string();
-        let task_models_dir = req.local_models_dir.clone();
-        let task_kind = managed_runtime_kind.unwrap();
-        tokio::spawn(async move {
-            let mut last_percent: Option<u8> = None;
-            let mut last_downloaded = 0u64;
-            while !task_stop.load(Ordering::Relaxed) {
-                let snapshot = match task_kind {
-                    local_stt::LocalRuntimeKind::Qwen => local_stt::qwen_model_progress_snapshot(
-                        &task_app,
-                        task_models_dir.as_deref(),
-                    ),
-                    local_stt::LocalRuntimeKind::Nvidia => {
-                        local_stt::nvidia_model_progress_snapshot(
-                            &task_app,
-                            task_models_dir.as_deref(),
-                            &task_model,
-                        )
-                    }
-                    local_stt::LocalRuntimeKind::Whisper
-                    | local_stt::LocalRuntimeKind::Diarization => Ok((0, None)),
-                };
-                if let Ok((downloaded, total)) = snapshot {
-                    let percent = total
-                        .filter(|value| *value > 0)
-                        .map(|value| ((downloaded.saturating_mul(100) / value).min(99)) as u8);
-                    if percent != last_percent
-                        || downloaded.saturating_sub(last_downloaded) >= 4 * 1024 * 1024
-                    {
-                        local_stt::emit_model_download_progress_message(
-                            &task_app,
-                            &task_model,
-                            "downloading",
-                            downloaded,
-                            total,
-                            if downloaded == 0 {
-                                match task_kind {
-                                    local_stt::LocalRuntimeKind::Nvidia => {
-                                        "Устанавливаем Parakeet зависимости."
-                                    }
-                                    local_stt::LocalRuntimeKind::Diarization => {
-                                        "Скачиваем sherpa-onnx модели diarization."
-                                    }
-                                    _ => "Устанавливаем Qwen зависимости.",
-                                }
-                            } else {
-                                match task_kind {
-                                    local_stt::LocalRuntimeKind::Nvidia => {
-                                        "Скачиваем файлы Parakeet модели."
-                                    }
-                                    local_stt::LocalRuntimeKind::Diarization => {
-                                        "Скачиваем sherpa-onnx модели diarization."
-                                    }
-                                    _ => "Скачиваем файлы Qwen модели.",
-                                }
-                            },
-                        );
-                        last_percent = percent;
-                        last_downloaded = downloaded;
-                    }
-                }
-
-                tokio::time::sleep(Duration::from_secs(1)).await;
-            }
-        });
-        Some(stop)
-    } else {
-        None
-    };
+    let install_client = (*client).clone();
+    let local_progress_stop: Option<Arc<AtomicBool>> = None;
 
     let mut request = install_client.post(&download_url);
-    if !whisper_key.trim().is_empty() {
+    if let Some(whisper_key) = whisper_key {
         request = request.bearer_auth(whisper_key);
     }
 
-    // The Qwen/Parakeet model download runs inside the managed Python runtime via
-    // this one blocking POST, so the streaming cancel flag (which Whisper/LLM poll
-    // per chunk) has nothing to watch here — that's why "Отмена" did nothing for
-    // Qwen. Race the request against the cancel flag; on abort, kill the managed
-    // runtime (stops the in-flight huggingface download) and reset to "not downloaded".
     let cancellable_engine_download =
-        managed_runtime_kind.is_some_and(|kind| kind != local_stt::LocalRuntimeKind::Whisper);
+        managed_runtime_kind == Some(local_stt::LocalRuntimeKind::Diarization);
     if cancellable_engine_download {
         crate::download_cancel::clear(requested_model);
     }
@@ -2318,21 +2138,27 @@ pub async fn install_stt_model(
                 .trim()
                 .to_string()
         });
-        let message = match status_code {
-            401 => "STT endpoint отклонил API-ключ при установке модели.".to_string(),
-            403 => "STT endpoint запретил установку модели. Проверьте права доступа.".to_string(),
-            404 => format!(
-                "Модель «{}» не найдена в реестре локального STT runtime.",
-                requested_model
-            ),
-            409 => format!(
-                "Модель «{}» уже устанавливается или уже доступна.",
-                requested_model
-            ),
-            _ => format!(
-                "STT endpoint вернул ошибку {} при установке модели: {}",
-                status_code, error_detail
-            ),
+        let message = if is_likely_local_url(&download_url) && matches!(status_code, 401 | 403) {
+            errors::local_stt_runtime_rejected_message(status_code, &error_text)
+        } else {
+            match status_code {
+                401 => "STT endpoint отклонил API-ключ при установке модели.".to_string(),
+                403 => {
+                    "STT endpoint запретил установку модели. Проверьте права доступа.".to_string()
+                }
+                404 => format!(
+                    "Модель «{}» не найдена в реестре локального STT runtime.",
+                    requested_model
+                ),
+                409 => format!(
+                    "Модель «{}» уже устанавливается или уже доступна.",
+                    requested_model
+                ),
+                _ => format!(
+                    "STT endpoint вернул ошибку {} при установке модели: {}",
+                    status_code, error_detail
+                ),
+            }
         };
         logger::log_error("STT_INSTALL", &message);
         return Ok(InstallSttModelResult {
@@ -2346,24 +2172,13 @@ pub async fn install_stt_model(
         "STT_INSTALL",
         &format!("STT model install request accepted: {}", requested_model),
     );
-    if managed_runtime_kind.is_some_and(|kind| kind != local_stt::LocalRuntimeKind::Whisper) {
-        let (downloaded, total) = match managed_runtime_kind {
-            Some(local_stt::LocalRuntimeKind::Nvidia) => local_stt::nvidia_model_progress_snapshot(
-                &app,
-                req.local_models_dir.as_deref(),
-                requested_model,
-            )
-            .unwrap_or((1, Some(1))),
-            Some(local_stt::LocalRuntimeKind::Diarization) => (1, Some(1)),
-            _ => local_stt::qwen_model_progress_snapshot(&app, req.local_models_dir.as_deref())
-                .unwrap_or((1, Some(1))),
-        };
+    if managed_runtime_kind == Some(local_stt::LocalRuntimeKind::Diarization) {
         local_stt::emit_model_download_progress_message(
             &app,
             requested_model,
             "downloaded",
-            downloaded,
-            total,
+            1,
+            Some(1),
             "Модель скачана.",
         );
     }
@@ -2405,11 +2220,14 @@ pub async fn delete_stt_model(
     let whisper_url = resolve_whisper_url(req.whisper_endpoint.as_deref());
     let mut models_url = resolve_whisper_models_url(&whisper_url);
     let mut delete_url = resolve_whisper_model_download_url(&models_url, requested_model);
-    let whisper_key = req
-        .whisper_api_key
-        .as_deref()
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or(req.api_key.as_str());
+    let whisper_key = if is_likely_local_url(&models_url) {
+        None
+    } else {
+        req.whisper_api_key
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| Some(req.api_key.as_str()).filter(|s| !s.trim().is_empty()))
+    };
 
     let client = http_client();
     if local_stt::is_managed_whisper_runtime_url(&models_url) {
@@ -2444,7 +2262,7 @@ pub async fn delete_stt_model(
     }
 
     let mut request = client.delete(&delete_url);
-    if !whisper_key.trim().is_empty() {
+    if let Some(whisper_key) = whisper_key {
         request = request.bearer_auth(whisper_key);
     }
 
@@ -2468,18 +2286,24 @@ pub async fn delete_stt_model(
     let status = response.status();
     if !status.is_success() {
         let error_text = response.text().await.unwrap_or_default();
-        let message = match status.as_u16() {
-            401 => "STT endpoint отклонил API-ключ при удалении модели.".to_string(),
-            403 => "STT endpoint запретил удаление модели. Проверьте права доступа.".to_string(),
-            404 => format!(
-                "Модель «{}» не найдена в реестре локального STT runtime.",
-                requested_model
-            ),
-            _ => format!(
-                "STT endpoint вернул ошибку {} при удалении модели: {}",
-                status.as_u16(),
-                error_text.chars().take(200).collect::<String>()
-            ),
+        let message = if is_likely_local_url(&delete_url) && matches!(status.as_u16(), 401 | 403) {
+            errors::local_stt_runtime_rejected_message(status.as_u16(), &error_text)
+        } else {
+            match status.as_u16() {
+                401 => "STT endpoint отклонил API-ключ при удалении модели.".to_string(),
+                403 => {
+                    "STT endpoint запретил удаление модели. Проверьте права доступа.".to_string()
+                }
+                404 => format!(
+                    "Модель «{}» не найдена в реестре локального STT runtime.",
+                    requested_model
+                ),
+                _ => format!(
+                    "STT endpoint вернул ошибку {} при удалении модели: {}",
+                    status.as_u16(),
+                    error_text.chars().take(200).collect::<String>()
+                ),
+            }
         };
         logger::log_error("STT_DELETE", &message);
         return Ok(DeleteSttModelResult {
@@ -2512,6 +2336,41 @@ mod tests {
             end,
             speaker_id: speaker_id.to_string(),
         }
+    }
+
+    fn file_req(use_own_key: bool, endpoint: &str) -> FilePathTranscriptionRequest {
+        FilePathTranscriptionRequest {
+            request_id: "test".to_string(),
+            file_path: "test.wav".to_string(),
+            file_name: Some("test.wav".to_string()),
+            file_size: None,
+            language: "ru".to_string(),
+            api_key: "stale-key".to_string(),
+            whisper_api_key: None,
+            style: "classic".to_string(),
+            whisper_endpoint: Some(endpoint.to_string()),
+            local_models_dir: None,
+            whisper_model: Some("whisper-large-v3-turbo".to_string()),
+            use_own_key,
+            device_token: Some("stale-cloud-token".to_string()),
+            speaker_diarization: true,
+        }
+    }
+
+    #[test]
+    fn local_file_diarization_preconditions_follow_endpoint_not_stale_mode_flag() {
+        let request = file_req(false, "http://127.0.0.1:8000");
+
+        assert!(ensure_diarized_file_preconditions(&request).is_ok());
+    }
+
+    #[test]
+    fn file_transcription_routing_uses_local_endpoint_over_stale_mode_flag() {
+        let local_request = file_req(false, "http://127.0.0.1:8000");
+        let remote_request = file_req(false, "https://api.openai.com/v1");
+
+        assert!(file_transcription_uses_own_key(&local_request));
+        assert!(!file_transcription_uses_own_key(&remote_request));
     }
 
     #[test]

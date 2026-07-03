@@ -87,6 +87,10 @@ function isModelDownloaded(settings: AppSettings, modelId: string): boolean {
   return settings.localModels?.[modelId]?.status === "downloaded";
 }
 
+function isLocalSttSettings(settings: AppSettings): boolean {
+  return /127\.0\.0\.1|localhost/i.test(settings.whisperEndpoint || "");
+}
+
 function getDiarizationWhisperOption(
   settings: AppSettings,
 ): (typeof DIARIZATION_WHISPER_OPTIONS)[number] | null {
@@ -186,11 +190,43 @@ function isSpeakerSetupRepairError(error: unknown): boolean {
   );
 }
 
-function toSpeakerSetupErrorMessage(error: unknown, t: TFunc): string {
+function isAuthFailureLike(normalized: string): boolean {
+  return (
+    normalized.includes("401") ||
+    normalized.includes("unauthorized") ||
+    normalized.includes("invalid api key") ||
+    normalized.includes("api-ключ") ||
+    normalized.includes("ключ доступа") ||
+    (normalized.includes("авторизоваться") && normalized.includes("api"))
+  );
+}
+
+function toSpeakerSetupErrorMessage(
+  error: unknown,
+  t: TFunc,
+  settings: AppSettings | null = null,
+): string {
   const raw = formatErrorMessage(error);
   const normalized = raw.toLowerCase();
+  const isLocalStt = settings ? isLocalSttSettings(settings) : false;
 
-  if (normalized.includes("401") || normalized.includes("api-ключ")) {
+  if (
+    isLocalStt ||
+    normalized.includes("локальный stt runtime") ||
+    normalized.includes("local stt runtime") ||
+    normalized.includes("127.0.0.1") ||
+    normalized.includes("localhost")
+  ) {
+    if (isAuthFailureLike(normalized) || normalized.includes("403") || normalized.includes("forbidden")) {
+      return t("fileTab.setupError.localRuntimeRejected");
+    }
+
+    return raw.trim()
+      ? t("fileTab.setupError.genericWithDetail", { detail: raw })
+      : t("fileTab.setupError.generic");
+  }
+
+  if (isAuthFailureLike(normalized)) {
     return t("fileTab.setupError.rejectedKey");
   }
 
@@ -519,12 +555,14 @@ export function FileTranscriptionTab({
     setSelectedFile({ name: file.name, size: file.size });
     resetResult();
     setStatus("reading");
+    let activeSettings: AppSettings | null = null;
 
     try {
       if (speakerDiarization) {
         throw new Error(t("fileTab.error.speakerNeedsDialog"));
       }
       const settings = await getSettings();
+      activeSettings = settings;
       const startedAt = Date.now();
       const transcription = await transcribeFileOnly({
         file,
@@ -558,7 +596,11 @@ export function FileTranscriptionTab({
       );
       setStatus("done");
     } catch (caughtError) {
-      setError(toFileTranscriptionErrorMessage(caughtError));
+      setError(
+        toFileTranscriptionErrorMessage(caughtError, {
+          settings: activeSettings,
+        }),
+      );
       setStatus("error");
     }
   };
@@ -576,19 +618,20 @@ export function FileTranscriptionTab({
       const settings = await refreshSpeakerInstalledModels(
         await getSettings({ reload: true }),
       );
-      const cloudSpeakerReady = await canUseCloudSpeakerDiarization(
-        settings,
-        true,
-      );
+      const isLocalStt = isLocalSttSettings(settings);
+      const effectiveUseOwnKey = isLocalStt || settings.useOwnKey;
+      const cloudSpeakerReady = isLocalStt
+        ? false
+        : await canUseCloudSpeakerDiarization(settings, true);
       settingsRef.current = settings;
       syncSpeakerSetupState(settings);
-      if (speakerMode && !settings.useOwnKey && !cloudSpeakerReady) {
+      if (speakerMode && !effectiveUseOwnKey && !cloudSpeakerReady) {
         setSpeakerDiarization(false);
         await saveSettings({ fileSpeakerDiarization: false });
         throw new Error("IconCloud speaker diarization unavailable");
       }
 
-      if (speakerMode && settings.useOwnKey && !isSpeakerSetupReady(settings)) {
+      if (speakerMode && effectiveUseOwnKey && !isSpeakerSetupReady(settings)) {
         setPendingSpeakerFilePath(filePath);
         setSpeakerSetupIntent("process");
         setSpeakerSetupMessage("");
@@ -634,13 +677,21 @@ export function FileTranscriptionTab({
         setSpeakerSetupIntent("process");
         setSpeakerSetupForceRepair(true);
         setSpeakerSetupMessage("");
-        setSpeakerSetupError(toFileTranscriptionErrorMessage(caughtError));
+        setSpeakerSetupError(
+          toFileTranscriptionErrorMessage(caughtError, {
+            settings: settingsRef.current,
+          }),
+        );
         setSpeakerSetupModalOpen(true);
         setStatus("idle");
         return;
       }
 
-      setError(toFileTranscriptionErrorMessage(caughtError));
+      setError(
+        toFileTranscriptionErrorMessage(caughtError, {
+          settings: settingsRef.current,
+        }),
+      );
       setStatus("error");
     }
   };
@@ -855,7 +906,9 @@ export function FileTranscriptionTab({
       }
       setSpeakerSetupIntent(null);
     } catch (caughtError) {
-      setSpeakerSetupError(toSpeakerSetupErrorMessage(caughtError, t));
+      setSpeakerSetupError(
+        toSpeakerSetupErrorMessage(caughtError, t, settingsRef.current),
+      );
     } finally {
       setSpeakerSetupInstalling(false);
     }
@@ -907,9 +960,15 @@ export function FileTranscriptionTab({
     void saveSettings({ fileSpeakerDiarization: true });
 
     const cachedSettings = settingsRef.current;
-    if (
-      !cachedSettings ||
-      (cachedSettings.useOwnKey && !isSpeakerSetupReady(cachedSettings))
+    if (!cachedSettings) {
+      setPendingSpeakerFilePath(null);
+      setSpeakerSetupIntent("toggle");
+      setSpeakerSetupMessage("");
+      setSpeakerSetupError("");
+      setSpeakerSetupModalOpen(true);
+    } else if (
+      (isLocalSttSettings(cachedSettings) || cachedSettings.useOwnKey) &&
+      !isSpeakerSetupReady(cachedSettings)
     ) {
       setPendingSpeakerFilePath(null);
       setSpeakerSetupIntent("toggle");
@@ -923,7 +982,9 @@ export function FileTranscriptionTab({
         const settings = await refreshSpeakerInstalledModels(
           await getSettings({ reload: true }),
         );
-        const cloudSpeakerReady = settings.useOwnKey
+        const isLocalStt = isLocalSttSettings(settings);
+        const effectiveUseOwnKey = isLocalStt || settings.useOwnKey;
+        const cloudSpeakerReady = effectiveUseOwnKey
           ? false
           : await canUseCloudSpeakerDiarization(settings, true);
 
@@ -934,7 +995,7 @@ export function FileTranscriptionTab({
         settingsRef.current = settings;
         syncSpeakerSetupState(settings);
 
-        if (!settings.useOwnKey) {
+        if (!effectiveUseOwnKey) {
           if (cloudSpeakerReady) {
             setSpeakerSetupModalOpen(false);
             setSpeakerSetupIntent(null);
@@ -971,7 +1032,11 @@ export function FileTranscriptionTab({
 
         setSpeakerSetupModalOpen(false);
         setSpeakerSetupIntent(null);
-        setError(toFileTranscriptionErrorMessage(caughtError));
+        setError(
+          toFileTranscriptionErrorMessage(caughtError, {
+            settings: settingsRef.current,
+          }),
+        );
         setSpeakerDiarization(false);
         await saveSettings({ fileSpeakerDiarization: false });
         return;

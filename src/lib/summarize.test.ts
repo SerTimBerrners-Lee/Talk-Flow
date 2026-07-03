@@ -82,3 +82,29 @@ describe("stored settings migration for bundled local LLM", () => {
     expect(normalized.llmLocalModelId).toBeUndefined();
   });
 });
+
+describe("stored settings migration for local STT", () => {
+  it("repairs stale mode flags when Whisper endpoint is local", () => {
+    const normalized = normalizeSavedSettings({
+      useOwnKey: false,
+      provider: "openai",
+      whisperApiKey: "stale-key",
+      whisperEndpoint: "http://127.0.0.1:8000",
+    });
+
+    expect(normalized.useOwnKey).toBe(true);
+    expect(normalized.provider).toBe("custom");
+    expect(normalized.whisperApiKey).toBe("");
+  });
+
+  it("migrates removed Qwen and Parakeet endpoints to unified transcribe.cpp runtime", () => {
+    const normalized = normalizeSavedSettings({
+      useOwnKey: true,
+      provider: "custom",
+      whisperApiKey: "",
+      whisperEndpoint: "http://127.0.0.1:8002",
+    });
+
+    expect(normalized.whisperEndpoint).toBe("http://127.0.0.1:8000");
+  });
+});

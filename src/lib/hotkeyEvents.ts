@@ -6,6 +6,7 @@ export const HOTKEY_CHANGE_REQUEST_EVENT = "hotkey-change-request";
 export const HOTKEY_REGISTRATION_RESULT_EVENT = "hotkey-registration-result";
 export const NATIVE_HOTKEY_CAPTURE_EVENT = "native-hotkey-capture";
 export const HOTKEY_CAPTURE_STATE_EVENT = "hotkey-capture-state";
+export const HANDY_HOTKEY_EVENT = "handy-hotkey-event";
 export const SETTINGS_NAVIGATE_EVENT = "settings-navigate";
 export const WIDGET_RETRY_PROCESSING_EVENT = "widget-retry-processing";
 export const PROCESSING_CANCEL_REQUEST_EVENT = "processing-cancel-request";
@@ -29,6 +30,11 @@ export interface NativeHotkeyCapturePayload {
 
 export interface HotkeyCaptureStatePayload {
   active: boolean;
+}
+
+export interface HandyHotkeyEventPayload {
+  hotkey: string;
+  state: "Pressed" | "Released";
 }
 
 export interface SettingsNavigatePayload {

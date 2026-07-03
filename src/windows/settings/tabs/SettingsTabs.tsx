@@ -75,7 +75,7 @@ import volcengineAvatar from "../../../assets/adapters/volcengine.webp";
 import xAiAvatar from "../../../assets/adapters/xai.png";
 
 const IS_DEV = import.meta.env.DEV;
-type LocalRuntimeKind = "whisper" | "nvidia" | "qwen" | "diarization";
+type LocalRuntimeKind = "whisper" | "diarization";
 type DesktopPlatform = "macos" | "windows" | "linux" | "unknown";
 
 function detectDesktopPlatform(): DesktopPlatform {
@@ -94,13 +94,15 @@ function detectDesktopPlatform(): DesktopPlatform {
 
 const LOCAL_RUNTIME_ENDPOINTS: Record<LocalRuntimeKind, string> = {
   whisper: "http://127.0.0.1:8000",
-  nvidia: "http://127.0.0.1:8001",
-  qwen: "http://127.0.0.1:8002",
   diarization: "http://127.0.0.1:8003",
 };
 const LOCAL_STT_PRESET_ENDPOINT = LOCAL_RUNTIME_ENDPOINTS.whisper;
 const LOCAL_STT_PRESET_MODEL = "whisper-large-v3-turbo";
 const LOCAL_STT_MODEL_DOWNLOAD_PROGRESS_EVENT = "local-stt-model-download-progress";
+
+function isLocalSttEndpoint(endpoint?: string | null): boolean {
+  return /127\.0\.0\.1|localhost/i.test(endpoint || "");
+}
 
 interface SettingsTabsProps { type: "model" | "style"; }
 
@@ -296,7 +298,7 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
     description: "Рекомендуемый Whisper-вариант: быстрый, качественный и хорошо подходит для диктовки.",
     model: "whisper-large-v3-turbo",
     engineLabel: "Whisper",
-    runtime: "Talkis Local / whisper.cpp",
+    runtime: "Talkis Local / transcribe.cpp",
     runtimeKind: "whisper",
     size: "large",
     speed: "быстро",
@@ -313,7 +315,7 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
     description: "Более легкий вариант Turbo для локальной работы с меньшим расходом памяти.",
     model: "whisper-large-v3-turbo",
     engineLabel: "Whisper",
-    runtime: "OpenAI-compatible / MLX runtime",
+    runtime: "Talkis Local / transcribe.cpp",
     runtimeKind: "whisper",
     size: "4-bit",
     speed: "быстро",
@@ -328,7 +330,7 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
     description: "Баланс скорости и качества для слабых машин и быстрых коротких диктовок.",
     model: "whisper-small",
     engineLabel: "Whisper",
-    runtime: "Talkis Local / whisper.cpp",
+    runtime: "Talkis Local / transcribe.cpp",
     runtimeKind: "whisper",
     size: "small",
     speed: "быстро",
@@ -344,7 +346,7 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
     description: "Максимальное качество Whisper, но выше требования к памяти и времени обработки.",
     model: "whisper-large-v3",
     engineLabel: "Whisper",
-    runtime: "Talkis Local / whisper.cpp",
+    runtime: "Talkis Local / transcribe.cpp",
     runtimeKind: "whisper",
     size: "large",
     speed: "средне",
@@ -360,7 +362,7 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
     description: "Предыдущая large-версия Whisper для совместимости с существующими локальными установками.",
     model: "whisper-large-v2",
     engineLabel: "Whisper",
-    runtime: "Talkis Local / whisper.cpp",
+    runtime: "Talkis Local / transcribe.cpp",
     runtimeKind: "whisper",
     size: "large",
     speed: "средне",
@@ -376,7 +378,7 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
     description: "Промежуточный вариант между Small и Large: заметно качественнее Small, но тяжелее.",
     model: "whisper-medium",
     engineLabel: "Whisper",
-    runtime: "Talkis Local / whisper.cpp",
+    runtime: "Talkis Local / transcribe.cpp",
     runtimeKind: "whisper",
     size: "medium",
     speed: "средне",
@@ -392,7 +394,7 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
     description: "Быстрая и легкая модель для простых сценариев и слабых машин.",
     model: "whisper-base",
     engineLabel: "Whisper",
-    runtime: "Talkis Local / whisper.cpp",
+    runtime: "Talkis Local / transcribe.cpp",
     runtimeKind: "whisper",
     size: "base",
     speed: "очень быстро",
@@ -408,7 +410,7 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
     description: "Минимальный размер и максимальная скорость, качество ниже остальных Whisper-моделей.",
     model: "whisper-tiny",
     engineLabel: "Whisper",
-    runtime: "Talkis Local / whisper.cpp",
+    runtime: "Talkis Local / transcribe.cpp",
     runtimeKind: "whisper",
     size: "tiny",
     speed: "очень быстро",
@@ -421,11 +423,11 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
   {
     id: "parakeet-tdt-06b-v3",
     name: "NVIDIA Parakeet TDT 0.6B v3",
-    description: "Быстрая локальная ASR-модель Parakeet через MLX runtime для Apple Silicon.",
-    model: "mlx-community/parakeet-tdt-0.6b-v3",
+    description: "Быстрая локальная ASR-модель Parakeet через transcribe.cpp GGUF runtime.",
+    model: "nvidia/parakeet-tdt-0.6b-v3",
     engineLabel: "Parakeet",
-    runtime: "OpenAI-compatible / Parakeet MLX runtime",
-    runtimeKind: "nvidia",
+    runtime: "Talkis Local / transcribe.cpp",
+    runtimeKind: "whisper",
     size: "0.6B",
     speed: "быстро",
     accuracy: "высокая",
@@ -433,16 +435,16 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
     accent: "#76b900",
     avatar: nvidiaAvatar,
     runtimeReady: true,
-    downloadBytes: 2_509_044_141,
+    downloadBytes: 740_000_000,
   },
   {
     id: "parakeet-tdt-06b-v2",
     name: "NVIDIA Parakeet TDT 0.6B v2",
-    description: "Стабильная английская Parakeet TDT-модель через MLX runtime для Apple Silicon.",
-    model: "mlx-community/parakeet-tdt-0.6b-v2",
+    description: "Стабильная английская Parakeet TDT-модель через transcribe.cpp GGUF runtime.",
+    model: "nvidia/parakeet-tdt-0.6b-v2",
     engineLabel: "Parakeet",
-    runtime: "OpenAI-compatible / Parakeet MLX runtime",
-    runtimeKind: "nvidia",
+    runtime: "Talkis Local / transcribe.cpp",
+    runtimeKind: "whisper",
     size: "0.6B",
     speed: "быстро",
     accuracy: "высокая",
@@ -450,16 +452,16 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
     accent: "#5f9f00",
     avatar: nvidiaAvatar,
     runtimeReady: true,
-    downloadBytes: 2_470_305_134,
+    downloadBytes: 730_000_000,
   },
   {
     id: "qwen3-asr-06b",
     name: "Qwen3-ASR 0.6B",
-    description: "Компактная ASR-модель Qwen для локального распознавания через совместимый runtime.",
+    description: "Компактная ASR-модель Qwen для локального распознавания через transcribe.cpp GGUF runtime.",
     model: "Qwen/Qwen3-ASR-0.6B",
     engineLabel: "Qwen",
-    runtime: "OpenAI-compatible / Qwen runtime",
-    runtimeKind: "qwen",
+    runtime: "Talkis Local / transcribe.cpp",
+    runtimeKind: "whisper",
     size: "0.6B",
     speed: "средне",
     accuracy: "высокая",
@@ -467,7 +469,7 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
     accent: "#2563eb",
     avatar: qwenAvatar,
     runtimeReady: true,
-    downloadBytes: 1_880_619_678,
+    downloadBytes: 811_000_000,
   },
 ];
 
@@ -1283,7 +1285,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
   }, [clearLocalAuthPolling, loadCloudProfile, syncSettings]);
 
   const refreshLocalInstalledModels = useCallback(async () => {
-    if (!settings || type !== "model" || !settings.useOwnKey || settings.provider !== "custom") {
+    if (!settings || type !== "model" || !settings.useOwnKey || !isLocalSttEndpoint(settings.whisperEndpoint)) {
       return;
     }
 
@@ -1527,12 +1529,12 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
 
     const currentMode: ModelMode = !settings.useOwnKey
       ? "cloud"
-      : settings.provider === "custom"
+      : isLocalSttEndpoint(settings.whisperEndpoint)
         ? "local"
         : "api";
 
     setModelModeView((current) => current ?? currentMode);
-  }, [settings?.provider, settings?.useOwnKey, type]);
+  }, [settings?.useOwnKey, settings?.whisperEndpoint, type]);
 
   useEffect(() => {
     if (!settings || type !== "model" || cloudProfile === undefined) return;
@@ -1635,10 +1637,10 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
   if (type === "model") {
     const hasActiveSubscription = cloudProfile?.subscription.active === true;
     const isCloudMode = !settings.useOwnKey;
-    const isCustom = settings.provider === "custom";
+    const isLocalSttMode = settings.useOwnKey && isLocalSttEndpoint(settings.whisperEndpoint);
     const isCloudSelected = isCloudMode && hasActiveSubscription;
     const desktopPlatform = detectDesktopPlatform();
-    const activeModelMode: ModelMode = isCloudSelected ? "cloud" : isCustom ? "local" : "api";
+    const activeModelMode: ModelMode = isCloudSelected ? "cloud" : isLocalSttMode ? "local" : "api";
     const visibleModelMode = modelModeView ?? activeModelMode;
     const isApiMode = visibleModelMode === "api";
     const isLocalMode = visibleModelMode === "local";
@@ -1694,9 +1696,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
           return null;
         }
 
-        if (port === 8000 || (port >= 18000 && port <= 18049)) return "whisper";
-        if (port === 8001 || (port >= 18050 && port <= 18099)) return "nvidia";
-        if (port === 8002 || (port >= 18100 && port <= 18149)) return "qwen";
+        if (port === 8000 || port === 8001 || port === 8002 || (port >= 18000 && port <= 18149)) return "whisper";
         if (port === 8003 || (port >= 18150 && port <= 18199)) return "diarization";
       } catch {
         return null;
@@ -2088,12 +2088,12 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
       const cachedState = settings.localModels?.[model.id];
       const isPlatformSupported = model.runtimeKind === "whisper" || model.runtimeKind === "diarization" || desktopPlatform === "macos";
       const isRuntimeReady = model.runtimeReady === true && isPlatformSupported;
-      const isInstalled = isRuntimeReady && (localInstalledModelSet.has(model.model) || cachedState?.status === "downloaded");
+      const isInstalled = isRuntimeReady && localInstalledModelSet.has(model.model);
       const isSelected = activeModelMode === "local" && localSttTargetModel === model.model && isInstalled;
 
       if (!isRuntimeReady) {
-        const runtimeName = model.runtimeKind === "nvidia" ? "NVIDIA" : model.runtimeKind === "qwen" ? "Qwen" : model.runtimeKind === "diarization" ? "Diarization" : "MLX";
-        const isRuntimeSlotReady = model.runtimeKind === "qwen" || model.runtimeKind === "nvidia" || model.runtimeKind === "diarization";
+        const runtimeName = model.runtimeKind === "diarization" ? "Diarization" : "transcribe.cpp";
+        const isRuntimeSlotReady = model.runtimeKind === "diarization";
         return {
           label: isRuntimeSlotReady ? t("models.local.modelNotConnected") : t("models.local.engineNotConnected"),
           connectionLabel: isRuntimeSlotReady
@@ -2297,9 +2297,6 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
         whisperApiKey: "",
         whisperEndpoint: endpointOverride || getLocalModelEndpoint(model),
         whisperModel: model.model,
-        llmApiKey: "",
-        llmEndpoint: "",
-        llmModel: "none",
       });
       setModelModeView("local");
       resetTestState();

@@ -40,8 +40,18 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 function isLocalSttSettings(settings: AppSettings): boolean {
   return (
     settings.useOwnKey &&
-    settings.provider === "custom" &&
     /127\.0\.0\.1|localhost/i.test(settings.whisperEndpoint || "")
+  );
+}
+
+function isAuthFailureLike(normalized: string): boolean {
+  return (
+    normalized.includes("401") ||
+    normalized.includes("unauthorized") ||
+    normalized.includes("invalid api key") ||
+    normalized.includes("api-ключ") ||
+    normalized.includes("ключ доступа") ||
+    (normalized.includes("авторизоваться") && normalized.includes("api"))
   );
 }
 
@@ -99,7 +109,7 @@ function toUserFacingErrorMessage(error: unknown, settings: AppSettings): string
     return tn("widget.error.cloudUnavailable");
   }
 
-  if (normalized.includes("401") || normalized.includes("unauthorized") || normalized.includes("invalid api key")) {
+  if (isAuthFailureLike(normalized)) {
     if (isLocalStt) {
       return tn("widget.error.localRuntimeRejected");
     }

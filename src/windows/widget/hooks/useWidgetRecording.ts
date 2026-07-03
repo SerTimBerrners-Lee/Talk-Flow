@@ -225,10 +225,9 @@ export function useWidgetRecording({
     const hasKey = activeSettings.apiKey.trim().length > 0 || activeSettings.whisperApiKey.trim().length > 0 || (activeSettings.llmApiKey || "").trim().length > 0;
 
     // In local STT mode the whisper server runs on localhost and requires no API key.
-    // Detect this case: custom provider + local-looking endpoint + no whisperApiKey.
+    // Detect this case by the local-looking endpoint; provider can be stale after upgrades.
     const isLocalSttMode =
       activeSettings.useOwnKey &&
-      activeSettings.provider === "custom" &&
       (activeSettings.whisperEndpoint || "").match(/127\.0\.0\.1|localhost/i) !== null &&
       (activeSettings.whisperApiKey || "").trim().length === 0;
 

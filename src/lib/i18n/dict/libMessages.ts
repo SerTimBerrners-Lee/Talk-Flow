@@ -100,6 +100,10 @@ export const libMessages = {
     ru: "Локальная модель распознавания не установлена. Откройте Настройки -> Модели -> Локально и нажмите «Скачать» для выбранной модели.",
     en: "The local recognition model is not installed. Open Settings -> Models -> Local and click “Download” for the selected model.",
   },
+  "fileTranscription.errLocalRuntimeRejected": {
+    ru: "Локальный runtime отклонил файл. Проверьте, что выбранная локальная модель скачана и запущена, затем попробуйте ещё раз.",
+    en: "The local runtime rejected the file. Make sure the selected local model is downloaded and running, then try again.",
+  },
   "fileTranscription.errAuthFailed": {
     ru: "Не удалось авторизоваться в API. Проверьте ключ доступа.",
     en: "Could not authenticate with the API. Check your access key.",

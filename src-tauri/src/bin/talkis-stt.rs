@@ -6,13 +6,13 @@ use std::fs;
 use std::io::{Cursor, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
-use whisper_rs::{
-    convert_integer_to_float_audio, convert_stereo_to_mono_audio, FullParams, SamplingStrategy,
-    WhisperContext, WhisperContextParameters,
-};
+use std::sync::Once;
+use transcribe_cpp::{ExtSlot, Model, RunExtension, RunOptions, TimestampKind, WhisperRunOptions};
 
 const SERVER_NAME: &str = "talkis-stt";
 const MAX_REQUEST_BYTES: usize = 128 * 1024 * 1024;
+const WHISPER_RUN_EXT_KIND: u32 = 0x4E524857;
+static INIT_TRANSCRIBE_CPP: Once = Once::new();
 
 struct RuntimeConfig {
     host: String,
@@ -32,6 +32,7 @@ struct WhisperModel {
     id: &'static str,
     aliases: &'static [&'static str],
     file_name: &'static str,
+    gguf_file_name: &'static str,
     url: &'static str,
 }
 
@@ -43,38 +44,80 @@ struct MultipartData {
 const WHISPER_MODELS: &[WhisperModel] = &[
     WhisperModel {
         id: "whisper-tiny",
-        aliases: &["tiny", "Systran/faster-whisper-tiny"],
+        aliases: &[
+            "tiny",
+            "Systran/faster-whisper-tiny",
+            "openai/whisper-tiny",
+            "ggml-tiny.bin",
+            "whisper-tiny.gguf",
+        ],
         file_name: "ggml-tiny.bin",
+        gguf_file_name: "whisper-tiny.gguf",
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
     },
     WhisperModel {
         id: "whisper-base",
-        aliases: &["base", "Systran/faster-whisper-base"],
+        aliases: &[
+            "base",
+            "Systran/faster-whisper-base",
+            "openai/whisper-base",
+            "ggml-base.bin",
+            "whisper-base.gguf",
+        ],
         file_name: "ggml-base.bin",
+        gguf_file_name: "whisper-base.gguf",
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
     },
     WhisperModel {
         id: "whisper-small",
-        aliases: &["small", "Systran/faster-whisper-small"],
+        aliases: &[
+            "small",
+            "Systran/faster-whisper-small",
+            "openai/whisper-small",
+            "ggml-small.bin",
+            "whisper-small.gguf",
+        ],
         file_name: "ggml-small.bin",
+        gguf_file_name: "whisper-small.gguf",
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
     },
     WhisperModel {
         id: "whisper-medium",
-        aliases: &["medium", "Systran/faster-whisper-medium"],
+        aliases: &[
+            "medium",
+            "Systran/faster-whisper-medium",
+            "openai/whisper-medium",
+            "ggml-medium.bin",
+            "whisper-medium.gguf",
+        ],
         file_name: "ggml-medium.bin",
+        gguf_file_name: "whisper-medium.gguf",
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin",
     },
     WhisperModel {
         id: "whisper-large-v2",
-        aliases: &["large-v2", "Systran/faster-whisper-large-v2"],
+        aliases: &[
+            "large-v2",
+            "Systran/faster-whisper-large-v2",
+            "openai/whisper-large-v2",
+            "ggml-large-v2.bin",
+            "whisper-large-v2.gguf",
+        ],
         file_name: "ggml-large-v2.bin",
+        gguf_file_name: "whisper-large-v2.gguf",
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v2.bin",
     },
     WhisperModel {
         id: "whisper-large-v3",
-        aliases: &["large-v3", "Systran/faster-whisper-large-v3"],
+        aliases: &[
+            "large-v3",
+            "Systran/faster-whisper-large-v3",
+            "openai/whisper-large-v3",
+            "ggml-large-v3.bin",
+            "whisper-large-v3.gguf",
+        ],
         file_name: "ggml-large-v3.bin",
+        gguf_file_name: "whisper-large-v3.gguf",
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin",
     },
     WhisperModel {
@@ -83,13 +126,55 @@ const WHISPER_MODELS: &[WhisperModel] = &[
             "large-v3-turbo",
             "Systran/faster-whisper-large-v3-turbo",
             "mlx-community/whisper-large-v3-turbo-4bit",
+            "openai/whisper-large-v3-turbo",
+            "ggml-large-v3-turbo.bin",
+            "whisper-large-v3-turbo.gguf",
         ],
         file_name: "ggml-large-v3-turbo.bin",
+        gguf_file_name: "whisper-large-v3-turbo.gguf",
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin",
+    },
+    WhisperModel {
+        id: "nvidia/parakeet-tdt-0.6b-v3",
+        aliases: &[
+            "mlx-community/parakeet-tdt-0.6b-v3",
+            "parakeet-tdt-06b-v3",
+            "parakeet-tdt-0.6b-v3",
+            "parakeet-tdt-0.6b-v3-Q8_0.gguf",
+        ],
+        file_name: "parakeet-tdt-0.6b-v3-Q8_0.gguf",
+        gguf_file_name: "parakeet-tdt-0.6b-v3-Q8_0.gguf",
+        url: "https://huggingface.co/handy-computer/parakeet-tdt-0.6b-v3-gguf/resolve/main/parakeet-tdt-0.6b-v3-Q8_0.gguf",
+    },
+    WhisperModel {
+        id: "nvidia/parakeet-tdt-0.6b-v2",
+        aliases: &[
+            "mlx-community/parakeet-tdt-0.6b-v2",
+            "parakeet-tdt-06b-v2",
+            "parakeet-tdt-0.6b-v2",
+            "parakeet-tdt-0.6b-v2-Q8_0.gguf",
+        ],
+        file_name: "parakeet-tdt-0.6b-v2-Q8_0.gguf",
+        gguf_file_name: "parakeet-tdt-0.6b-v2-Q8_0.gguf",
+        url: "https://huggingface.co/handy-computer/parakeet-tdt-0.6b-v2-gguf/resolve/main/parakeet-tdt-0.6b-v2-Q8_0.gguf",
+    },
+    WhisperModel {
+        id: "Qwen/Qwen3-ASR-0.6B",
+        aliases: &[
+            "qwen3-asr-06b",
+            "Qwen3-ASR-0.6B",
+            "qwen3-asr-0.6b",
+            "Qwen3-ASR-0.6B-Q8_0.gguf",
+        ],
+        file_name: "Qwen3-ASR-0.6B-Q8_0.gguf",
+        gguf_file_name: "Qwen3-ASR-0.6B-Q8_0.gguf",
+        url: "https://huggingface.co/handy-computer/Qwen3-ASR-0.6B-gguf/resolve/main/Qwen3-ASR-0.6B-Q8_0.gguf",
     },
 ];
 
 fn main() {
+    init_transcribe_cpp();
+
     let config = parse_args();
     if let Err(err) = fs::create_dir_all(&config.data_dir) {
         eprintln!("failed to prepare data dir: {}", err);
@@ -260,7 +345,7 @@ fn route_request(request: &HttpRequest, config: &RuntimeConfig) -> (u16, String)
             json!({
                 "status": "ok",
                 "runtime": SERVER_NAME,
-                "engine": "whisper.cpp"
+                "engine": "transcribe.cpp"
             })
             .to_string(),
         ),
@@ -341,11 +426,20 @@ fn find_model(value: &str) -> Option<&'static WhisperModel> {
 }
 
 fn model_path(config: &RuntimeConfig, model: &WhisperModel) -> PathBuf {
-    config.models_dir.join(model.file_name)
+    let gguf_path = config.models_dir.join(model.gguf_file_name);
+    if gguf_path.is_file() {
+        gguf_path
+    } else {
+        config.models_dir.join(model.file_name)
+    }
 }
 
 fn marker_path(config: &RuntimeConfig, model: &WhisperModel) -> PathBuf {
     config.models_dir.join(format!("{}.json", model.id))
+}
+
+fn download_model_path(config: &RuntimeConfig, model: &WhisperModel) -> PathBuf {
+    config.models_dir.join(model.file_name)
 }
 
 fn install_model(config: &RuntimeConfig, requested: &str) -> Result<String, (u16, String)> {
@@ -353,7 +447,7 @@ fn install_model(config: &RuntimeConfig, requested: &str) -> Result<String, (u16
         (
             404,
             format!(
-                "Модель «{}» не поддерживается встроенным Whisper runtime.",
+                "Модель «{}» не поддерживается встроенным transcribe.cpp runtime.",
                 requested
             ),
         )
@@ -366,7 +460,7 @@ fn install_model(config: &RuntimeConfig, requested: &str) -> Result<String, (u16
         )
     })?;
 
-    let path = model_path(config, model);
+    let path = download_model_path(config, model);
     if !path.is_file() {
         let temp_path = path.with_extension("download");
         let mut response = reqwest::blocking::get(model.url)
@@ -416,13 +510,13 @@ fn delete_model(config: &RuntimeConfig, requested: &str) -> Result<String, (u16,
         (
             404,
             format!(
-                "Модель «{}» не поддерживается встроенным Whisper runtime.",
+                "Модель «{}» не поддерживается встроенным transcribe.cpp runtime.",
                 requested
             ),
         )
     })?;
 
-    let path = model_path(config, model);
+    let path = download_model_path(config, model);
     if path.is_file() {
         fs::remove_file(&path).map_err(|err| {
             (
@@ -457,7 +551,7 @@ fn write_model_marker(config: &RuntimeConfig, model: &WhisperModel) -> Result<()
     let marker = json!({
         "id": model.id,
         "file": model.file_name,
-        "engine": "whisper.cpp"
+        "engine": "transcribe.cpp"
     });
     fs::write(marker_path(config, model), marker.to_string()).map_err(|err| {
         (
@@ -473,7 +567,10 @@ fn write_model_marker(config: &RuntimeConfig, model: &WhisperModel) -> Result<()
 fn installed_models(config: &RuntimeConfig) -> Vec<String> {
     let mut models = WHISPER_MODELS
         .iter()
-        .filter(|model| model_path(config, model).is_file())
+        .filter(|model| {
+            config.models_dir.join(model.file_name).is_file()
+                || config.models_dir.join(model.gguf_file_name).is_file()
+        })
         .map(|model| model.id.to_string())
         .collect::<Vec<_>>();
     models.sort();
@@ -491,7 +588,7 @@ fn transcribe(request: &HttpRequest, config: &RuntimeConfig) -> Result<String, (
         (
             404,
             format!(
-                "Модель «{}» не поддерживается встроенным Whisper runtime.",
+                "Модель «{}» не поддерживается встроенным transcribe.cpp runtime.",
                 requested_model
             ),
         )
@@ -503,66 +600,115 @@ fn transcribe(request: &HttpRequest, config: &RuntimeConfig) -> Result<String, (
     }
 
     let audio = read_wav_mono_16k(&multipart.file)?;
-    let context = WhisperContext::new_with_params(&path, WhisperContextParameters::default())
-        .map_err(|err| {
-            (
-                500,
-                format!("Не удалось загрузить модель «{}»: {}", model.id, err),
-            )
-        })?;
-    let mut state = context.create_state().map_err(|err| {
-        (
-            500,
-            format!("Не удалось создать состояние Whisper: {}", err),
-        )
-    })?;
-    let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 0 });
-    params.set_n_threads(
-        std::thread::available_parallelism()
-            .map(|value| value.get().min(8) as i32)
-            .unwrap_or(4),
-    );
-    params.set_print_special(false);
-    params.set_print_progress(false);
-    params.set_print_realtime(false);
-    params.set_print_timestamps(false);
-    params.set_no_context(true);
-    params.set_suppress_nst(true);
-    params.set_temperature(0.0);
-    params.set_temperature_inc(0.0);
-    params.set_entropy_thold(2.2);
-
-    if let Some(language) = multipart.fields.get("language") {
-        let language = language.trim();
-        if !language.is_empty() && language != "auto" {
-            params.set_language(Some(language));
-        }
+    if is_low_signal_audio(&audio) {
+        return transcription_response(String::new(), Vec::new(), &multipart.fields);
     }
 
-    state
-        .full(params, &audio)
-        .map_err(|err| (500, format!("Whisper не смог распознать аудио: {}", err)))?;
+    let loaded_model = Model::load(&path).map_err(|err| {
+        (
+            500,
+            format!(
+                "Не удалось загрузить модель «{}» через transcribe.cpp: {}",
+                model.id, err
+            ),
+        )
+    })?;
+    let capabilities = loaded_model.capabilities();
+    let supports_whisper_options = loaded_model.accepts_ext(ExtSlot::Run, WHISPER_RUN_EXT_KIND);
+    let mut session = loaded_model.session().map_err(|err| {
+        (
+            500,
+            format!("Не удалось создать transcribe.cpp session: {}", err),
+        )
+    })?;
+    let options = run_options_from_fields(
+        &multipart.fields,
+        capabilities.max_timestamp_kind,
+        supports_whisper_options,
+    );
+    let transcript = session.run(&audio, &options).map_err(|err| {
+        (
+            500,
+            format!("transcribe.cpp не смог распознать аудио: {}", err),
+        )
+    })?;
 
-    let segments = state
-        .as_iter()
+    let segments = transcript
+        .segments
+        .iter()
         .map(|segment| {
-            let text = segment.to_string();
             json!({
-                "start": segment.start_timestamp() as f64 / 100.0,
-                "end": segment.end_timestamp() as f64 / 100.0,
-                "text": text.trim()
+                "start": segment.t0_ms as f64 / 1000.0,
+                "end": segment.t1_ms as f64 / 1000.0,
+                "text": segment.text.trim()
             })
         })
         .collect::<Vec<_>>();
-    let text = state
-        .as_iter()
-        .map(|segment| segment.to_string())
-        .collect::<Vec<_>>()
-        .join("")
-        .trim()
-        .to_string();
-    let response_format = multipart
-        .fields
+    let text = transcript.text.trim().to_string();
+    transcription_response(text, segments, &multipart.fields)
+}
+
+fn init_transcribe_cpp() {
+    INIT_TRANSCRIBE_CPP.call_once(|| {
+        transcribe_cpp::init_logging();
+        if let Err(err) = transcribe_cpp::init_backends_default() {
+            eprintln!("failed to initialize transcribe.cpp backends: {}", err);
+            return;
+        }
+
+        let devices = transcribe_cpp::devices()
+            .into_iter()
+            .map(|device| format!("{} ({})", device.name, device.kind))
+            .collect::<Vec<_>>()
+            .join(", ");
+        eprintln!(
+            "{} using transcribe.cpp {} devices=[{}]",
+            SERVER_NAME,
+            transcribe_cpp::version(),
+            devices
+        );
+    });
+}
+
+fn run_options_from_fields(
+    fields: &HashMap<String, String>,
+    max_timestamp_kind: TimestampKind,
+    supports_whisper_options: bool,
+) -> RunOptions {
+    let language = fields
+        .get("language")
+        .map(|language| language.trim())
+        .filter(|language| !language.is_empty() && *language != "auto")
+        .map(ToString::to_string);
+
+    RunOptions {
+        timestamps: match max_timestamp_kind {
+            TimestampKind::None => TimestampKind::None,
+            _ => TimestampKind::Segment,
+        },
+        language,
+        family: supports_whisper_options.then(|| {
+            RunExtension::Whisper(WhisperRunOptions {
+                condition_on_prev_tokens: Some(false),
+                temperature: Some(0.0),
+                temperature_inc: Some(0.0),
+                compression_ratio_thold: Some(2.2),
+                logprob_thold: Some(-1.0),
+                no_speech_thold: Some(0.6),
+                max_prev_context_tokens: Some(0),
+                ..Default::default()
+            })
+        }),
+        ..Default::default()
+    }
+}
+
+fn transcription_response(
+    text: String,
+    segments: Vec<serde_json::Value>,
+    fields: &HashMap<String, String>,
+) -> Result<String, (u16, String)> {
+    let response_format = fields
         .get("response_format")
         .map(|value| value.trim())
         .unwrap_or("json");
@@ -572,6 +718,23 @@ fn transcribe(request: &HttpRequest, config: &RuntimeConfig) -> Result<String, (
     } else {
         Ok(json!({ "text": text }).to_string())
     }
+}
+
+fn is_low_signal_audio(audio: &[f32]) -> bool {
+    if audio.is_empty() {
+        return true;
+    }
+
+    let mut peak = 0.0f32;
+    let mut sum_squares = 0.0f64;
+    for sample in audio {
+        let abs = sample.abs();
+        peak = peak.max(abs);
+        sum_squares += (*sample as f64) * (*sample as f64);
+    }
+    let rms = (sum_squares / audio.len() as f64).sqrt() as f32;
+
+    peak < 0.001 && rms < 0.0001
 }
 
 fn parse_multipart(request: &HttpRequest) -> Result<MultipartData, (u16, String)> {
@@ -642,21 +805,20 @@ fn read_wav_mono_16k(bytes: &[u8]) -> Result<Vec<f32>, (u16, String)> {
         .into_samples::<i16>()
         .collect::<Result<Vec<_>, _>>()
         .map_err(|err| (400, format!("Не удалось прочитать WAV samples: {}", err)))?;
-    let mut audio = vec![0.0f32; samples.len()];
-    convert_integer_to_float_audio(&samples, &mut audio).map_err(|err| {
-        (
-            400,
-            format!("Не удалось конвертировать WAV samples: {}", err),
-        )
-    })?;
-
     if channels == 1 {
-        Ok(audio)
+        Ok(samples
+            .into_iter()
+            .map(|sample| sample as f32 / i16::MAX as f32)
+            .collect())
     } else {
-        let mut mono = vec![0.0f32; audio.len() / 2];
-        convert_stereo_to_mono_audio(&audio, &mut mono)
-            .map_err(|err| (400, format!("Не удалось сделать mono WAV: {}", err)))?;
-        Ok(mono)
+        Ok(samples
+            .chunks_exact(2)
+            .map(|frame| {
+                let left = frame[0] as f32 / i16::MAX as f32;
+                let right = frame[1] as f32 / i16::MAX as f32;
+                (left + right) * 0.5
+            })
+            .collect())
     }
 }
 
@@ -736,4 +898,69 @@ fn percent_decode(value: &str) -> String {
     }
 
     String::from_utf8_lossy(&decoded).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn low_signal_audio_is_detected_before_model_run() {
+        assert!(is_low_signal_audio(&vec![0.0; 16_000]));
+        assert!(is_low_signal_audio(&vec![0.00005; 16_000]));
+        assert!(!is_low_signal_audio(&vec![0.01; 16_000]));
+    }
+
+    #[test]
+    fn run_options_keep_auto_language_empty() {
+        let mut fields = HashMap::new();
+        fields.insert("language".to_string(), "auto".to_string());
+
+        let options = run_options_from_fields(&fields, TimestampKind::Segment, true);
+
+        assert_eq!(options.language, None);
+        assert_eq!(options.timestamps, TimestampKind::Segment);
+    }
+
+    #[test]
+    fn run_options_pass_explicit_language() {
+        let mut fields = HashMap::new();
+        fields.insert("language".to_string(), "ru".to_string());
+
+        let options = run_options_from_fields(&fields, TimestampKind::Segment, true);
+
+        assert_eq!(options.language.as_deref(), Some("ru"));
+    }
+
+    #[test]
+    fn model_path_prefers_existing_gguf_over_legacy_bin() {
+        let root = env::temp_dir().join(format!(
+            "talkis-stt-test-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        let models_dir = root.join("models");
+        fs::create_dir_all(&models_dir).expect("models dir");
+
+        let model = find_model("whisper-base").expect("model");
+        let legacy_path = models_dir.join(model.file_name);
+        let gguf_path = models_dir.join(model.gguf_file_name);
+        fs::write(&legacy_path, b"legacy").expect("legacy");
+        fs::write(&gguf_path, b"gguf").expect("gguf");
+
+        let config = RuntimeConfig {
+            host: "127.0.0.1".to_string(),
+            port: 0,
+            data_dir: root.clone(),
+            models_dir,
+        };
+
+        assert_eq!(model_path(&config, model), gguf_path);
+        assert_eq!(download_model_path(&config, model), legacy_path);
+
+        let _ = fs::remove_dir_all(root);
+    }
 }
