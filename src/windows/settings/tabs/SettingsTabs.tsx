@@ -6,13 +6,14 @@ import { onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   IconBriefcase,
+  IconBroadcast,
   IconCheck,
   IconCloud,
   IconCode,
   IconCrown,
   IconDownload,
   IconGauge,
-  IconDeviceDesktopCog,
+  IconGlobe,
   IconLogout,
   Icon,
   IconMessage,
@@ -68,6 +69,7 @@ import elevenLabsAvatar from "../../../assets/adapters/elevenlabs.png";
 import fireworksAvatar from "../../../assets/adapters/fireworks.png";
 import groqAvatar from "../../../assets/adapters/groq.png";
 import mistralAvatar from "../../../assets/adapters/mistral.png";
+import moonshineAvatar from "../../../assets/adapters/moonshine.png";
 import nvidiaAvatar from "../../../assets/adapters/nvidia.webp";
 import openAiAvatar from "../../../assets/adapters/openai.svg";
 import qwenAvatar from "../../../assets/adapters/qwen.png";
@@ -281,6 +283,7 @@ interface LocalModelOption {
   size: string;
   speed: string;
   accuracy: string;
+  languageLabel: string;
   initials: string;
   accent: string;
   avatar?: string;
@@ -289,9 +292,32 @@ interface LocalModelOption {
   unavailableReason?: string;
   downloadBytes?: number;
   purpose?: "stt" | "diarization";
+  supportsStreaming?: boolean;
+  streamingDefaultEnabled?: boolean;
 }
 
 const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
+  {
+    id: "nemotron-35-asr-streaming-06b",
+    name: "NVIDIA Nemotron 3.5 ASR Streaming 0.6B",
+    description: "Мультиязычная streaming ASR-модель Nemotron для очень быстрой локальной диктовки.",
+    model: "nvidia/nemotron-3.5-asr-streaming-0.6b",
+    engineLabel: "Nemotron",
+    runtime: "Talkis Local / transcribe.cpp",
+    runtimeKind: "whisper",
+    size: "0.6B",
+    speed: "очень быстро",
+    accuracy: "высокая",
+    languageLabel: "40",
+    initials: "N3",
+    accent: "#76b900",
+    avatar: nvidiaAvatar,
+    recommended: true,
+    runtimeReady: true,
+    downloadBytes: 716_000_000,
+    supportsStreaming: true,
+    streamingDefaultEnabled: true,
+  },
   {
     id: "whisper-large-v3-turbo",
     name: "Whisper Large V3 Turbo",
@@ -303,26 +329,11 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
     size: "large",
     speed: "быстро",
     accuracy: "высокая",
+    languageLabel: "99+",
     initials: "WT",
     accent: "#0f172a",
-    recommended: true,
     runtimeReady: true,
-    downloadBytes: 1_624_555_275,
-  },
-  {
-    id: "whisper-large-v3-turbo-quantized",
-    name: "Whisper Large V3 Turbo Quantized",
-    description: "Более легкий вариант Turbo для локальной работы с меньшим расходом памяти.",
-    model: "whisper-large-v3-turbo",
-    engineLabel: "Whisper",
-    runtime: "Talkis Local / transcribe.cpp",
-    runtimeKind: "whisper",
-    size: "4-bit",
-    speed: "быстро",
-    accuracy: "высокая",
-    initials: "WQ",
-    accent: "#111827",
-    runtimeReady: false,
+    downloadBytes: 473_992_235,
   },
   {
     id: "whisper-small",
@@ -335,10 +346,11 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
     size: "small",
     speed: "быстро",
     accuracy: "средняя",
+    languageLabel: "99+",
     initials: "WS",
     accent: "#334155",
     runtimeReady: true,
-    downloadBytes: 487_601_967,
+    downloadBytes: 145_458_032,
   },
   {
     id: "whisper-large-v3",
@@ -351,26 +363,11 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
     size: "large",
     speed: "средне",
     accuracy: "максимальная",
+    languageLabel: "99+",
     initials: "W3",
     accent: "#1e293b",
     runtimeReady: true,
-    downloadBytes: 3_095_033_483,
-  },
-  {
-    id: "whisper-large-v2",
-    name: "Whisper Large V2",
-    description: "Предыдущая large-версия Whisper для совместимости с существующими локальными установками.",
-    model: "whisper-large-v2",
-    engineLabel: "Whisper",
-    runtime: "Talkis Local / transcribe.cpp",
-    runtimeKind: "whisper",
-    size: "large",
-    speed: "средне",
-    accuracy: "высокая",
-    initials: "W2",
-    accent: "#475569",
-    runtimeReady: true,
-    downloadBytes: 3_094_623_691,
+    downloadBytes: 889_340_843,
   },
   {
     id: "whisper-medium",
@@ -383,10 +380,11 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
     size: "medium",
     speed: "средне",
     accuracy: "высокая",
+    languageLabel: "99+",
     initials: "WM",
     accent: "#475569",
     runtimeReady: true,
-    downloadBytes: 1_533_763_059,
+    downloadBytes: 444_493_380,
   },
   {
     id: "whisper-base",
@@ -399,10 +397,11 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
     size: "base",
     speed: "очень быстро",
     accuracy: "базовая",
+    languageLabel: "99+",
     initials: "WB",
     accent: "#64748b",
     runtimeReady: true,
-    downloadBytes: 147_951_465,
+    downloadBytes: 46_471_066,
   },
   {
     id: "whisper-tiny",
@@ -415,10 +414,11 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
     size: "tiny",
     speed: "очень быстро",
     accuracy: "низкая+",
+    languageLabel: "99+",
     initials: "WT",
     accent: "#94a3b8",
     runtimeReady: true,
-    downloadBytes: 77_691_713,
+    downloadBytes: 25_321_834,
   },
   {
     id: "parakeet-tdt-06b-v3",
@@ -431,6 +431,7 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
     size: "0.6B",
     speed: "быстро",
     accuracy: "высокая",
+    languageLabel: "25",
     initials: "P3",
     accent: "#76b900",
     avatar: nvidiaAvatar,
@@ -448,11 +449,72 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
     size: "0.6B",
     speed: "быстро",
     accuracy: "высокая",
+    languageLabel: "English",
     initials: "P2",
     accent: "#5f9f00",
     avatar: nvidiaAvatar,
     runtimeReady: true,
     downloadBytes: 730_000_000,
+  },
+  {
+    id: "nemotron-speech-streaming-en-06b",
+    name: "NVIDIA Nemotron Speech Streaming EN 0.6B",
+    description: "Английская streaming ASR-модель Nemotron с минимальной задержкой для live-диктовки.",
+    model: "nvidia/nemotron-speech-streaming-en-0.6b",
+    engineLabel: "Nemotron",
+    runtime: "Talkis Local / transcribe.cpp",
+    runtimeKind: "whisper",
+    size: "0.6B",
+    speed: "очень быстро",
+    accuracy: "высокая",
+    languageLabel: "English",
+    initials: "NS",
+    accent: "#5f9f00",
+    avatar: nvidiaAvatar,
+    runtimeReady: true,
+    downloadBytes: 696_000_000,
+    supportsStreaming: true,
+    streamingDefaultEnabled: true,
+  },
+  {
+    id: "moonshine-streaming-tiny",
+    name: "Moonshine Streaming Tiny",
+    description: "Очень лёгкая английская streaming-модель для мгновенного локального распознавания.",
+    model: "moonshine-streaming-tiny",
+    engineLabel: "Moonshine",
+    runtime: "Talkis Local / transcribe.cpp",
+    runtimeKind: "whisper",
+    size: "tiny",
+    speed: "очень быстро",
+    accuracy: "базовая",
+    languageLabel: "English",
+    initials: "MT",
+    accent: "#8b5cf6",
+    avatar: moonshineAvatar,
+    runtimeReady: true,
+    downloadBytes: 48_000_000,
+    supportsStreaming: true,
+    streamingDefaultEnabled: true,
+  },
+  {
+    id: "moonshine-streaming-small",
+    name: "Moonshine Streaming Small",
+    description: "Лёгкая английская streaming-модель: быстрее Whisper Small и подходит для live-ввода.",
+    model: "moonshine-streaming-small",
+    engineLabel: "Moonshine",
+    runtime: "Talkis Local / transcribe.cpp",
+    runtimeKind: "whisper",
+    size: "small",
+    speed: "очень быстро",
+    accuracy: "средняя+",
+    languageLabel: "English",
+    initials: "MS",
+    accent: "#7c3aed",
+    avatar: moonshineAvatar,
+    runtimeReady: true,
+    downloadBytes: 189_000_000,
+    supportsStreaming: true,
+    streamingDefaultEnabled: true,
   },
   {
     id: "qwen3-asr-06b",
@@ -465,6 +527,7 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
     size: "0.6B",
     speed: "средне",
     accuracy: "высокая",
+    languageLabel: "52",
     initials: "Q3",
     accent: "#2563eb",
     avatar: qwenAvatar,
@@ -491,15 +554,17 @@ const API_ADAPTER_DESCRIPTION_KEYS: Record<ApiAdapterId, MsgKey> = {
 
 const LOCAL_MODEL_DESCRIPTION_KEYS: Record<string, MsgKey> = {
   "whisper-large-v3-turbo": "models.local.whisper-large-v3-turbo.description",
-  "whisper-large-v3-turbo-quantized": "models.local.whisper-large-v3-turbo-quantized.description",
   "whisper-small": "models.local.whisper-small.description",
   "whisper-large-v3": "models.local.whisper-large-v3.description",
-  "whisper-large-v2": "models.local.whisper-large-v2.description",
   "whisper-medium": "models.local.whisper-medium.description",
   "whisper-base": "models.local.whisper-base.description",
   "whisper-tiny": "models.local.whisper-tiny.description",
   "parakeet-tdt-06b-v3": "models.local.parakeet-tdt-06b-v3.description",
   "parakeet-tdt-06b-v2": "models.local.parakeet-tdt-06b-v2.description",
+  "nemotron-35-asr-streaming-06b": "models.local.nemotron-35-asr-streaming-06b.description",
+  "nemotron-speech-streaming-en-06b": "models.local.nemotron-speech-streaming-en-06b.description",
+  "moonshine-streaming-tiny": "models.local.moonshine-streaming-tiny.description",
+  "moonshine-streaming-small": "models.local.moonshine-streaming-small.description",
   "qwen3-asr-06b": "models.local.qwen3-asr-06b.description",
 };
 
@@ -2210,6 +2275,18 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
       return formatLocalDownloadBytes(model.downloadBytes) || (model.runtimeReady ? t("models.size.unknown") : t("models.size.notConnected"));
     };
 
+    const isLocalModelStreamingEnabled = (model: LocalModelOption) => {
+      if (!model.supportsStreaming) return false;
+      const cachedValue = settings.localModels?.[model.id]?.streamingEnabled;
+      return typeof cachedValue === "boolean" ? cachedValue : model.streamingDefaultEnabled !== false;
+    };
+
+    const handleToggleLocalModelStreaming = (model: LocalModelOption, enabled: boolean) => {
+      updateLocalModelCache(model.id, {
+        streamingEnabled: enabled,
+      });
+    };
+
     const renderDotRating = (level: number) => (
       <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
         {Array.from({ length: 5 }).map((_, index) => (
@@ -2249,42 +2326,69 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
       }
     };
 
+    const translateLanguageValue = (value: string) => {
+      if (value === "English") return t("models.languageValue.english");
+      return t("models.languageValue.count", { value });
+    };
+
     const renderLocalModelStats = (model: LocalModelOption) => {
       const speedValueLabel = translateSpeedValue(model.speed);
       const accuracyValueLabel = translateAccuracyValue(model.accuracy);
-      const stats: { key: string; title: string; label: string; Icon: Icon; level: number }[] = [
-        { key: "speed", title: t("models.stat.speedTitle", { value: speedValueLabel }), label: t("models.stat.speed"), Icon: IconGauge, level: getLocalModelLevel("speed", model.speed) },
-        { key: "accuracy", title: t("models.stat.accuracyTitle", { value: accuracyValueLabel }), label: t("models.stat.accuracy"), Icon: IconTargetArrow, level: getLocalModelLevel("accuracy", model.accuracy) },
+      const languageValueLabel = translateLanguageValue(model.languageLabel);
+      const stats: { key: string; title: string; Icon: Icon; level: number }[] = [
+        { key: "speed", title: t("models.stat.speedTitle", { value: speedValueLabel }), Icon: IconGauge, level: getLocalModelLevel("speed", model.speed) },
+        { key: "accuracy", title: t("models.stat.accuracyTitle", { value: accuracyValueLabel }), Icon: IconTargetArrow, level: getLocalModelLevel("accuracy", model.accuracy) },
       ];
       const storageLabel = getLocalModelStorageLabel(model);
 
       return (
-        <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 9, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 9, flexWrap: "nowrap", minWidth: 0, overflow: "hidden" }}>
           <div
             title={t("models.stat.downloadSizeTitle", { value: storageLabel })}
             aria-label={t("models.stat.downloadSizeTitle", { value: storageLabel })}
-            style={{ display: "flex", alignItems: "center", gap: 6 }}
+            style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}
           >
-            <IconDeviceDesktopCog size={14} stroke={1.9} color="var(--text-hi)" />
-            <span style={{ fontSize: 12, fontWeight: 650, color: "var(--text-hi)", lineHeight: 1 }}>
+            <IconDownload size={14} stroke={1.9} color="var(--text-hi)" />
+            <span style={{ fontSize: 12, fontWeight: 650, color: "var(--text-hi)", lineHeight: 1, whiteSpace: "nowrap" }}>
               {storageLabel}
             </span>
           </div>
 
-          {stats.map(({ key, title, label, Icon, level }) => (
+          <div
+            title={t("models.stat.languagesTitle", { value: languageValueLabel })}
+            aria-label={t("models.stat.languagesTitle", { value: languageValueLabel })}
+            style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}
+          >
+            <IconGlobe size={14} stroke={1.9} color="var(--text-hi)" />
+            <span style={{ fontSize: 12, fontWeight: 650, color: "var(--text-hi)", lineHeight: 1, whiteSpace: "nowrap" }}>
+              {languageValueLabel}
+            </span>
+          </div>
+
+          {stats.map(({ key, title, Icon, level }) => (
             <div
               key={key}
               title={title}
               aria-label={title}
-              style={{ display: "flex", alignItems: "center", gap: 6 }}
+              style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}
             >
               <Icon size={14} stroke={1.9} color="var(--text-hi)" />
-              <span style={{ fontSize: 12, fontWeight: 650, color: "var(--text-hi)", lineHeight: 1 }}>
-                {label}
-              </span>
               {renderDotRating(level)}
             </div>
           ))}
+
+          {model.supportsStreaming && (
+            <div
+              title={t("models.stat.streaming")}
+              aria-label={t("models.stat.streaming")}
+              style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}
+            >
+              <IconBroadcast size={14} stroke={1.9} color="var(--text-hi)" />
+              <span style={{ fontSize: 12, fontWeight: 650, color: "var(--text-hi)", lineHeight: 1, whiteSpace: "nowrap" }}>
+                {t("models.stat.streaming")}
+              </span>
+            </div>
+          )}
         </div>
       );
     };
@@ -2308,6 +2412,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
           downloadedAt: settings.localModels?.[model.id]?.downloadedAt || new Date().toISOString(),
           lastCheckedAt: new Date().toISOString(),
           message: undefined,
+          streamingEnabled: model.supportsStreaming ? isLocalModelStreamingEnabled(model) : undefined,
         });
       }
     };
@@ -2902,6 +3007,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                   const downloadProgress = modelStatus.status === "installing" ? modelActionState?.progress : undefined;
                   const downloadedLabel = formatLocalDownloadBytes(modelActionState?.downloadedBytes, { showZero: Boolean(modelActionState?.totalBytes) });
                   const totalLabel = formatLocalDownloadBytes(modelActionState?.totalBytes);
+                  const streamingEnabled = isLocalModelStreamingEnabled(model);
 
                   return (
                     <div key={model.id} className="card" style={{ padding: 0, overflow: "hidden", background: "var(--surface)" }}>
@@ -2949,7 +3055,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                             </div>
                           </div>
                           <div style={{ fontSize: 12, lineHeight: 1.45, color: "var(--text-mid)" }}>
-                            {t(LOCAL_MODEL_DESCRIPTION_KEYS[model.id])} {t("models.local.runtimeSuffix", { runtime: model.runtime })}
+                            {t(LOCAL_MODEL_DESCRIPTION_KEYS[model.id])}
                           </div>
                           {renderLocalModelStats(model)}
                         </div>
@@ -3000,6 +3106,68 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                           )}
 
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                            {model.supportsStreaming && (
+                              <label
+                                title={t("models.local.streamingToggleTitle")}
+                                onClick={(event) => event.stopPropagation()}
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 9,
+                                  padding: "7px 10px",
+                                  borderRadius: 999,
+                                  background: "var(--control-muted)",
+                                  border: "1px solid var(--border-subtle)",
+                                  cursor: "pointer",
+                                  userSelect: "none",
+                                }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  role="switch"
+                                  aria-label={t("models.local.streamingToggle")}
+                                  checked={streamingEnabled}
+                                  onChange={(event) => handleToggleLocalModelStreaming(model, event.currentTarget.checked)}
+                                  style={{
+                                    position: "absolute",
+                                    opacity: 0,
+                                    pointerEvents: "none",
+                                    width: 1,
+                                    height: 1,
+                                  }}
+                                />
+                                <IconBroadcast size={14} stroke={2.1} color="var(--text-hi)" />
+                                <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-hi)", lineHeight: 1 }}>
+                                  {t("models.local.streamingToggle")}
+                                </span>
+                                <span
+                                  aria-hidden="true"
+                                  style={{
+                                    width: 34,
+                                    height: 20,
+                                    borderRadius: 999,
+                                    background: streamingEnabled ? "var(--accent)" : "var(--border-strong)",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    padding: 2,
+                                    transition: "background 0.18s ease",
+                                  }}
+                                >
+                                  <span
+                                    style={{
+                                      width: 16,
+                                      height: 16,
+                                      borderRadius: 999,
+                                      background: "var(--surface)",
+                                      boxShadow: "0 1px 3px rgba(0,0,0,0.22)",
+                                      transform: streamingEnabled ? "translateX(14px)" : "translateX(0)",
+                                      transition: "transform 0.18s ease",
+                                    }}
+                                  />
+                                </span>
+                              </label>
+                            )}
+
                             {modelStatus.connectionLabel && (
                               <div style={{ display: "flex", alignItems: "center", gap: 8, color: modelStatus.color, fontSize: 12, fontWeight: 600 }}>
                                 {(modelStatus.status === "installed" || modelStatus.status === "selected") && <IconCheck size={15} stroke={2.5} />}

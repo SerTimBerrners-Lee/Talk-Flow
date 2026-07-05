@@ -42,8 +42,8 @@ pub async fn open_accessibility_settings() -> Result<(), String> {
                 keys.as_ptr(),
                 values.as_ptr(),
                 1,
-                &kCFTypeDictionaryKeyCallBacks as *const _ as *const std::ffi::c_void,
-                &kCFTypeDictionaryValueCallBacks as *const _ as *const std::ffi::c_void,
+                &kCFTypeDictionaryKeyCallBacks as *const _,
+                &kCFTypeDictionaryValueCallBacks as *const _,
             );
             AXIsProcessTrustedWithOptions(options);
             CFRelease(options);
@@ -95,7 +95,7 @@ pub async fn check_accessibility_permission() -> Result<bool, String> {
             return Ok(true);
         }
 
-        return Ok(unsafe { AXIsProcessTrusted() != 0 });
+        Ok(unsafe { AXIsProcessTrusted() != 0 })
     }
 
     #[cfg(not(target_os = "macos"))]

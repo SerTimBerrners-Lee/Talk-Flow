@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Synchronized `NOTICE_WIDGET_GAP` constant between TypeScript and Rust
 
 ### Added
+- Managed local LLM summaries with OpenAI-compatible `talkis-llm` runtime support and map-reduce handling for long transcripts.
 - `CHANGELOG.md` (this file)
 
 ## [0.1.7] - 2026-03-27

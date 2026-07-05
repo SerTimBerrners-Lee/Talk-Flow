@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_shell::process::CommandChild;
+use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 use tokio::io::AsyncWriteExt;
 
@@ -25,28 +25,161 @@ struct LlmModelInfo {
     description: &'static str,
     size_label: &'static str,
     min_ram_gb: u32,
+    profile_label: &'static str,
+    languages_label: &'static str,
+    speed: &'static str,
+    accuracy: &'static str,
+    language_label: &'static str,
+    avatar_family: &'static str,
+    recommended: bool,
 }
 
-/// Built-in catalog of local text models (GGUF for llama.cpp). Qwen2.5 chosen
-/// for strong Russian support. URLs may need refreshing if HF layout changes.
+/// Built-in catalog of local text models (GGUF for llama.cpp). Qwen3 is the
+/// default starter line; Qwen2.5 remains for users who already downloaded it.
 static LLM_CATALOG: &[LlmModelInfo] = &[
+    LlmModelInfo {
+        id: "qwen3-1.7b-instruct-q4",
+        file_name: "Qwen3-1.7B-Q4_K_M.gguf",
+        url: "https://huggingface.co/lm-kit/qwen-3-1.7b-instruct-gguf/resolve/main/Qwen3-1.7B-Q4_K_M.gguf",
+        label: "Qwen3 1.7B Instruct",
+        description: "Быстрая модель для коротких саммари и правки текста. Рекомендуется по умолчанию.",
+        size_label: "1.2 ГБ",
+        min_ram_gb: 8,
+        profile_label: "Быстрая",
+        languages_label: "RU / EN / multi",
+        speed: "очень быстро",
+        accuracy: "средняя+",
+        language_label: "119+",
+        avatar_family: "qwen",
+        recommended: true,
+    },
+    LlmModelInfo {
+        id: "granite-3.3-2b-instruct-q4",
+        file_name: "granite-3.3-2b-instruct-Q4_K_M.gguf",
+        url: "https://huggingface.co/ibm-granite/granite-3.3-2b-instruct-GGUF/resolve/main/granite-3.3-2b-instruct-Q4_K_M.gguf",
+        label: "Granite 3.3 2B Instruct",
+        description: "Компактная Apache 2.0 модель IBM для быстрых локальных задач и аккуратных деловых саммари.",
+        size_label: "1.5 ГБ",
+        min_ram_gb: 8,
+        profile_label: "Open / быстрая",
+        languages_label: "EN / code / multi",
+        speed: "очень быстро",
+        accuracy: "средняя",
+        language_label: "12",
+        avatar_family: "granite",
+        recommended: false,
+    },
+    LlmModelInfo {
+        id: "smollm3-3b-q4",
+        file_name: "HuggingFaceTB_SmolLM3-3B-Q4_K_M.gguf",
+        url: "https://huggingface.co/bartowski/HuggingFaceTB_SmolLM3-3B-GGUF/resolve/main/HuggingFaceTB_SmolLM3-3B-Q4_K_M.gguf",
+        label: "SmolLM3 3B",
+        description: "Современная компактная Apache 2.0 модель Hugging Face: длинный контекст, reasoning, быстрый on-device режим.",
+        size_label: "1.8 ГБ",
+        min_ram_gb: 8,
+        profile_label: "Open / reasoning",
+        languages_label: "6 языков",
+        speed: "быстро",
+        accuracy: "средняя+",
+        language_label: "6",
+        avatar_family: "smollm",
+        recommended: false,
+    },
+    LlmModelInfo {
+        id: "qwen3-4b-instruct-q4",
+        file_name: "Qwen3-4B-Q4_K_M.gguf",
+        url: "https://huggingface.co/lm-kit/qwen-3-4b-instruct-gguf/resolve/main/Qwen3-4B-Q4_K_M.gguf",
+        label: "Qwen3 4B Instruct",
+        description: "Баланс скорости и качества для более аккуратных саммари на машинах с запасом памяти.",
+        size_label: "2.5 ГБ",
+        min_ram_gb: 12,
+        profile_label: "Баланс качества",
+        languages_label: "RU / EN / multi",
+        speed: "быстро",
+        accuracy: "высокая",
+        language_label: "119+",
+        avatar_family: "qwen",
+        recommended: false,
+    },
+    LlmModelInfo {
+        id: "phi-4-mini-instruct-q4",
+        file_name: "microsoft_Phi-4-mini-instruct-Q4_K_M.gguf",
+        url: "https://huggingface.co/llmware/phi-4-mini-gguf/resolve/main/microsoft_Phi-4-mini-instruct-Q4_K_M.gguf",
+        label: "Phi-4 Mini Instruct",
+        description: "Лёгкая reasoning-модель Microsoft: хороша для структурирования, инструкций и плотных коротких ответов.",
+        size_label: "2.3 ГБ",
+        min_ram_gb: 12,
+        profile_label: "Reasoning",
+        languages_label: "EN / multi",
+        speed: "быстро",
+        accuracy: "высокая",
+        language_label: "EN / multi",
+        avatar_family: "microsoft",
+        recommended: false,
+    },
+    LlmModelInfo {
+        id: "gemma-3-4b-it-q4",
+        file_name: "google_gemma-3-4b-it-Q4_K_M.gguf",
+        url: "https://huggingface.co/bartowski/google_gemma-3-4b-it-GGUF/resolve/main/google_gemma-3-4b-it-Q4_K_M.gguf",
+        label: "Gemma 3 4B IT",
+        description: "Современная instruction-модель Google с сильной мультиязычностью и хорошим качеством саммари.",
+        size_label: "2.3 ГБ",
+        min_ram_gb: 12,
+        profile_label: "Качество",
+        languages_label: "RU / EN / multi",
+        speed: "быстро",
+        accuracy: "высокая",
+        language_label: "140+",
+        avatar_family: "gemma",
+        recommended: false,
+    },
+    LlmModelInfo {
+        id: "qwen3-8b-instruct-q4",
+        file_name: "Qwen3-8B-Q4_K_M.gguf",
+        url: "https://huggingface.co/lm-kit/qwen-3-8b-instruct-gguf/resolve/main/Qwen3-8B-Q4_K_M.gguf",
+        label: "Qwen3 8B Instruct",
+        description: "Качественная модель для сложных и длинных текстов. Тяжелее по загрузке и памяти.",
+        size_label: "4.7 ГБ",
+        min_ram_gb: 16,
+        profile_label: "Качество",
+        languages_label: "RU / EN / multi",
+        speed: "средне",
+        accuracy: "максимальная",
+        language_label: "119+",
+        avatar_family: "qwen",
+        recommended: false,
+    },
     LlmModelInfo {
         id: "qwen2.5-3b-instruct-q4",
         file_name: "Qwen2.5-3B-Instruct-Q4_K_M.gguf",
         url: "https://huggingface.co/bartowski/Qwen2.5-3B-Instruct-GGUF/resolve/main/Qwen2.5-3B-Instruct-Q4_K_M.gguf",
         label: "Qwen2.5 3B Instruct",
-        description: "Компактная текстовая модель для саммари на слабых машинах: быстрая, с хорошей поддержкой русского.",
+        description: "Совместимая модель прошлого каталога. Оставлена для уже скачанных установок.",
         size_label: "2.0 ГБ",
         min_ram_gb: 8,
+        profile_label: "Legacy",
+        languages_label: "RU / EN / multi",
+        speed: "быстро",
+        accuracy: "средняя+",
+        language_label: "119+",
+        avatar_family: "qwen",
+        recommended: false,
     },
     LlmModelInfo {
         id: "qwen2.5-7b-instruct-q4",
         file_name: "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
         url: "https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
         label: "Qwen2.5 7B Instruct",
-        description: "Более качественная текстовая модель для детальных саммари: точнее, но требовательнее к памяти.",
+        description: "Совместимая качественная модель прошлого каталога. Новым установкам лучше выбрать Qwen3.",
         size_label: "4.7 ГБ",
         min_ram_gb: 16,
+        profile_label: "Legacy",
+        languages_label: "RU / EN / multi",
+        speed: "средне",
+        accuracy: "высокая",
+        language_label: "119+",
+        avatar_family: "qwen",
+        recommended: false,
     },
 ];
 
@@ -57,6 +190,7 @@ fn model_info(id: &str) -> Option<&'static LlmModelInfo> {
 
 struct RunningLlm {
     child: CommandChild,
+    pid: u32,
     port: u16,
     model_id: String,
 }
@@ -66,15 +200,80 @@ fn runtime_state() -> &'static Mutex<Option<RunningLlm>> {
     STATE.get_or_init(|| Mutex::new(None))
 }
 
+fn clear_runtime_if_pid(pid: u32) {
+    let mut guard = runtime_state()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
+    if guard.as_ref().map(|running| running.pid) == Some(pid) {
+        *guard = None;
+    }
+}
+
+fn llama_stderr_is_error(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    lower.contains("error")
+        || lower.contains("failed")
+        || lower.contains("panic")
+        || lower.contains("exception")
+        || lower.contains("terminated")
+}
+
+fn drain_runtime_events(
+    mut events: tauri::async_runtime::Receiver<CommandEvent>,
+    pid: u32,
+    model_id: String,
+) {
+    tauri::async_runtime::spawn(async move {
+        while let Some(event) = events.recv().await {
+            match event {
+                CommandEvent::Stderr(bytes) => {
+                    let line = String::from_utf8_lossy(&bytes);
+                    let line = line.trim();
+                    if !line.is_empty() {
+                        let message = format!("{} stderr: {}", model_id, line);
+                        if llama_stderr_is_error(line) {
+                            logger::log_error("LOCAL_LLM", &message);
+                        } else {
+                            logger::log_info("LOCAL_LLM", &message);
+                        }
+                    }
+                }
+                CommandEvent::Stdout(bytes) => {
+                    let line = String::from_utf8_lossy(&bytes);
+                    let line = line.trim();
+                    if !line.is_empty() {
+                        logger::log_info("LOCAL_LLM", &format!("{} stdout: {}", model_id, line));
+                    }
+                }
+                CommandEvent::Error(err) => {
+                    logger::log_error("LOCAL_LLM", &format!("{} event error: {}", model_id, err));
+                }
+                CommandEvent::Terminated(payload) => {
+                    logger::log_error(
+                        "LOCAL_LLM",
+                        &format!(
+                            "{} terminated: pid={} code={:?} signal={:?}",
+                            model_id, pid, payload.code, payload.signal
+                        ),
+                    );
+                    clear_runtime_if_pid(pid);
+                    break;
+                }
+                _ => {}
+            }
+        }
+    });
+}
+
 fn llm_dir(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_data_dir()
         .map_err(|err| format!("Не удалось найти папку данных Talkis: {}", err))
-        .map(|dir| dir.join("local-llm"))
+        .map(|dir| dir.join("models").join("llm"))
 }
 
 fn models_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(llm_dir(app)?.join("models"))
+    llm_dir(app)
 }
 
 fn model_path(app: &AppHandle, info: &LlmModelInfo) -> Result<PathBuf, String> {
@@ -82,7 +281,9 @@ fn model_path(app: &AppHandle, info: &LlmModelInfo) -> Result<PathBuf, String> {
 }
 
 fn is_downloaded(app: &AppHandle, info: &LlmModelInfo) -> bool {
-    model_path(app, info).map(|path| path.is_file()).unwrap_or(false)
+    model_path(app, info)
+        .map(|path| path.is_file())
+        .unwrap_or(false)
 }
 
 fn port_is_available(port: u16) -> bool {
@@ -133,7 +334,10 @@ fn emit_progress(app: &AppHandle, payload: LlmDownloadProgress) {
         let mut registry = download_registry()
             .lock()
             .unwrap_or_else(|err| err.into_inner());
-        if matches!(payload.status.as_str(), "downloaded" | "cancelled" | "error") {
+        if matches!(
+            payload.status.as_str(),
+            "downloaded" | "cancelled" | "error"
+        ) {
             registry.remove(&payload.model_id);
         } else {
             registry.insert(payload.model_id.clone(), payload.clone());
@@ -297,6 +501,45 @@ async fn health_ok(client: &reqwest::Client, port: u16) -> bool {
     )
 }
 
+async fn chat_completions_ready_with_timeout(
+    client: &reqwest::Client,
+    port: u16,
+    timeout: Duration,
+) -> Result<(), String> {
+    let url = format!("http://127.0.0.1:{}/v1/chat/completions", port);
+    let payload = serde_json::json!({
+        "model": "talkis-llm",
+        "messages": [
+            { "role": "system", "content": "Ответь одним словом." },
+            { "role": "user", "content": "ping" }
+        ],
+        "temperature": 0.0,
+        "max_tokens": 1,
+        "stream": false
+    });
+
+    let response = client
+        .post(&url)
+        .json(&payload)
+        .timeout(timeout)
+        .send()
+        .await
+        .map_err(|err| err.to_string())?;
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+
+    if status.is_success() {
+        Ok(())
+    } else {
+        let snippet: String = body.chars().take(500).collect();
+        Err(format!("{}: {}", status, snippet))
+    }
+}
+
+async fn chat_completions_ready(client: &reqwest::Client, port: u16) -> Result<(), String> {
+    chat_completions_ready_with_timeout(client, port, Duration::from_secs(120)).await
+}
+
 /// Ensure the bundled llama-server is running with the requested model and return
 /// its OpenAI-compatible base URL (`http://127.0.0.1:<port>/v1`).
 pub async fn ensure_runtime(app: &AppHandle, model_id: &str) -> Result<String, String> {
@@ -307,19 +550,54 @@ pub async fn ensure_runtime(app: &AppHandle, model_id: &str) -> Result<String, S
         return Err(format!("Модель «{}» ещё не скачана", info.label));
     }
 
-    {
-        let guard = runtime_state().lock().unwrap_or_else(|err| err.into_inner());
+    let client = reqwest::Client::builder()
+        .pool_max_idle_per_host(0)
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    let existing_port = {
+        let guard = runtime_state()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
         if let Some(running) = guard.as_ref() {
             if running.model_id == info.id {
-                return Ok(base_url(running.port));
+                Some(running.port)
+            } else {
+                None
             }
+        } else {
+            None
         }
+    };
+
+    if let Some(port) = existing_port {
+        if health_ok(&client, port).await {
+            match chat_completions_ready_with_timeout(&client, port, Duration::from_secs(8)).await {
+                Ok(()) => return Ok(base_url(port)),
+                Err(message) => logger::log_error(
+                    "LOCAL_LLM",
+                    &format!(
+                        "Detected stale local LLM runtime on port {} ({}): {}",
+                        port, info.id, message
+                    ),
+                ),
+            }
+        } else {
+            logger::log_error(
+                "LOCAL_LLM",
+                &format!(
+                    "Detected stopped local LLM runtime on port {} ({})",
+                    port, info.id
+                ),
+            );
+        }
+        stop_runtime();
     }
 
     stop_runtime();
 
     let port = find_port();
-    let (_events, child) = app
+    let (events, child) = app
         .shell()
         .sidecar(LLM_RUNTIME_NAME)
         .map_err(|err| format!("Встроенный LLM-рантайм недоступен: {}", err))?
@@ -336,23 +614,37 @@ pub async fn ensure_runtime(app: &AppHandle, model_id: &str) -> Result<String, S
         ])
         .spawn()
         .map_err(|err| format!("Не удалось запустить LLM-рантайм: {}", err))?;
+    let pid = child.pid();
+    drain_runtime_events(events, pid, info.id.to_string());
 
     {
-        let mut guard = runtime_state().lock().unwrap_or_else(|err| err.into_inner());
+        let mut guard = runtime_state()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
         *guard = Some(RunningLlm {
             child,
+            pid,
             port,
             model_id: info.id.to_string(),
         });
     }
 
-    let client = reqwest::Client::builder()
-        .pool_max_idle_per_host(0)
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new());
-
     for _ in 0..180 {
         if health_ok(&client, port).await {
+            if let Err(message) = chat_completions_ready(&client, port).await {
+                logger::log_error(
+                    "LOCAL_LLM",
+                    &format!(
+                        "llama-server chat/completions warmup failed on port {} ({}): {}",
+                        port, info.id, message
+                    ),
+                );
+                stop_runtime();
+                return Err(format!(
+                    "Локальный LLM-рантайм запустился, но не смог выполнить тестовый запрос к /v1/chat/completions: {}",
+                    message
+                ));
+            }
             logger::log_info(
                 "LOCAL_LLM",
                 &format!("llama-server ready on port {} ({})", port, info.id),
@@ -367,7 +659,9 @@ pub async fn ensure_runtime(app: &AppHandle, model_id: &str) -> Result<String, S
 }
 
 pub fn stop_runtime() {
-    let mut guard = runtime_state().lock().unwrap_or_else(|err| err.into_inner());
+    let mut guard = runtime_state()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
     if let Some(running) = guard.take() {
         let _ = running.child.kill();
     }
@@ -381,6 +675,13 @@ pub struct LocalLlmModel {
     file_name: String,
     size_label: String,
     min_ram_gb: u32,
+    profile_label: String,
+    languages_label: String,
+    speed: String,
+    accuracy: String,
+    language_label: String,
+    avatar_family: String,
+    recommended: bool,
     downloaded: bool,
 }
 
@@ -395,9 +696,53 @@ pub fn list_local_llm_models(app: AppHandle) -> Vec<LocalLlmModel> {
             file_name: model.file_name.to_string(),
             size_label: model.size_label.to_string(),
             min_ram_gb: model.min_ram_gb,
+            profile_label: model.profile_label.to_string(),
+            languages_label: model.languages_label.to_string(),
+            speed: model.speed.to_string(),
+            accuracy: model.accuracy.to_string(),
+            language_label: model.language_label.to_string(),
+            avatar_family: model.avatar_family.to_string(),
+            recommended: model.recommended,
             downloaded: is_downloaded(&app, model),
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn catalog_starts_with_recommended_qwen3_models() {
+        let ids: Vec<&str> = LLM_CATALOG.iter().map(|model| model.id).collect();
+
+        assert_eq!(ids[0], "qwen3-1.7b-instruct-q4");
+        assert!(ids.contains(&"qwen3-4b-instruct-q4"));
+        assert!(ids.contains(&"qwen3-8b-instruct-q4"));
+        assert!(LLM_CATALOG[0].recommended);
+    }
+
+    #[test]
+    fn catalog_keeps_legacy_qwen25_ids_for_existing_downloads() {
+        assert!(model_info("qwen2.5-3b-instruct-q4").is_some());
+        assert!(model_info("qwen2.5-7b-instruct-q4").is_some());
+    }
+
+    #[test]
+    fn catalog_includes_modern_non_qwen_families() {
+        assert!(model_info("granite-3.3-2b-instruct-q4").is_some());
+        assert!(model_info("smollm3-3b-q4").is_some());
+        assert!(model_info("phi-4-mini-instruct-q4").is_some());
+        assert!(model_info("gemma-3-4b-it-q4").is_some());
+    }
+
+    #[test]
+    fn llama_cpp_kernel_stderr_is_logged_as_info() {
+        assert!(!llama_stderr_is_error(
+            "ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_q4_K_f32"
+        ));
+        assert!(llama_stderr_is_error("server failed to load model"));
+    }
 }
 
 #[tauri::command]
@@ -411,7 +756,9 @@ pub fn delete_local_llm_model(app: AppHandle, model_id: String) -> Result<(), St
         .ok_or_else(|| format!("Неизвестная локальная модель «{}»", model_id))?;
 
     let running_same = {
-        let guard = runtime_state().lock().unwrap_or_else(|err| err.into_inner());
+        let guard = runtime_state()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
         guard
             .as_ref()
             .map(|running| running.model_id == info.id)
@@ -423,8 +770,7 @@ pub fn delete_local_llm_model(app: AppHandle, model_id: String) -> Result<(), St
 
     let path = model_path(&app, info)?;
     if path.is_file() {
-        std::fs::remove_file(&path)
-            .map_err(|err| format!("Не удалось удалить модель: {}", err))?;
+        std::fs::remove_file(&path).map_err(|err| format!("Не удалось удалить модель: {}", err))?;
     }
 
     Ok(())
@@ -449,7 +795,9 @@ pub struct LocalLlmStatus {
 
 #[tauri::command]
 pub fn get_local_llm_status() -> LocalLlmStatus {
-    let guard = runtime_state().lock().unwrap_or_else(|err| err.into_inner());
+    let guard = runtime_state()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
     match guard.as_ref() {
         Some(running) => LocalLlmStatus {
             running: true,

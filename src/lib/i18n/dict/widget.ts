@@ -96,6 +96,14 @@ export const widget = {
     ru: "Запись разговора",
     en: "Record the conversation",
   },
+  "widget.translationBubble.active": {
+    ru: "Перевод диктовки включен",
+    en: "Dictation translation is on",
+  },
+  "widget.translationBubble.inactive": {
+    ru: "Перевод диктовки выключен",
+    en: "Dictation translation is off",
+  },
 
   // ── Widget.tsx: IdlePill / RecordingPill buttons ────────────────────────
   "widget.idle.startRecording": {
@@ -188,6 +196,30 @@ export const widget = {
     ru: "Речь не распознана. Попробуйте отправить запись еще раз.",
     en: "No speech recognized. Try submitting the recording again.",
   },
+  "widget.error.translationModelUnavailable": {
+    ru: "Для перевода нужна текстовая модель. Выберите облако, локальную текстовую модель или LLM endpoint в «Настройки → Модели».",
+    en: "Translation needs a text model. Choose cloud, a local text model, or an LLM endpoint in “Settings → Models”.",
+  },
+  "widget.selectionTranslation.noSelection": {
+    ru: "Выделенный текст не найден.",
+    en: "No selected text found.",
+  },
+  "widget.selectionTranslation.noModel": {
+    ru: "Для перевода нужна текстовая модель. Выберите облако, локальную текстовую модель или LLM endpoint в «Настройки → Модели».",
+    en: "Translation needs a text model. Choose cloud, a local text model, or an LLM endpoint in “Settings → Models”.",
+  },
+  "widget.selectionTranslation.copyFailed": {
+    ru: "Не удалось прочитать выделенный текст через буфер обмена.",
+    en: "Couldn't read the selected text through the clipboard.",
+  },
+  "widget.selectionTranslation.emptyResult": {
+    ru: "Модель вернула пустой перевод.",
+    en: "The model returned an empty translation.",
+  },
+  "widget.selectionTranslation.done": {
+    ru: "Выделенный текст переведен.",
+    en: "Selected text translated.",
+  },
 
   // ── useWidgetRecording.ts: status / error notices ───────────────────────
   "widget.recording.lowMic": {
@@ -243,5 +275,9 @@ export const widget = {
   "widget.hotkey.registerFailedGeneric": {
     ru: "Не удалось зарегистрировать горячую клавишу.",
     en: "Couldn't register the hotkey.",
+  },
+  "widget.hotkey.conflict": {
+    ru: "Это сочетание уже используется другой функцией Talkis.",
+    en: "This shortcut is already used by another Talkis feature.",
   },
 } as const;

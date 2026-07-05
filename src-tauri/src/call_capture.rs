@@ -376,15 +376,11 @@ fn platform_name() -> &'static str {
     }
 }
 
-fn call_capture_root(app: &AppHandle, storage_dir: Option<&str>) -> Result<PathBuf, String> {
-    if let Some(custom_dir) = storage_dir.map(str::trim).filter(|value| !value.is_empty()) {
-        return Ok(PathBuf::from(custom_dir).join("call-capture"));
-    }
-
+fn call_capture_root(app: &AppHandle, _storage_dir: Option<&str>) -> Result<PathBuf, String> {
     app.path()
         .app_data_dir()
         .map_err(|err| format!("Не удалось найти папку данных Talkis: {}", err))
-        .map(|dir| dir.join("call-capture"))
+        .map(|dir| dir.join("history").join("call-capture"))
 }
 
 fn create_session_dir(
@@ -1857,7 +1853,7 @@ fn start_macos_system_audio_capture(
     let source_bits_per_sample = if is_float {
         32
     } else {
-        stream_description.mBitsPerChannel.max(16).min(32) as u16
+        stream_description.mBitsPerChannel.clamp(16, 32) as u16
     };
     let writer = match hound::WavWriter::create(&path, system_wav_spec()) {
         Ok(writer) => writer,

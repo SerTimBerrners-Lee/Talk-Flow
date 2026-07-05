@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { IconCheck, IconCopy, IconFileMusic, IconLoader2, IconPhoneCall } from "../../lib/icons";
+import { IconCheck, IconCopy, IconFileMusic, IconLanguage, IconLoader2, IconPhoneCall } from "../../lib/icons";
 
 import {
   HISTORY_CLEARED_EVENT,
@@ -18,10 +18,13 @@ import {
   type WidgetRetryProcessingPayload,
 } from "../../lib/hotkeyEvents";
 import {
+  DEFAULT_SELECTION_TRANSLATION_HOTKEY,
   getHistory,
   getSettings,
   reconcileInterruptedProcessing,
+  saveSettings,
   type HistoryEntry,
+  type TranslationSettings,
 } from "../../lib/store";
 import {
   beginProcessing,
@@ -64,12 +67,16 @@ import {
   CALL_STACK_WIDGET_WIDTH,
   FILE_DROP_STACK_WIDGET_HEIGHT,
   FILE_DROP_STACK_WIDGET_WIDTH,
+  FILE_DROP_TRANSLATION_STACK_WIDGET_HEIGHT,
+  FILE_DROP_TRANSLATION_STACK_WIDGET_WIDTH,
   FILE_DROP_WIDGET_HEIGHT,
   FILE_DROP_WIDGET_WIDTH,
   IDLE_HOVER_WIDGET_HEIGHT,
   IDLE_HOVER_WIDGET_WIDTH,
   IDLE_HOVER_SCALE,
   NOTICE_TIMEOUT_MS,
+  TRANSLATION_STACK_WIDGET_HEIGHT,
+  TRANSLATION_STACK_WIDGET_WIDTH,
   WIDGET_SHELL_HEIGHT,
   WIDGET_SHELL_WIDTH,
 } from "./widgetConstants";
@@ -92,6 +99,40 @@ type WidgetCallState =
   | "success"
   | "error";
 type WidgetRetryProcessingSource = WidgetRetryProcessingPayload["source"];
+
+const DEFAULT_TRANSLATION_SETTINGS: TranslationSettings = {
+  widgetEnabled: false,
+  active: false,
+  targetLanguage: "en",
+  selectionTargetLanguage: "en",
+  selectionEnabled: false,
+  selectionHotkey: DEFAULT_SELECTION_TRANSLATION_HOTKEY,
+};
+const WIDGET_STACK_EDGE_PADDING = 10;
+
+function stackWidthFor(fileDropActive: boolean, translationVisible: boolean): number {
+  const contentWidth = fileDropActive
+    ? translationVisible
+      ? FILE_DROP_TRANSLATION_STACK_WIDGET_WIDTH
+      : FILE_DROP_STACK_WIDGET_WIDTH
+    : translationVisible
+      ? TRANSLATION_STACK_WIDGET_WIDTH
+      : CALL_STACK_WIDGET_WIDTH;
+
+  return contentWidth + WIDGET_STACK_EDGE_PADDING * 2;
+}
+
+function stackHeightFor(fileDropActive: boolean, translationVisible: boolean): number {
+  if (fileDropActive) {
+    return translationVisible
+      ? FILE_DROP_TRANSLATION_STACK_WIDGET_HEIGHT
+      : FILE_DROP_STACK_WIDGET_HEIGHT;
+  }
+
+  return translationVisible
+    ? TRANSLATION_STACK_WIDGET_HEIGHT
+    : CALL_STACK_WIDGET_HEIGHT;
+}
 
 class CallCaptureStartError extends Error {
   readonly permissionRelated: boolean;
@@ -357,6 +398,9 @@ export function Widget() {
   const fileCloseTimerRef = useRef<number | null>(null);
   const fileDragDepthRef = useRef(0);
   const fileDropExpandedRef = useRef(false);
+  const translationSettingsRef = useRef<TranslationSettings>(
+    DEFAULT_TRANSLATION_SETTINGS,
+  );
   const fileProcessRef = useRef<(filePath: string) => Promise<void>>(
     async () => {},
   );
@@ -381,6 +425,8 @@ export function Widget() {
   const [callSettings, setCallSettings] = useState<Awaited<
     ReturnType<typeof getSettings>
   > | null>(null);
+  const [translationSettings, setTranslationSettings] =
+    useState<TranslationSettings>(DEFAULT_TRANSLATION_SETTINGS);
   const [retryProcessingSource, setRetryProcessingSource] =
     useState<WidgetRetryProcessingSource | null>(null);
 
@@ -395,6 +441,37 @@ export function Widget() {
   useEffect(() => {
     retryProcessingSourceRef.current = retryProcessingSource;
   }, [retryProcessingSource]);
+
+  useEffect(() => {
+    translationSettingsRef.current = translationSettings;
+  }, [translationSettings]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadTranslationSettings = async (): Promise<void> => {
+      try {
+        const settings = await getSettings({ reload: true });
+        if (!mounted) return;
+        setTranslationSettings(settings.translation);
+      } catch (error) {
+        logError(
+          "TRANSLATION",
+          `Failed to load translation settings: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    };
+
+    void loadTranslationSettings();
+    const unlistenPromise = listen(SETTINGS_UPDATED_EVENT, () => {
+      void loadTranslationSettings();
+    });
+
+    return () => {
+      mounted = false;
+      void unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -507,8 +584,8 @@ export function Widget() {
 
     fileDropExpandedRef.current = active;
     await resizeWidget(
-      active ? FILE_DROP_STACK_WIDGET_WIDTH : CALL_STACK_WIDGET_WIDTH,
-      active ? FILE_DROP_STACK_WIDGET_HEIGHT : CALL_STACK_WIDGET_HEIGHT,
+      stackWidthFor(active, translationSettingsRef.current.widgetEnabled),
+      stackHeightFor(active, translationSettingsRef.current.widgetEnabled),
     ).catch((error) => {
       logError(
         "WIDGET_FILE",
@@ -1068,12 +1145,9 @@ export function Widget() {
   };
 
   const fileDropActive = fileDropState !== "idle";
-  const stackWidth = fileDropActive
-    ? FILE_DROP_STACK_WIDGET_WIDTH
-    : CALL_STACK_WIDGET_WIDTH;
-  const stackHeight = fileDropActive
-    ? FILE_DROP_STACK_WIDGET_HEIGHT
-    : CALL_STACK_WIDGET_HEIGHT;
+  const translationVisible = translationSettings.widgetEnabled;
+  const stackWidth = stackWidthFor(fileDropActive, translationVisible);
+  const stackHeight = stackHeightFor(fileDropActive, translationVisible);
   const scaledStackWidth = scaleWidgetDimension(stackWidth, widgetScale);
   const scaledStackHeight = scaleWidgetDimension(stackHeight, widgetScale);
   const displayCallState: WidgetCallState =
@@ -1087,6 +1161,46 @@ export function Widget() {
   const callBubbleDisabled =
     displayCallState === "idle" &&
     (displayWidgetState !== "idle" || fileDropActive);
+  const translationBubbleDisabled =
+    displayWidgetState !== "idle" || fileDropActive || displayCallState !== "idle";
+
+  useEffect(() => {
+    void resizeWidget(
+      stackWidthFor(fileDropStateRef.current !== "idle", translationSettings.widgetEnabled),
+      stackHeightFor(fileDropStateRef.current !== "idle", translationSettings.widgetEnabled),
+    ).catch((error) => {
+      logError(
+        "TRANSLATION",
+        `Resize after translation visibility change failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
+  }, [resizeWidget, translationSettings.widgetEnabled]);
+
+  const handleTranslationBubbleClick = async (): Promise<void> => {
+    if (dragTriggeredRef.current || translationBubbleDisabled) {
+      return;
+    }
+
+    try {
+      const latestSettings = await getSettings({ reload: true });
+      const nextTranslation: TranslationSettings = {
+        ...latestSettings.translation,
+        active: !latestSettings.translation.active,
+      };
+      setTranslationSettings(nextTranslation);
+      await saveSettings({ translation: nextTranslation });
+      await emit(SETTINGS_UPDATED_EVENT);
+    } catch (error) {
+      logError(
+        "TRANSLATION",
+        `Failed to toggle widget translation: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      const restored = await getSettings({ reload: true }).catch(() => null);
+      if (restored) {
+        setTranslationSettings(restored.translation);
+      }
+    }
+  };
   const handleCallBubbleClick = () => {
     if (dragTriggeredRef.current) {
       return;
@@ -1207,6 +1321,25 @@ export function Widget() {
               onPointerCancel={handleDragPointerUp}
             />
           </div>
+          {translationVisible && (
+            <div
+              style={{
+                pointerEvents: "none",
+              }}
+            >
+              <TranslationBubble
+                active={translationSettings.active}
+                disabled={translationBubbleDisabled}
+                onClick={() => {
+                  void handleTranslationBubbleClick();
+                }}
+                onPointerDown={handleDragPointerDown}
+                onPointerMove={handleDragPointerMove}
+                onPointerUp={handleDragPointerUp}
+                onPointerCancel={handleDragPointerUp}
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -1421,6 +1554,68 @@ function CallBubble({
         ) : (
           <IconPhoneCall size={iconSize} stroke={isRecording ? 2.4 : 2} />
         )}
+      </div>
+    </ActiveWidgetShell>
+  );
+}
+
+function TranslationBubble({
+  active,
+  disabled,
+  onClick,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+  onPointerCancel,
+}: DragHandlers & {
+  active: boolean;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  const { t } = useI18n();
+  const title = active
+    ? t("widget.translationBubble.active")
+    : t("widget.translationBubble.inactive");
+  const iconColor = disabled
+    ? "rgba(255,255,255,0.28)"
+    : active
+      ? "#ff4d4d"
+      : "rgba(255,255,255,0.72)";
+
+  return (
+    <ActiveWidgetShell
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
+      onClick={onClick}
+      cursor={disabled ? "grab" : "pointer"}
+      width={CALL_BUBBLE_SIZE}
+      height={CALL_BUBBLE_SIZE}
+    >
+      <div
+        aria-label={title}
+        aria-pressed={active}
+        title={title}
+        role="button"
+        style={{
+          width: CALL_BUBBLE_SIZE,
+          height: CALL_BUBBLE_SIZE,
+          borderRadius: 999,
+          background: "#050505",
+          border: "none",
+          color: iconColor,
+          display: "grid",
+          placeItems: "center",
+          boxShadow: "none",
+          opacity: disabled ? 0.72 : 1,
+          transform: active ? "scale(1.02)" : "scale(1)",
+          transition:
+            "background 0.16s ease, border-color 0.16s ease, color 0.16s ease, opacity 0.16s ease, transform 0.16s ease",
+          WebkitFontSmoothing: "antialiased",
+        }}
+      >
+        <IconLanguage size={12} stroke={active ? 2.5 : 2} />
       </div>
     </ActiveWidgetShell>
   );

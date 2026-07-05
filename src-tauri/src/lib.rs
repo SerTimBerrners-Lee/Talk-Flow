@@ -13,7 +13,6 @@ mod media_permissions;
 mod native_voice_recorder;
 mod paste;
 mod prompt_config;
-mod realtime_interpreter;
 
 use commands::{
     accessibility, runtime_info, settings_window,
@@ -78,6 +77,7 @@ pub fn run() {
             ))?;
 
             let _ = widget::ensure_widget_notice_window(app.handle());
+            let _ = widget::ensure_widget_text_window(app.handle());
 
             if let Some(win) = app.get_webview_window("widget") {
                 media_permissions::allow_microphone_requests(&win);
@@ -141,26 +141,30 @@ pub fn run() {
             widget::show_widget_notice,
             widget::hide_widget_notice,
             widget::expand_widget_notice,
+            widget::show_widget_text_overlay,
+            widget::get_widget_text_overlay_payload,
+            widget::hide_widget_text_overlay,
             paste::remember_paste_target_window,
+            paste::copy_selected_text,
             paste::paste_text,
             ai::transcribe_and_clean,
             ai::transcribe_only,
             ai::transcribe_file_path,
             ai::process_text,
+            ai::embed_text,
+            history_storage::migrate_app_data_layout,
             history_storage::read_history_file,
             history_storage::write_history_file,
             history_storage::get_default_transcription_storage_dir,
+            history_storage::save_history_audio,
+            history_storage::read_history_audio,
+            history_storage::delete_history_audio,
             call_capture::list_call_capture_targets,
             call_capture::start_call_capture,
             call_capture::stop_call_capture,
             call_capture::save_call_capture_mic_track,
             call_capture::get_call_capture_status,
             call_capture::get_call_capture_duration_ms,
-            realtime_interpreter::list_realtime_audio_devices,
-            realtime_interpreter::start_realtime_interpreter,
-            realtime_interpreter::stop_realtime_interpreter,
-            realtime_interpreter::get_realtime_interpreter_status,
-            realtime_interpreter::test_virtual_mic_output,
             media::prepare_media_for_transcription,
             native_voice_recorder::start_native_voice_recording,
             native_voice_recorder::pause_native_voice_recording,

@@ -31,11 +31,11 @@ It is designed for practical daily work: IDEs, chats, notes, CRM fields, email, 
 - Dictate into any active text field with a global hotkey.
 - Use locked recording mode for longer speech without holding the keys.
 - Paste cleaned text automatically after transcription.
-- Choose cloud mode, your own API key, or local STT models.
+- Choose cloud mode, your own API key, or local STT and text LLM models.
 - Transcribe audio and video files from the Files tab or by dropping files onto the widget.
 - Record macOS calls with separate microphone and system-audio tracks.
 - Keep local history for voice recordings and file transcriptions.
-- Run managed local STT through one native `transcribe.cpp` runtime for Whisper, Qwen ASR, NVIDIA Parakeet, plus speaker diarization.
+- Run managed local STT through one native `transcribe.cpp` runtime for Whisper, Qwen ASR, NVIDIA Parakeet, plus local text summaries through a managed GGUF LLM runtime.
 - Build native bundles for macOS, Windows, and Linux.
 
 ## Latest Changes
@@ -131,11 +131,12 @@ Supported STT model names include:
 
 ### Local Models
 
-Install and run Talkis-managed local models from Settings. Local mode is transcription-only unless you also configure a separate LLM endpoint.
+Install and run Talkis-managed local models from Settings. Local mode can keep both transcription and transcript summaries on your machine: STT models handle audio, and a separate local text LLM handles summary and prompt-based processing.
 
 Managed local runtimes:
 
 - Whisper, NVIDIA Parakeet GGUF, and Qwen ASR GGUF through the unified `transcribe.cpp` runtime, default endpoint `http://127.0.0.1:8000`
+- Text LLM summaries through the bundled OpenAI-compatible `talkis-llm` runtime backed by GGUF models such as Qwen2.5 Instruct
 - Speaker diarization, default endpoint `http://127.0.0.1:8003`
 
 If a default port is busy, Talkis starts the managed runtime on a fallback port and saves the actual endpoint in settings.

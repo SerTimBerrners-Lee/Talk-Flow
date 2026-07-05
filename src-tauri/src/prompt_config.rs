@@ -280,8 +280,8 @@ fn render_rule(rule: &str, filler_examples: &str) -> String {
     rule.replace("{filler_examples}", filler_examples)
 }
 
-fn resolve_language_and_style<'a>(
-    registry: &'a PromptRegistry,
+fn resolve_language_and_style(
+    registry: &PromptRegistry,
     language: &str,
     style: &str,
 ) -> (String, String) {

@@ -1,12 +1,21 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 
-import { AppSettings, deleteHistoryEntry, HistoryEntry } from "../../../lib/store";
+import {
+  AppSettings,
+  deleteHistoryEntry,
+  deleteHistoryAudio,
+  HistoryEntry,
+  readHistoryAudio,
+  saveHistoryAudio,
+} from "../../../lib/store";
 import { logError, logInfo } from "../../../lib/logger";
 import { tn } from "../../../lib/i18n";
 import { formatErrorMessage } from "../../../lib/utils";
 import { HISTORY_UPDATED_EVENT } from "../../../lib/hotkeyEvents";
 import { beginProcessing, finishProcessing, isAbortError } from "../../../lib/processingControl";
+import { resolveSummaryBackend } from "../../../lib/summarize";
+import { LANGUAGES } from "../../../config/languages";
 
 export interface ProcessRecordingBlobParams {
   blob: Blob;
@@ -24,6 +33,14 @@ export interface RetryHistoryEntryResult {
   updatedEntry: HistoryEntry;
 }
 
+interface RecordingAudioSource {
+  audioBase64: string;
+  audioMimeType: string;
+  audioFileName: string;
+}
+
+type TranscriptionResult = Pick<HistoryEntry, "raw" | "cleaned" | "dictationTranslation">;
+
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
   const chunkSize = 0x8000;
@@ -37,11 +54,98 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   return btoa(binary);
 }
 
+async function saveCompletedRecordingAudio({
+  entryId,
+  audioBase64,
+  audioMimeType,
+  audioFileName,
+  settings,
+}: RecordingAudioSource & {
+  entryId: string;
+  settings: AppSettings;
+}): Promise<Pick<HistoryEntry, "audioPath" | "audioMimeType" | "audioFileName">> {
+  if (!settings.saveRecordingAudio) {
+    return {
+      audioPath: undefined,
+      audioMimeType: undefined,
+      audioFileName: undefined,
+    };
+  }
+
+  try {
+    const saved = await saveHistoryAudio({
+      storageDir: settings.transcriptionStorageDir,
+      entryId,
+      audioBase64,
+      mimeType: audioMimeType,
+    });
+
+    return {
+      audioPath: saved.path,
+      audioMimeType: saved.mimeType || audioMimeType,
+      audioFileName: saved.fileName || audioFileName,
+    };
+  } catch (error) {
+    logError("HISTORY", `Failed to save recording audio: ${formatErrorMessage(error)}`);
+    return {
+      audioPath: undefined,
+      audioMimeType: undefined,
+      audioFileName: undefined,
+    };
+  }
+}
+
+async function loadRecordingAudioSource(
+  entry: HistoryEntry,
+): Promise<RecordingAudioSource> {
+  if (entry.audioPath) {
+    const audio = await readHistoryAudio(entry.audioPath);
+    return {
+      audioBase64: audio.audioBase64,
+      audioMimeType: audio.mimeType || entry.audioMimeType || "audio/webm",
+      audioFileName:
+        entry.audioFileName ||
+        (audio.mimeType?.includes("wav") ? "recording.wav" : "recording.webm"),
+    };
+  }
+
+  if (entry.audioBase64) {
+    return {
+      audioBase64: entry.audioBase64,
+      audioMimeType: entry.audioMimeType || "audio/webm",
+      audioFileName: entry.audioFileName || "recording.webm",
+    };
+  }
+
+  throw new Error(tn("widget.error.noSavedAudio"));
+}
+
 function isLocalSttSettings(settings: AppSettings): boolean {
   return (
     settings.useOwnKey &&
     /127\.0\.0\.1|localhost/i.test(settings.whisperEndpoint || "")
   );
+}
+
+const STREAMING_LOCAL_STT_MODEL_IDS: Record<string, string> = {
+  "nvidia/nemotron-3.5-asr-streaming-0.6b": "nemotron-35-asr-streaming-06b",
+  "nvidia/nemotron-speech-streaming-en-0.6b": "nemotron-speech-streaming-en-06b",
+  "moonshine-streaming-tiny": "moonshine-streaming-tiny",
+  "moonshine-streaming-small": "moonshine-streaming-small",
+};
+
+function isLocalSttStreamingEnabled(settings: AppSettings): boolean {
+  if (!isLocalSttSettings(settings)) return false;
+  const modelId = STREAMING_LOCAL_STT_MODEL_IDS[settings.whisperModel || ""];
+  if (!modelId) return false;
+  const cachedValue = settings.localModels?.[modelId]?.streamingEnabled;
+  return typeof cachedValue === "boolean" ? cachedValue : true;
+}
+
+function languageLabel(code: string): string {
+  const language = LANGUAGES.find((item) => item.code === code);
+  if (!language) return code;
+  return `${language.name} (${language.native})`;
 }
 
 function isAuthFailureLike(normalized: string): boolean {
@@ -107,6 +211,10 @@ function toUserFacingErrorMessage(error: unknown, settings: AppSettings): string
 
   if (normalized.includes("subscription check failed") || normalized.includes("cloud auth unavailable")) {
     return tn("widget.error.cloudUnavailable");
+  }
+
+  if (normalized.includes("translation text model unavailable")) {
+    return tn("widget.error.translationModelUnavailable");
   }
 
   if (isAuthFailureLike(normalized)) {
@@ -180,7 +288,7 @@ async function transcribeViaProxy({
   audioFileName: string;
   settings: AppSettings;
   signal?: AbortSignal;
-}): Promise<{ raw: string; cleaned: string }> {
+}): Promise<TranscriptionResult> {
   logInfo("API", `Sending to proxy, audio_size: ${audioBase64.length} chars`);
 
   // Decode base64 → binary → Blob
@@ -237,7 +345,7 @@ async function transcribeViaBackend({
   audioMimeType: string;
   audioFileName: string;
   settings: AppSettings;
-}): Promise<{ raw: string; cleaned: string }> {
+}): Promise<TranscriptionResult> {
   logInfo("API", `Sending to backend, audio_size: ${audioBase64.length} chars`);
 
   const result = await invoke<{ raw: string; cleaned: string }>("transcribe_and_clean", {
@@ -255,6 +363,7 @@ async function transcribeViaBackend({
       llm_model: "none",
       file_name: audioFileName,
       mime_type: audioMimeType,
+      streaming_enabled: isLocalSttStreamingEnabled(settings),
     },
   });
 
@@ -273,7 +382,7 @@ async function transcribeAudio({
   audioFileName: string;
   settings: AppSettings;
   signal?: AbortSignal;
-}): Promise<{ raw: string; cleaned: string }> {
+}): Promise<TranscriptionResult> {
   // Subscription mode: send to proxy
   if (!settings.useOwnKey && settings.deviceToken?.trim()) {
     return transcribeViaProxy({ audioBase64, audioMimeType, audioFileName, settings, signal });
@@ -285,6 +394,60 @@ async function transcribeAudio({
 
   // Own key mode: send to Rust backend
   return transcribeViaBackend({ audioBase64, audioMimeType, audioFileName, settings });
+}
+
+async function applyDictationTranslation(
+  result: TranscriptionResult,
+  settings: AppSettings,
+): Promise<TranscriptionResult> {
+  if (!settings.translation.active) {
+    return result;
+  }
+
+  const sourceText = result.cleaned.trim();
+  if (!sourceText) {
+    return result;
+  }
+
+  const backend = resolveSummaryBackend(settings);
+  if (!backend) {
+    throw new Error("translation text model unavailable");
+  }
+
+  const sourceLanguage = settings.language || "auto";
+  const targetLanguage = settings.translation.targetLanguage;
+  const prompt =
+    `Переведи текст с языка "${languageLabel(sourceLanguage)}" на язык "${languageLabel(targetLanguage)}". ` +
+    "Верни только перевод, без комментариев, пояснений, markdown-оберток и новых фактов. " +
+    "Сохрани смысл, тон, структуру, переносы строк и форматирование исходного текста. " +
+    "Если в тексте есть списки, числа, имена, ссылки или технические термины, сохрани их точно, переводя только естественный язык.";
+
+  logInfo(
+    "TRANSLATION",
+    `Translating dictation via ${backend.kind}: ${sourceLanguage} -> ${targetLanguage}, chars=${sourceText.length}`,
+  );
+
+  const translatedText = (await backend.run({
+    text: sourceText,
+    prompt,
+    temperature: 0.1,
+  })).trim();
+
+  if (!translatedText) {
+    throw new Error("translation returned empty text");
+  }
+
+  return {
+    raw: result.raw,
+    cleaned: translatedText,
+    dictationTranslation: {
+      provider: backend.kind,
+      sourceLanguage,
+      targetLanguage,
+      sourceText,
+      translatedText,
+    },
+  };
 }
 
 async function pasteCleanedText(text: string): Promise<void> {
@@ -325,7 +488,7 @@ export async function processRecordingBlob({
 
   try {
     const apiStart = Date.now();
-    const result = await transcribeAudio({
+    const transcription = await transcribeAudio({
       audioBase64: base64Audio,
       audioMimeType,
       audioFileName,
@@ -338,27 +501,43 @@ export async function processRecordingBlob({
       return { durationSeconds, hasTranscription: false };
     }
 
-    logInfo("API", `Pipeline result received: raw_type=${typeof result.raw}, cleaned_type=${typeof result.cleaned}`);
-    const processingTime = Date.now() - apiStart;
+    logInfo("API", `Pipeline result received: raw_type=${typeof transcription.raw}, cleaned_type=${typeof transcription.cleaned}`);
 
-    if (!hasRecognizedSpeech(result)) {
+    if (!hasRecognizedSpeech(transcription)) {
       logInfo("API", "Nothing recognized, removing placeholder entry, skipping paste");
       await deleteHistoryEntry(baseEntry.id);
       await emit(HISTORY_UPDATED_EVENT, baseEntry);
       return { durationSeconds, hasTranscription: false };
     }
 
+    const result = await applyDictationTranslation(transcription, settings);
+    const processingTime = Date.now() - apiStart;
+
+    if (handle.isCancelled()) {
+      await finishProcessing(buildInterruptedEntry(baseEntry));
+      return { durationSeconds, hasTranscription: false };
+    }
+
     logInfo("API", `Transcription complete in ${processingTime}ms: "${result.cleaned}"`);
+    const savedAudio = await saveCompletedRecordingAudio({
+      entryId: baseEntry.id,
+      audioBase64: base64Audio,
+      audioMimeType,
+      audioFileName,
+      settings,
+    });
     await finishProcessing({
       ...baseEntry,
       raw: result.raw,
       cleaned: result.cleaned,
+      dictationTranslation: result.dictationTranslation,
       status: "completed",
       errorMessage: undefined,
       processingTime,
+      audioPath: savedAudio.audioPath,
       audioBase64: undefined,
-      audioMimeType: undefined,
-      audioFileName: undefined,
+      audioMimeType: savedAudio.audioMimeType,
+      audioFileName: savedAudio.audioFileName,
     });
 
     let pasteFailed = false;
@@ -410,9 +589,7 @@ export async function retryHistoryEntry(
   settings: AppSettings,
   options?: { shouldPaste?: boolean },
 ): Promise<RetryHistoryEntryResult> {
-  if (!entry.audioBase64) {
-    throw new Error(tn("widget.error.noSavedAudio"));
-  }
+  const audioSource = await loadRecordingAudioSource(entry);
 
   const retrySettings: AppSettings = {
     ...settings,
@@ -426,10 +603,10 @@ export async function retryHistoryEntry(
   const handle = await beginProcessing(entry, "update");
 
   try {
-    const result = await transcribeAudio({
-      audioBase64: entry.audioBase64,
-      audioMimeType: entry.audioMimeType || "audio/webm",
-      audioFileName: entry.audioFileName || "recording.webm",
+    const transcription = await transcribeAudio({
+      audioBase64: audioSource.audioBase64,
+      audioMimeType: audioSource.audioMimeType,
+      audioFileName: audioSource.audioFileName,
       settings: retrySettings,
       signal: handle.signal,
     });
@@ -440,22 +617,49 @@ export async function retryHistoryEntry(
       return { hasTranscription: false, updatedEntry: interrupted };
     }
 
-    if (!hasRecognizedSpeech(result)) {
+    if (!hasRecognizedSpeech(transcription)) {
       throw new Error(tn("widget.error.speechNotRecognized"));
     }
+
+    const result = await applyDictationTranslation(transcription, retrySettings);
+
+    if (handle.isCancelled()) {
+      const interrupted = buildInterruptedEntry(entry);
+      await finishProcessing(interrupted);
+      return { hasTranscription: false, updatedEntry: interrupted };
+    }
+
+    const savedAudio = entry.audioPath && settings.saveRecordingAudio
+      ? {
+          audioPath: entry.audioPath,
+          audioMimeType: entry.audioMimeType || audioSource.audioMimeType,
+          audioFileName: entry.audioFileName || audioSource.audioFileName,
+        }
+      : await saveCompletedRecordingAudio({
+          entryId: entry.id,
+          ...audioSource,
+          settings,
+        });
 
     const updatedEntry: HistoryEntry = {
       ...entry,
       raw: result.raw,
       cleaned: result.cleaned,
+      dictationTranslation: result.dictationTranslation,
       status: "completed",
       errorMessage: undefined,
+      audioPath: savedAudio.audioPath,
       audioBase64: undefined,
-      audioMimeType: undefined,
-      audioFileName: undefined,
+      audioMimeType: savedAudio.audioMimeType,
+      audioFileName: savedAudio.audioFileName,
     };
 
     await finishProcessing(updatedEntry);
+    if (!settings.saveRecordingAudio && entry.audioPath) {
+      await deleteHistoryAudio(entry.audioPath).catch((error) => {
+        logError("HISTORY", `Failed to delete disabled recording audio: ${formatErrorMessage(error)}`);
+      });
+    }
 
     if (shouldPaste) {
       try {

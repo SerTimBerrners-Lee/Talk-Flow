@@ -3,7 +3,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { PhysicalPosition } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
-import { AppSettings, getSettings, getWidgetPosition, saveWidgetPosition } from "../../../lib/store";
+import {
+  AppSettings,
+  getSettings,
+  getWidgetPosition,
+  saveWidgetPosition,
+} from "../../../lib/store";
+import { tn } from "../../../lib/i18n";
 import { logError, logInfo } from "../../../lib/logger";
 import { formatErrorMessage } from "../../../lib/utils";
 import {
@@ -21,6 +27,12 @@ import { resolveInitialWidgetPosition } from "../widgetPositioning";
 import { useWidgetHotkey } from "./useWidgetHotkey";
 import { useWidgetNotice } from "./useWidgetNotice";
 import { useWidgetRecording } from "./useWidgetRecording";
+import {
+  selectionTranslationLanguageLabel,
+  translateSelectedText,
+  type SelectionTranslationProgress,
+} from "../services/selectionTranslation";
+import type { WidgetTextOverlayStatus } from "../widgetConstants";
 import {
   initialWidgetMachineState,
   widgetReducer,
@@ -76,7 +88,9 @@ export function useWidgetController({
 
   // Imperative refs (truly need ref semantics)
   const registeredHotkeyRef = useRef<string | null>(null);
-  const releaseStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const releaseStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const moveSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const positionReadyRef = useRef(false);
   const widgetScaleRef = useRef(DEFAULT_WIDGET_SCALE);
@@ -86,13 +100,20 @@ export function useWidgetController({
   });
   const widgetSizeRef = useRef<{ width: number; height: number }>({
     width: scaleWidgetDimension(CALL_STACK_WIDGET_WIDTH, DEFAULT_WIDGET_SCALE),
-    height: scaleWidgetDimension(CALL_STACK_WIDGET_HEIGHT, DEFAULT_WIDGET_SCALE),
+    height: scaleWidgetDimension(
+      CALL_STACK_WIDGET_HEIGHT,
+      DEFAULT_WIDGET_SCALE,
+    ),
   });
   const stopAndProcessRef = useRef<() => Promise<void>>(async () => {});
+  const selectionTranslationBusyRef = useRef(false);
 
   // ── Dispatch: apply action → update machine state → execute effects ─────
   const dispatch = useCallback((action: WidgetAction) => {
-    const { state: nextState, effects } = widgetReducer(machineRef.current, action);
+    const { state: nextState, effects } = widgetReducer(
+      machineRef.current,
+      action,
+    );
     machineRef.current = nextState;
 
     // Sync React render state
@@ -103,7 +124,7 @@ export function useWidgetController({
     for (const effect of effects) {
       executeEffect(effect);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Effect executor ─────────────────────────────────────────────────────
@@ -134,7 +155,7 @@ export function useWidgetController({
         setLockedRecording(effect.value);
         break;
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Timer helpers ───────────────────────────────────────────────────────
@@ -189,11 +210,16 @@ export function useWidgetController({
         clearMoveSaveTimer();
         moveSaveTimerRef.current = setTimeout(() => {
           moveSaveTimerRef.current = null;
-          void saveWidgetPosition({ x: payload.x, y: payload.y }).catch((error) => {
-            if (!disposed) {
-              logError("WIDGET", `Failed to save widget position: ${formatErrorMessage(error)}`);
-            }
-          });
+          void saveWidgetPosition({ x: payload.x, y: payload.y }).catch(
+            (error) => {
+              if (!disposed) {
+                logError(
+                  "WIDGET",
+                  `Failed to save widget position: ${formatErrorMessage(error)}`,
+                );
+              }
+            },
+          );
         }, 120);
       })
       .then((removeListener) => {
@@ -205,7 +231,10 @@ export function useWidgetController({
       })
       .catch((error) => {
         if (!disposed) {
-          logError("WIDGET", `Failed to track widget movement: ${formatErrorMessage(error)}`);
+          logError(
+            "WIDGET",
+            `Failed to track widget movement: ${formatErrorMessage(error)}`,
+          );
         }
       });
 
@@ -222,17 +251,25 @@ export function useWidgetController({
     const restoreWidgetPosition = async () => {
       try {
         const savedPosition = await getWidgetPosition();
-        const targetPosition = await resolveInitialWidgetPosition(widgetWindow, savedPosition);
+        const targetPosition = await resolveInitialWidgetPosition(
+          widgetWindow,
+          savedPosition,
+        );
         if (!targetPosition || cancelled) return;
 
-        await widgetWindow.setPosition(new PhysicalPosition(targetPosition.x, targetPosition.y));
+        await widgetWindow.setPosition(
+          new PhysicalPosition(targetPosition.x, targetPosition.y),
+        );
 
         if (!savedPosition) {
           await saveWidgetPosition(targetPosition);
         }
       } catch (error) {
         if (!cancelled) {
-          logError("WIDGET", `Failed to restore widget position: ${formatErrorMessage(error)}`);
+          logError(
+            "WIDGET",
+            `Failed to restore widget position: ${formatErrorMessage(error)}`,
+          );
         }
       } finally {
         if (!cancelled) {
@@ -242,51 +279,56 @@ export function useWidgetController({
     };
 
     void restoreWidgetPosition();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [widgetWindow]);
 
   // ── Widget resize ───────────────────────────────────────────────────────
-  const resizeWidget = useCallback(async (
-    width: number,
-    height: number,
-    options: ResizeWidgetOptions = {},
-  ) => {
-    try {
-      const scale = normalizeWidgetScale(widgetScaleRef.current);
-      const scaledWidth = scaleWidgetDimension(width, scale);
-      const scaledHeight = scaleWidgetDimension(height, scale);
-      const currentBaseSize = widgetBaseSizeRef.current;
-      const currentSize = widgetSizeRef.current;
+  const resizeWidget = useCallback(
+    async (
+      width: number,
+      height: number,
+      options: ResizeWidgetOptions = {},
+    ) => {
+      try {
+        const scale = normalizeWidgetScale(widgetScaleRef.current);
+        const scaledWidth = scaleWidgetDimension(width, scale);
+        const scaledHeight = scaleWidgetDimension(height, scale);
+        const currentBaseSize = widgetBaseSizeRef.current;
+        const currentSize = widgetSizeRef.current;
 
-      if (
-        currentBaseSize.width === width &&
-        currentBaseSize.height === height &&
-        currentSize.width === scaledWidth &&
-        currentSize.height === scaledHeight
-      ) {
-        return;
+        if (
+          currentBaseSize.width === width &&
+          currentBaseSize.height === height &&
+          currentSize.width === scaledWidth &&
+          currentSize.height === scaledHeight
+        ) {
+          return;
+        }
+
+        const resizePayload: {
+          width: number;
+          height: number;
+          growthOffsetRatio?: number;
+        } = {
+          width: scaledWidth,
+          height: scaledHeight,
+        };
+
+        if (options.growthOffsetRatio !== undefined) {
+          resizePayload.growthOffsetRatio = options.growthOffsetRatio;
+        }
+
+        await invoke("widget_resize", resizePayload);
+        widgetBaseSizeRef.current = { width, height };
+        widgetSizeRef.current = { width: scaledWidth, height: scaledHeight };
+      } catch (error) {
+        logError("WIDGET", `Resize failed: ${formatErrorMessage(error)}`);
       }
-
-      const resizePayload: {
-        width: number;
-        height: number;
-        growthOffsetRatio?: number;
-      } = {
-        width: scaledWidth,
-        height: scaledHeight,
-      };
-
-      if (options.growthOffsetRatio !== undefined) {
-        resizePayload.growthOffsetRatio = options.growthOffsetRatio;
-      }
-
-      await invoke("widget_resize", resizePayload);
-      widgetBaseSizeRef.current = { width, height };
-      widgetSizeRef.current = { width: scaledWidth, height: scaledHeight };
-    } catch (error) {
-      logError("WIDGET", `Resize failed: ${formatErrorMessage(error)}`);
-    }
-  }, []);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!settings) {
@@ -302,7 +344,9 @@ export function useWidgetController({
 
     widgetScaleRef.current = nextScale;
     const baseSize = widgetBaseSizeRef.current;
-    void resizeWidget(baseSize.width, baseSize.height, { growthOffsetRatio: 0 });
+    void resizeWidget(baseSize.width, baseSize.height, {
+      growthOffsetRatio: 0,
+    });
   }, [resizeWidget, settings?.widgetScale]);
 
   // ── Notice ──────────────────────────────────────────────────────────────
@@ -314,7 +358,9 @@ export function useWidgetController({
     stateRefForNotice.current = widgetState;
   }, [widgetState]);
 
-  const { showNotice, hideNotice } = useWidgetNotice({ stateRef: stateRefForNotice });
+  const { showNotice, hideNotice } = useWidgetNotice({
+    stateRef: stateRefForNotice,
+  });
 
   // ── Error handler ───────────────────────────────────────────────────────
   const showError = useCallback(
@@ -324,6 +370,155 @@ export function useWidgetController({
     },
     [dispatch],
   );
+
+  const showSelectionTextOverlay = useCallback(
+    (payload: {
+      status: WidgetTextOverlayStatus;
+      sourceText?: string;
+      translatedText?: string;
+      targetLanguage?: string;
+      message?: string;
+    }): void => {
+      void invoke("show_widget_text_overlay", {
+        payload: {
+          status: payload.status,
+          sourceText: payload.sourceText ?? "",
+          translatedText: payload.translatedText ?? "",
+          targetLanguage: payload.targetLanguage ?? "",
+          ...(payload.message ? { message: payload.message } : {}),
+        },
+      }).catch((error) => {
+        logError(
+          "TRANSLATION",
+          `Failed to show text overlay: ${formatErrorMessage(error)}`,
+        );
+      });
+    },
+    [],
+  );
+
+  const translateSelectionFromHotkey = useCallback(async (): Promise<void> => {
+    if (selectionTranslationBusyRef.current) {
+      return;
+    }
+
+    if (machineRef.current.widgetState !== "idle") {
+      return;
+    }
+
+    selectionTranslationBusyRef.current = true;
+
+    try {
+      const activeSettings =
+        settingsRef.current ?? (await getSettings({ reload: true }));
+      settingsRef.current = activeSettings;
+      const targetLanguage = selectionTranslationLanguageLabel(
+        activeSettings.translation.selectionTargetLanguage,
+      );
+
+      if (!activeSettings.translation.selectionEnabled) {
+        return;
+      }
+
+      showSelectionTextOverlay({
+        status: "copying",
+        targetLanguage,
+        message: "Считываем выделенный текст через буфер обмена.",
+      });
+
+      await invoke("remember_paste_target_window").catch((error) => {
+        logError(
+          "PASTE",
+          `Failed to remember selection translation target: ${formatErrorMessage(error)}`,
+        );
+      });
+
+      let selectedText = "";
+      try {
+        selectedText = await invoke<string>("copy_selected_text");
+      } catch (error) {
+        logError(
+          "TRANSLATION",
+          `Failed to copy selected text: ${formatErrorMessage(error)}`,
+        );
+        const message = formatErrorMessage(error);
+        showSelectionTextOverlay({
+          status: "error",
+          targetLanguage,
+          message: /no selected text/i.test(message)
+            ? tn("widget.selectionTranslation.noSelection")
+            : tn("widget.selectionTranslation.copyFailed"),
+        });
+        showError(
+          /no selected text/i.test(message)
+            ? tn("widget.selectionTranslation.noSelection")
+            : tn("widget.selectionTranslation.copyFailed"),
+        );
+        return;
+      }
+
+      if (!selectedText.trim()) {
+        showSelectionTextOverlay({
+          status: "error",
+          targetLanguage,
+          message: tn("widget.selectionTranslation.noSelection"),
+        });
+        showError(tn("widget.selectionTranslation.noSelection"));
+        return;
+      }
+
+      showSelectionTextOverlay({
+        status: "translating",
+        sourceText: selectedText,
+        targetLanguage,
+        message: "Исходный язык определяется автоматически.",
+      });
+
+      const translatedText = await translateSelectedText({
+        text: selectedText,
+        settings: activeSettings,
+        onProgress: (progress: SelectionTranslationProgress) => {
+          showSelectionTextOverlay({
+            status: "translating",
+            sourceText: progress.sourceText,
+            translatedText: progress.translatedText,
+            targetLanguage,
+            message:
+              progress.total > 1
+                ? `Переведено ${progress.current} из ${progress.total} фрагментов.`
+                : "Перевод готовится к вставке.",
+          });
+        },
+      });
+
+      if (!translatedText.trim()) {
+        showSelectionTextOverlay({
+          status: "error",
+          sourceText: selectedText,
+          targetLanguage,
+          message: tn("widget.selectionTranslation.emptyResult"),
+        });
+        showError(tn("widget.selectionTranslation.emptyResult"));
+        return;
+      }
+
+      showSelectionTextOverlay({
+        status: "done",
+        sourceText: selectedText,
+        translatedText,
+        targetLanguage,
+        message: "Перевод показан над виджетом.",
+      });
+    } catch (error) {
+      showSelectionTextOverlay({
+        status: "error",
+        message: formatErrorMessage(error),
+      });
+      showError(formatErrorMessage(error));
+    } finally {
+      selectionTranslationBusyRef.current = false;
+    }
+  }, [showError, showSelectionTextOverlay]);
 
   // ── Recording ───────────────────────────────────────────────────────────
   const startRecordingRef = useRef<() => Promise<void>>(async () => {});
@@ -358,6 +553,9 @@ export function useWidgetController({
     registeredHotkeyRef,
     clearReleaseStopTimer,
     showError,
+    onSelectionTranslationHotkey: () => {
+      void translateSelectionFromHotkey();
+    },
   });
 
   const toggleManualRecording = useCallback(() => {

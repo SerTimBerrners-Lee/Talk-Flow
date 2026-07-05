@@ -79,6 +79,28 @@ pub(super) fn resolve_chat_completions_url(endpoint: Option<&str>) -> String {
         .unwrap_or_else(|| "https://api.openai.com/v1/chat/completions".to_string())
 }
 
+/// Resolve a user/runtime endpoint to an OpenAI-compatible embeddings URL.
+/// Empty endpoint falls back to OpenAI. Accepts a base, a `/v1` base, or a full
+/// `/embeddings` URL.
+pub(super) fn resolve_embeddings_url(endpoint: Option<&str>) -> String {
+    endpoint
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            let base = value.trim_end_matches('/');
+            if let Some(root) = base.strip_suffix("/chat/completions") {
+                format!("{}/embeddings", root)
+            } else if base.ends_with("/embeddings") {
+                base.to_string()
+            } else if base.ends_with("/v1") {
+                format!("{}/embeddings", base)
+            } else {
+                format!("{}/v1/embeddings", base)
+            }
+        })
+        .unwrap_or_else(|| "https://api.openai.com/v1/embeddings".to_string())
+}
+
 pub(super) fn resolve_whisper_model_download_url(models_url: &str, model: &str) -> String {
     let encoded_model = percent_encode_path_segment(model);
     format!("{}/{}", models_url.trim_end_matches('/'), encoded_model)

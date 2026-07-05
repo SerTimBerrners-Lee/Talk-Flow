@@ -1,5 +1,4 @@
-// Strings for the File Transcription and Realtime Interpreter settings tabs
-// (windows/settings/tabs/FileTranscriptionTab.tsx + RealtimeInterpreterTab.tsx).
+// Strings for settings tabs that do not have their own dictionary file.
 export const settingsTabsMisc = {
   // ---- FileTranscriptionTab ----
 
@@ -182,153 +181,66 @@ export const settingsTabsMisc = {
     en: "Speaker diarization components will be downloaded",
   },
 
-  // ---- RealtimeInterpreterTab ----
-
-  // Status labels (statusLabel)
-  "realtime.status.checking": { ru: "Проверяем", en: "Checking" },
-  "realtime.status.running": { ru: "Работает", en: "Running" },
-  "realtime.status.starting": { ru: "Запускается", en: "Starting" },
-  "realtime.status.stopping": { ru: "Останавливается", en: "Stopping" },
-  "realtime.status.error": { ru: "Ошибка", en: "Error" },
-  "realtime.status.off": { ru: "Выключен", en: "Off" },
-
-  // Transcript speaker labels (directionSpeakerLabel)
-  "realtime.speaker.you": { ru: "Вы", en: "You" },
-  "realtime.speaker.remote": { ru: "Собеседник", en: "Other party" },
-  "realtime.transcript.translationLabel": {
-    ru: "Перевод ({lang})",
-    en: "Translation ({lang})",
+  // ---- TranslationTab ----
+  "translation.loading": { ru: "Загружаем переводчик…", en: "Loading translator…" },
+  "translation.title": { ru: "Переводчик", en: "Translator" },
+  "translation.source.title": { ru: "Распознавать с", en: "Recognize from" },
+  "translation.source.desc": {
+    ru: "Источник берется из основного языка распознавания в настройках.",
+    en: "The source comes from the main recognition language setting.",
   },
-
-  // Warnings
-  "realtime.warning.needLogin": {
-    ru: "Для облачного режима войдите в аккаунт Talkis.",
-    en: "Sign in to your Talkis account for cloud mode.",
+  "translation.target.title": { ru: "Переводить на", en: "Translate to" },
+  "translation.target.desc": {
+    ru: "Перевод применяется к обычной диктовке после распознавания и перед вставкой.",
+    en: "Translation is applied to ordinary dictation after recognition and before paste.",
   },
-  "realtime.warning.needHeadphones": {
-    ru: "Для локального перевода нужны наушники или отдельный output.",
-    en: "Local translation requires headphones or a separate output.",
+  "translation.dictation.title": {
+    ru: "Перевод через транскрибацию",
+    en: "Translation through transcription",
   },
-
-  // Test output
-  "realtime.test.signalSent": {
-    ru: "Тестовый сигнал отправлен в virtual mic output.",
-    en: "A test signal was sent to the virtual mic output.",
+  "translation.widget.title": { ru: "Показывать кнопку в виджете", en: "Show button in widget" },
+  "translation.widget.desc": {
+    ru: "Кнопка в виджете включает и выключает активный перевод диктовки.",
+    en: "The widget button turns active dictation translation on and off.",
   },
-
-  // Saved history entry name
-  "realtime.history.fileName": { ru: "Перевод звонка", en: "Call translation" },
-
-  // Loading
-  "realtime.loading": { ru: "Загружаем переводчик…", en: "Loading interpreter…" },
-
-  // Header
-  "realtime.title": {
-    ru: "Синхронный переводчик",
-    en: "Simultaneous interpreter",
+  "translation.widget.on": { ru: "Показывать", en: "Show" },
+  "translation.widget.off": { ru: "Не показывать", en: "Hide" },
+  "translation.selection.title": {
+    ru: "Перевод выделенного текста",
+    en: "Selected text translation",
   },
-  "realtime.metric.status": { ru: "Статус", en: "Status" },
-  "realtime.metric.languages": { ru: "Языки", en: "Languages" },
-  "realtime.metric.route": { ru: "Маршрут", en: "Route" },
-  "realtime.statusMessage.off": {
-    ru: "Realtime Interpreter выключен.",
-    en: "Realtime Interpreter is off.",
+  "translation.selection.desc": {
+    ru: "Выделите текст в любом приложении и нажмите горячую клавишу. Talkis покажет перевод в отдельном окне над виджетом.",
+    en: "Select text in any app and press the hotkey. Talkis shows the translation in a separate window above the widget.",
   },
-
-  // Settings fields
-  "realtime.field.realMic.label": {
-    ru: "Настоящий микрофон",
-    en: "Real microphone",
+  "translation.selection.on": { ru: "Включено", en: "On" },
+  "translation.selection.off": { ru: "Выключено", en: "Off" },
+  "translation.selection.hotkeyLabel": {
+    ru: "Горячая клавиша",
+    en: "Hotkey",
   },
-  "realtime.field.realMic.note": {
-    ru: "Голос пользователя для RU → {lang}.",
-    en: "User's voice for RU → {lang}.",
+  "translation.selection.hotkeyIdle": {
+    ru: "Нажмите поле и введите сочетание",
+    en: "Click the field and press a shortcut",
   },
-  "realtime.field.realMic.empty": {
-    ru: "Системный микрофон",
-    en: "System microphone",
+  "translation.selection.hotkeySaved": {
+    ru: "Горячая клавиша сохранена.",
+    en: "Hotkey saved.",
   },
-  "realtime.field.languagePair.label": { ru: "Пара языков", en: "Language pair" },
-  "realtime.field.languagePair.note": {
-    ru: "Русский остается локальным языком пользователя в v1.",
-    en: "Russian stays the user's local language in v1.",
+  "translation.selection.hotkeyInvalid": {
+    ru: "Неверное сочетание.",
+    en: "Invalid shortcut.",
   },
-  "realtime.field.virtualMic.note": {
-    ru: "{driver} для приложения звонка.",
-    en: "{driver} for the call app.",
+  "translation.selection.hotkeyChange": {
+    ru: "Изменить",
+    en: "Change",
   },
-  "realtime.field.virtualMic.empty": {
-    ru: "Установите {driver}",
-    en: "Install {driver}",
+  "translation.status.active": {
+    ru: "В виджете перевод сейчас включен.",
+    en: "Translation is currently on in the widget.",
   },
-  "realtime.field.localPlayback.label": {
-    ru: "Локальное прослушивание",
-    en: "Local monitoring",
-  },
-  "realtime.field.localPlayback.note": {
-    ru: "Русский перевод собеседника.",
-    en: "Russian translation of the other party.",
-  },
-  "realtime.field.localPlayback.empty": {
-    ru: "Системный output",
-    en: "System output",
-  },
-  "realtime.field.access.label": { ru: "Доступ", en: "Access" },
-  "realtime.field.access.note": {
-    ru: "V1 работает только через Talkis Cloud.",
-    en: "V1 works only via Talkis Cloud.",
-  },
-  "realtime.access.connected": {
-    ru: "Аккаунт подключен",
-    en: "Account connected",
-  },
-  "realtime.access.needLogin": { ru: "Нужен вход", en: "Sign-in required" },
-
-  // Headphones confirmation
-  "realtime.headphonesConfirm": {
-    ru: "Локальный перевод идет в наушники или отдельный output",
-    en: "Local translation goes to headphones or a separate output",
-  },
-
-  // Check and run section
-  "realtime.checkAndRun": { ru: "Проверка и запуск", en: "Check and start" },
-  "realtime.button.refresh.title": {
-    ru: "Обновить устройства",
-    en: "Refresh devices",
-  },
-  "realtime.button.refresh": { ru: "Обновить", en: "Refresh" },
-  "realtime.button.test.title": {
-    ru: "Тест virtual mic output",
-    en: "Test virtual mic output",
-  },
-  "realtime.button.test": { ru: "Тест", en: "Test" },
-  "realtime.button.stop.title": {
-    ru: "Остановить переводчик",
-    en: "Stop interpreter",
-  },
-  "realtime.button.stop": { ru: "Стоп", en: "Stop" },
-  "realtime.button.start.title": {
-    ru: "Запустить переводчик",
-    en: "Start interpreter",
-  },
-  "realtime.button.start": { ru: "Старт", en: "Start" },
-
-  // Live transcript panels
-  "realtime.panel.youToCall": { ru: "Вы → звонок", en: "You → call" },
-  "realtime.panel.callToYou": { ru: "Звонок → вы", en: "Call → you" },
-  "realtime.noLiveTranscript": {
-    ru: "Нет live transcript",
-    en: "No live transcript",
-  },
-
-  // Routing summary line
-  "realtime.routingSummary": {
-    ru: "Virtual mic: {virtualMic} · Playback: {playback}",
-    en: "Virtual mic: {virtualMic} · Playback: {playback}",
-  },
-  "realtime.routing.notSelected": { ru: "не выбран", en: "not selected" },
-  "realtime.routing.systemOutput": {
-    ru: "системный output",
-    en: "system output",
+  "translation.status.inactive": {
+    ru: "В виджете перевод сейчас выключен.",
+    en: "Translation is currently off in the widget.",
   },
 } as const;

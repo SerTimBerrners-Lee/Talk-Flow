@@ -148,6 +148,12 @@ function readTargetTriple() {
   }
 }
 
+function markExecutable(path, targetTriple) {
+  if (!targetTriple.includes("windows")) {
+    chmodSync(path, 0o755);
+  }
+}
+
 const targetTriple = readTargetTriple();
 ensureLinuxBuildDependencies(targetTriple);
 
@@ -170,9 +176,7 @@ for (const sidecar of sidecars) {
   const destinationBinary = join(binariesDir, `${sidecar}-${targetTriple}${extension}`);
   if (!existsSync(destinationBinary)) {
     writeFileSync(destinationBinary, "#!/usr/bin/env sh\nexit 1\n");
-    if (!targetTriple.includes("windows")) {
-      chmodSync(destinationBinary, 0o755);
-    }
+    markExecutable(destinationBinary, targetTriple);
   }
 }
 
@@ -190,11 +194,9 @@ for (const sidecar of sidecars) {
     throw new Error(`${sidecar} path is not a file: ${sourceBinary}`);
   }
 
+  markExecutable(sourceBinary, targetTriple);
   copyFileSync(sourceBinary, destinationBinary);
-
-  if (!targetTriple.includes("windows")) {
-    chmodSync(destinationBinary, 0o755);
-  }
+  markExecutable(destinationBinary, targetTriple);
 
   console.log(`Prepared ${sidecar} sidecar: ${destinationBinary}`);
 }

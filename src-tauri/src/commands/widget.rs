@@ -1,14 +1,20 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::sync::{Mutex, OnceLock};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 use crate::media_permissions;
 
 const NOTICE_WINDOW_LABEL: &str = "widget-notice";
+const TEXT_WINDOW_LABEL: &str = "widget-text";
 const NOTICE_EVENT: &str = "widget-notice:update";
+const TEXT_EVENT: &str = "widget-text:update";
 pub const NOTICE_WIDTH: f64 = 212.0;
 pub const NOTICE_HEIGHT: f64 = 52.0;
+pub const TEXT_OVERLAY_WIDTH: f64 = 324.0;
+pub const TEXT_OVERLAY_HEIGHT: f64 = 182.0;
 /// Must match NOTICE_WIDGET_GAP in src/windows/widget/widgetConstants.ts (logical pixels).
 pub const NOTICE_GAP: f64 = 2.0;
+const TEXT_OVERLAY_GAP: f64 = 8.0;
 /// Must match CALL_STACK_WIDGET_WIDTH/HEIGHT in src/windows/widget/widgetConstants.ts.
 pub const WIDGET_WIDTH: f64 = 109.0;
 pub const WIDGET_HEIGHT: f64 = 34.0;
@@ -30,6 +36,21 @@ struct WidgetNoticePayload {
     tone: String,
 }
 
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WidgetTextOverlayPayload {
+    status: String,
+    source_text: String,
+    translated_text: String,
+    target_language: String,
+    message: Option<String>,
+}
+
+fn text_overlay_payload_store() -> &'static Mutex<Option<WidgetTextOverlayPayload>> {
+    static STORE: OnceLock<Mutex<Option<WidgetTextOverlayPayload>>> = OnceLock::new();
+    STORE.get_or_init(|| Mutex::new(None))
+}
+
 pub fn ensure_widget_notice_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
     if let Some(win) = app.get_webview_window(NOTICE_WINDOW_LABEL) {
         return Ok(win);
@@ -42,6 +63,42 @@ pub fn ensure_widget_notice_window(app: &AppHandle) -> Result<tauri::WebviewWind
     )
     .title("Talkis Notice")
     .inner_size(NOTICE_WIDTH, NOTICE_HEIGHT)
+    .resizable(false)
+    .decorations(false)
+    .always_on_top(true)
+    .accept_first_mouse(true)
+    .focused(false)
+    .visible(false)
+    .shadow(false);
+
+    #[cfg(target_os = "linux")]
+    {
+        builder = builder.transparent(true).skip_taskbar(true);
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        builder = builder.transparent(true).skip_taskbar(true);
+    }
+
+    let win = builder.build().map_err(|e| e.to_string())?;
+    media_permissions::allow_microphone_requests(&win);
+
+    Ok(win)
+}
+
+pub fn ensure_widget_text_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
+    if let Some(win) = app.get_webview_window(TEXT_WINDOW_LABEL) {
+        return Ok(win);
+    }
+
+    let mut builder = WebviewWindowBuilder::new(
+        app,
+        TEXT_WINDOW_LABEL,
+        WebviewUrl::App("index.html?window=widget-text".into()),
+    )
+    .title("Talkis Text")
+    .inner_size(TEXT_OVERLAY_WIDTH, TEXT_OVERLAY_HEIGHT)
     .resizable(false)
     .decorations(false)
     .always_on_top(true)
@@ -93,6 +150,36 @@ fn position_widget_notice_window(
         .map_err(|e| e.to_string())?;
 
     notice_window
+        .set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+            x: x.round() as i32,
+            y: y.round() as i32,
+        }))
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+fn position_widget_text_window(
+    widget_window: &tauri::WebviewWindow,
+    text_window: &tauri::WebviewWindow,
+) -> Result<(), String> {
+    let widget_position = widget_window.outer_position().map_err(|e| e.to_string())?;
+    let widget_size = widget_window.outer_size().map_err(|e| e.to_string())?;
+    let scale_factor = widget_window.scale_factor().map_err(|e| e.to_string())?;
+    let text_width = TEXT_OVERLAY_WIDTH * scale_factor;
+    let text_height = TEXT_OVERLAY_HEIGHT * scale_factor;
+    let gap = TEXT_OVERLAY_GAP * scale_factor;
+    let x = widget_position.x as f64 + widget_size.width as f64 - text_width;
+    let y = widget_position.y as f64 - gap - text_height;
+
+    text_window
+        .set_size(tauri::Size::Logical(tauri::LogicalSize {
+            width: TEXT_OVERLAY_WIDTH,
+            height: TEXT_OVERLAY_HEIGHT,
+        }))
+        .map_err(|e| e.to_string())?;
+
+    text_window
         .set_position(tauri::Position::Physical(tauri::PhysicalPosition {
             x: x.round() as i32,
             y: y.round() as i32,
@@ -295,6 +382,56 @@ pub async fn show_widget_notice(
 #[tauri::command]
 pub async fn hide_widget_notice(app: AppHandle) -> Result<(), String> {
     if let Some(win) = app.get_webview_window(NOTICE_WINDOW_LABEL) {
+        win.hide().map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn show_widget_text_overlay(
+    app: AppHandle,
+    payload: WidgetTextOverlayPayload,
+) -> Result<(), String> {
+    {
+        let mut cached = text_overlay_payload_store()
+            .lock()
+            .map_err(|e| format!("Text overlay state lock failed: {e}"))?;
+        *cached = Some(payload.clone());
+    }
+
+    let widget_window = app
+        .get_webview_window("widget")
+        .ok_or_else(|| "Widget window not found".to_string())?;
+    let text_window = ensure_widget_text_window(&app)?;
+
+    position_widget_text_window(&widget_window, &text_window)?;
+    let _ = text_window.set_ignore_cursor_events(false);
+    text_window.show().map_err(|e| e.to_string())?;
+
+    app.emit_to(TEXT_WINDOW_LABEL, TEXT_EVENT, payload)
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_widget_text_overlay_payload() -> Result<Option<WidgetTextOverlayPayload>, String> {
+    let cached = text_overlay_payload_store()
+        .lock()
+        .map_err(|e| format!("Text overlay state lock failed: {e}"))?;
+    Ok(cached.clone())
+}
+
+#[tauri::command]
+pub async fn hide_widget_text_overlay(app: AppHandle) -> Result<(), String> {
+    {
+        let mut cached = text_overlay_payload_store()
+            .lock()
+            .map_err(|e| format!("Text overlay state lock failed: {e}"))?;
+        *cached = None;
+    }
+
+    if let Some(win) = app.get_webview_window(TEXT_WINDOW_LABEL) {
         win.hide().map_err(|e| e.to_string())?;
     }
 

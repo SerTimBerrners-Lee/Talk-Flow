@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { IconCheck, IconClipboard, IconPencil, IconTrash } from "../lib/icons";
 
@@ -19,7 +19,7 @@ import {
   transcriptToText,
   type SummarizeProgress,
 } from "../lib/summarize";
-import { formatErrorMessage } from "../lib/utils";
+import { formatDurationMs, formatErrorMessage } from "../lib/utils";
 import { useI18n } from "../lib/i18n";
 import { SlideOverModal } from "./SlideOverModal";
 import { RowActionsMenu, type RowActionItem } from "./RowActionsMenu";
@@ -50,6 +50,8 @@ export function SummaryModal({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const summaryRunRef = useRef<{ id: number; cancelled: boolean } | null>(null);
+  const nextRunIdRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -101,11 +103,6 @@ export function SummaryModal({
     }
   };
 
-  const durationLabel = (ms: number): string =>
-    ms < 1000
-      ? t("mainTab.durationMs", { value: ms })
-      : t("mainTab.durationS", { value: (ms / 1000).toFixed(1) });
-
   const progressLabel = (): string => {
     if (!progress) return t("summary.progress.preparing");
     if (progress.phase === "map") {
@@ -129,6 +126,9 @@ export function SummaryModal({
       if (!text) setError(t("summary.empty.noText"));
       return;
     }
+    const runState = { id: nextRunIdRef.current + 1, cancelled: false };
+    nextRunIdRef.current = runState.id;
+    summaryRunRef.current = runState;
     setRunning(true);
     setError(null);
     setProgress(null);
@@ -139,7 +139,9 @@ export function SummaryModal({
         prompt: selected,
         settings,
         onProgress: setProgress,
+        shouldCancel: () => summaryRunRef.current !== runState || runState.cancelled,
       });
+      if (summaryRunRef.current !== runState || runState.cancelled) return;
       const summary: SummaryEntry = {
         id: crypto.randomUUID(),
         createdAt: new Date().toISOString(),
@@ -153,12 +155,33 @@ export function SummaryModal({
       if (updated) onEntryChange?.(updated);
       setExpandedId(summary.id);
     } catch (e) {
-      setError(formatErrorMessage(e));
+      if (summaryRunRef.current === runState && !runState.cancelled) {
+        setError(formatErrorMessage(e));
+      }
     } finally {
-      setRunning(false);
-      setProgress(null);
+      if (summaryRunRef.current === runState) {
+        summaryRunRef.current = null;
+        setRunning(false);
+        setProgress(null);
+      }
     }
   };
+
+  const stopSummary = (): void => {
+    if (summaryRunRef.current) {
+      summaryRunRef.current.cancelled = true;
+    }
+    setRunning(false);
+    setProgress(null);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (summaryRunRef.current) {
+        summaryRunRef.current.cancelled = true;
+      }
+    };
+  }, []);
 
   const copy = async (item: SummaryEntry): Promise<void> => {
     try {
@@ -192,7 +215,7 @@ export function SummaryModal({
   const promptOptions = prompts.map((p) => ({ value: p.id, label: p.name }));
 
   return (
-    <SlideOverModal onClose={onClose} title={t("summary.title")} width="100vw">
+    <SlideOverModal onClose={onClose} title={t("summary.title")} width="100vw" topOffset="var(--summary-modal-top-offset, 0px)">
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         {/* Generate controls */}
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -204,11 +227,11 @@ export function SummaryModal({
             <button
               type="button"
               className="btn"
-              onClick={() => void generate()}
-              disabled={!canRun}
-              style={{ minHeight: 38, padding: "0 18px", borderRadius: 8, justifyContent: "center", background: "var(--accent)", color: "var(--accent-contrast)", opacity: canRun ? 1 : 0.6, flexShrink: 0, whiteSpace: "nowrap", fontWeight: 600 }}
+              onClick={running ? stopSummary : () => void generate()}
+              disabled={!running && !canRun}
+              style={{ minHeight: 38, padding: "0 18px", borderRadius: 8, justifyContent: "center", background: running ? "var(--surface-hi)" : "var(--accent)", color: running ? "var(--text-hi)" : "var(--accent-contrast)", opacity: running || canRun ? 1 : 0.6, flexShrink: 0, whiteSpace: "nowrap", fontWeight: 600 }}
             >
-              {running ? t("summary.generating") : summaries.length ? t("summary.regenerate") : t("summary.generate")}
+              {running ? t("summary.stop") : summaries.length ? t("summary.regenerate") : t("summary.generate")}
             </button>
           </div>
 
@@ -257,7 +280,7 @@ export function SummaryModal({
                       <td style={{ verticalAlign: "top", color: "var(--text-low)" }}>
                         <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
                           <span style={{ whiteSpace: "nowrap" }}>{formatTime(item.createdAt)}</span>
-                          <span style={{ fontSize: 10, opacity: 0.55, letterSpacing: "0.02em", whiteSpace: "nowrap" }}>{durationLabel(item.durationMs)}</span>
+                          <span style={{ fontSize: 10, opacity: 0.55, letterSpacing: "0.02em", whiteSpace: "nowrap" }}>{formatDurationMs(item.durationMs, lang)}</span>
                           <span style={{ fontSize: 10, opacity: 0.55, letterSpacing: "0.02em", whiteSpace: "normal", wordBreak: "break-word", lineHeight: 1.35 }}>{item.promptName}</span>
                         </div>
                       </td>

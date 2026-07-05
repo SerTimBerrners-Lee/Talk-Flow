@@ -13,6 +13,15 @@ import { tn } from "./i18n";
 const DIRECT_LIMIT_CHARS = 16000;
 const MAX_CHUNK_CHARS = 12000;
 const CHUNK_OVERLAP_CHARS = 400;
+const LOCAL_DIRECT_LIMIT_CHARS = 6000;
+const LOCAL_MAX_CHUNK_CHARS = 4500;
+const MAP_MAX_TOKENS = 260;
+const REDUCE_MAX_TOKENS = 360;
+const FINAL_MAX_TOKENS = 1200;
+export const LOCAL_TEXT_PROCESSING_LIMITS = {
+  directChars: LOCAL_DIRECT_LIMIT_CHARS,
+  chunkChars: LOCAL_MAX_CHUNK_CHARS,
+} as const;
 
 export type SummaryPromptInput = { prompt: string; temperature?: number };
 export type SummaryBackendKind = "cloud" | "custom" | "local";
@@ -28,6 +37,13 @@ export interface SummarizeParams {
   prompt: SummaryPromptInput;
   settings: AppSettings;
   onProgress?: (progress: SummarizeProgress) => void;
+  shouldCancel?: () => boolean;
+}
+
+export interface ProcessLongTextParams extends SummarizeParams {
+  emptyTextError?: string;
+  emptyPromptError?: string;
+  noModelError?: string;
 }
 
 /** Flatten a transcript history entry to plain text suitable for summarization. */
@@ -103,6 +119,7 @@ type RunOnce = (params: {
   text: string;
   prompt: string;
   temperature?: number;
+  maxTokens?: number;
 }) => Promise<string>;
 
 export interface ResolvedSummaryBackend {
@@ -121,12 +138,13 @@ function cloudRunner(settings: AppSettings): RunOnce {
 }
 
 function llmRunner(endpoint: string, model: string, apiKey: string): RunOnce {
-  return async ({ text, prompt, temperature }) => {
+  return async ({ text, prompt, temperature, maxTokens }) => {
     const response = await invoke<ProcessTextResponse>("process_text", {
       req: {
         text,
         prompt,
         temperature: temperature ?? null,
+        max_tokens: maxTokens ?? null,
         endpoint: endpoint || null,
         model: model || null,
         api_key: apiKey || null,
@@ -134,6 +152,11 @@ function llmRunner(endpoint: string, model: string, apiKey: string): RunOnce {
     });
     return response.result;
   };
+}
+
+function isRestartableLocalLlmError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /sending request|connect|connection|refused|closed|terminated|reset|timed out|timeout/i.test(message);
 }
 
 /**
@@ -150,22 +173,75 @@ function localLlmRunner(
   apiKey: string,
 ): RunOnce {
   let baseUrl: string | null = null;
-  return async ({ text, prompt, temperature }) => {
-    if (!baseUrl) {
-      baseUrl = await invoke<string>("start_local_llm", { modelId });
+  return async ({ text, prompt, temperature, maxTokens }) => {
+    let lastRestartableError: unknown = null;
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (!baseUrl || attempt > 0) {
+        if (attempt > 0) {
+          await invoke<void>("stop_local_llm").catch(() => {});
+        }
+        baseUrl = await invoke<string>("start_local_llm", { modelId });
+      }
+
+      try {
+        const response = await invoke<ProcessTextResponse>("process_text", {
+          req: {
+            text,
+            prompt,
+            temperature: temperature ?? null,
+            max_tokens: maxTokens ?? null,
+            endpoint: baseUrl || fallbackEndpoint || null,
+            model: model || null,
+            api_key: apiKey || null,
+          },
+        });
+        return response.result;
+      } catch (error) {
+        if (!isRestartableLocalLlmError(error)) {
+          throw error;
+        }
+        lastRestartableError = error;
+        baseUrl = null;
+      }
     }
-    const response = await invoke<ProcessTextResponse>("process_text", {
-      req: {
-        text,
-        prompt,
-        temperature: temperature ?? null,
-        endpoint: baseUrl || fallbackEndpoint || null,
-        model: model || null,
-        api_key: apiKey || null,
-      },
-    });
-    return response.result;
+
+    const message = lastRestartableError instanceof Error
+      ? lastRestartableError.message
+      : String(lastRestartableError);
+    throw new Error(
+      `Локальная текстовая модель не смогла обработать фрагмент после нескольких перезапусков runtime. ` +
+      `Попробуйте выбрать модель крупнее или облачный режим для длинных записей. Детали: ${message}`,
+    );
   };
+}
+
+function formatPartialBlocks(blocks: string[]): string {
+  return blocks
+    .map((partial, index) => `Часть ${index + 1}:\n${partial}`)
+    .join("\n\n");
+}
+
+function groupBlocksByLimit(blocks: string[], maxChars: number): string[][] {
+  const groups: string[][] = [];
+  let current: string[] = [];
+
+  for (const block of blocks) {
+    const candidate = [...current, block];
+    const candidateLength = formatPartialBlocks(candidate).length;
+    if (current.length > 0 && candidateLength > maxChars) {
+      groups.push(current);
+      current = [block];
+    } else {
+      current = candidate;
+    }
+  }
+
+  if (current.length > 0) {
+    groups.push(current);
+  }
+
+  return groups;
 }
 
 // The bundled local text runtime prefers 127.0.0.1:8011, then falls back to
@@ -282,50 +358,142 @@ export async function generatePromptText(
   return generated.trim();
 }
 
-async function runMapReduce(
+export async function runTextMapReduce(
   text: string,
   instruction: string,
   temperature: number | undefined,
   run: RunOnce,
   onProgress?: (progress: SummarizeProgress) => void,
+  shouldCancel?: () => boolean,
+  limits: { directChars: number; chunkChars: number } = {
+    directChars: DIRECT_LIMIT_CHARS,
+    chunkChars: MAX_CHUNK_CHARS,
+  },
 ): Promise<string> {
   const trimmed = text.trim();
+  const throwIfCancelled = (): void => {
+    if (shouldCancel?.()) {
+      throw new Error("Саммари остановлено.");
+    }
+  };
 
-  if (trimmed.length <= DIRECT_LIMIT_CHARS) {
+  throwIfCancelled();
+
+  if (trimmed.length <= limits.directChars) {
     onProgress?.({ phase: "single", current: 1, total: 1 });
-    return run({ text: trimmed, prompt: instruction, temperature });
+    const result = await run({ text: trimmed, prompt: instruction, temperature });
+    throwIfCancelled();
+    return result;
   }
 
-  const chunks = splitIntoChunks(trimmed);
+  const chunks = splitIntoChunks(trimmed, limits.chunkChars);
   const partials: string[] = [];
 
   for (let index = 0; index < chunks.length; index += 1) {
+    throwIfCancelled();
     onProgress?.({ phase: "map", current: index + 1, total: chunks.length });
     const partial = await run({
       text: chunks[index],
       prompt:
         `${instruction}\n\n` +
-        `Это часть ${index + 1} из ${chunks.length} длинной расшифровки. ` +
-        "Сделай по ней краткие тезисы — позже части объединят в общий результат. " +
-        "Не выдумывай то, чего нет в тексте.",
+        `Это часть ${index + 1} из ${chunks.length} длинного текста. ` +
+        "Сейчас НЕ пиши финальное саммари. Извлеки только факты для будущего итогового ответа: " +
+        "тема, разобранный материал, ошибки/затруднения, прогресс, домашнее задание, рекомендации, решения и действия — только если они есть в этом фрагменте. " +
+        "Верни до 8 коротких маркеров, без вступления, без просьб прислать текст, без выдуманных фактов.",
       temperature,
+      maxTokens: MAP_MAX_TOKENS,
     });
+    throwIfCancelled();
     partials.push(partial.trim());
   }
 
+  throwIfCancelled();
   onProgress?.({ phase: "reduce", current: chunks.length, total: chunks.length });
-  const combined = partials
-    .map((partial, index) => `Часть ${index + 1}:\n${partial}`)
-    .join("\n\n");
+  let reduceInputs = partials;
+  let combined = formatPartialBlocks(reduceInputs);
 
-  return run({
+  while (combined.length > limits.directChars && reduceInputs.length > 1) {
+    const groups = groupBlocksByLimit(reduceInputs, limits.directChars);
+    if (groups.length <= 1) {
+      break;
+    }
+
+    const merged: string[] = [];
+    for (let index = 0; index < groups.length; index += 1) {
+      throwIfCancelled();
+      onProgress?.({ phase: "reduce", current: index + 1, total: groups.length });
+      const partial = await run({
+        text: formatPartialBlocks(groups[index]),
+        prompt:
+          `${instruction}\n\n` +
+          `Ниже — группа ${index + 1} из ${groups.length} промежуточных фактов по длинному тексту. ` +
+          "Сейчас НЕ пиши финальное саммари. Сожми и объедини факты в до 10 коротких маркеров строго по инструкции. " +
+          "Удаляй повторы, не добавляй новых фактов, не проси прислать текст.",
+        temperature,
+        maxTokens: REDUCE_MAX_TOKENS,
+      });
+      throwIfCancelled();
+      merged.push(partial.trim());
+    }
+
+    reduceInputs = merged;
+    combined = formatPartialBlocks(reduceInputs);
+  }
+
+  const result = await run({
     text: combined,
     prompt:
       `${instruction}\n\n` +
-      "Выше указана инструкция. Ниже — тезисы по частям длинной расшифровки. " +
-      "Объедини их в один связный результат строго по инструкции, без повторов и без новых фактов.",
+      "Выше указана инструкция. Ниже — факты по частям длинного текста. " +
+      "Объедини их в один связный итоговый результат строго по инструкции, без повторов и без новых фактов. " +
+      "Не упоминай номера частей и не проси прислать исходный текст.",
     temperature,
+    maxTokens: FINAL_MAX_TOKENS,
   });
+  throwIfCancelled();
+  return result;
+}
+
+/**
+ * Run an explicit text prompt with automatic chunking for long inputs. This is
+ * intentionally generic: chat, summaries, and prompt tools can all route large
+ * text through the same bounded calls instead of sending an oversized local LLM
+ * request that may kill the runtime.
+ */
+export async function processLongTextWithPrompt({
+  text,
+  prompt,
+  settings,
+  onProgress,
+  shouldCancel,
+  emptyTextError = tn("summarize.errNoText"),
+  emptyPromptError = tn("summarize.errEmptyPrompt"),
+  noModelError = tn("summarize.errNoModel"),
+}: ProcessLongTextParams): Promise<string> {
+  const instruction = prompt.prompt.trim();
+  const trimmed = text.trim();
+
+  if (!trimmed) {
+    throw new Error(emptyTextError);
+  }
+  if (!instruction) {
+    throw new Error(emptyPromptError);
+  }
+
+  const backend = resolveSummaryBackend(settings);
+  if (!backend) {
+    throw new Error(noModelError);
+  }
+
+  return runTextMapReduce(
+    trimmed,
+    instruction,
+    prompt.temperature,
+    backend.run,
+    onProgress,
+    shouldCancel,
+    backend.kind === "local" ? LOCAL_TEXT_PROCESSING_LIMITS : undefined,
+  );
 }
 
 /**
@@ -338,27 +506,13 @@ export async function summarizeTranscript({
   prompt,
   settings,
   onProgress,
+  shouldCancel,
 }: SummarizeParams): Promise<string> {
-  const instruction = prompt.prompt.trim();
-  const trimmed = text.trim();
-
-  if (!trimmed) {
-    throw new Error(tn("summarize.errNoText"));
-  }
-  if (!instruction) {
-    throw new Error(tn("summarize.errEmptyPrompt"));
-  }
-
-  const backend = resolveSummaryBackend(settings);
-  if (!backend) {
-    throw new Error(tn("summarize.errNoModel"));
-  }
-
-  return runMapReduce(
-    trimmed,
-    instruction,
-    prompt.temperature,
-    backend.run,
+  return processLongTextWithPrompt({
+    text,
+    prompt,
+    settings,
     onProgress,
-  );
+    shouldCancel,
+  });
 }

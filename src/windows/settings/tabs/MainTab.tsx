@@ -44,15 +44,19 @@ import { isSummaryAvailable } from "../../../lib/summarize";
 import { retryCallCaptureHistoryEntry } from "../../../lib/callCapture";
 import { retryFileHistoryEntry } from "../../../lib/fileTranscription";
 import { cancelProcessing } from "../../../lib/processingControl";
+import { formatDurationMs } from "../../../lib/utils";
 import { logError } from "../../../lib/logger";
 import { TranscriptionStatsPanel } from "../../../components/TranscriptionStatsPanel";
 import { SummaryModal } from "../../../components/SummaryModal";
 import { RowActionsMenu, type RowActionItem } from "../../../components/RowActionsMenu";
+import { HistoryAudioTrack } from "../../../components/HistoryAudioTrack";
 import { retryHistoryEntry } from "../../widget/services/transcriptionPipeline";
 import { useI18n, type TFunc, type UiLanguage, type MsgKey } from "../../../lib/i18n";
 
 interface MainTabProps {
   initialHistory?: HistoryEntry[];
+  focusedEntryId?: string | null;
+  focusedEntryNonce?: number;
 }
 
 interface HistoryGroup {
@@ -294,7 +298,11 @@ function formatDayLabel(timestamp: string, t: TFunc, lang: UiLanguage): string {
     weekday: "long",
   });
 }
-export function MainTab({ initialHistory = [] }: MainTabProps) {
+export function MainTab({
+  initialHistory = [],
+  focusedEntryId = null,
+  focusedEntryNonce = 0,
+}: MainTabProps) {
   const { t, lang } = useI18n();
   const [history, setHistory] = useState<HistoryEntry[]>(initialHistory);
   const [copied, setCopied] = useState<string | null>(null);
@@ -315,7 +323,9 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
   >(null);
   const [summaryEntry, setSummaryEntry] = useState<HistoryEntry | null>(null);
   const [summaryAvailable, setSummaryAvailable] = useState(false);
+  const [activeAudioId, setActiveAudioId] = useState<string | null>(null);
   const heroPointerStartX = useRef<number | null>(null);
+  const focusedRowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
 
   useEffect(() => {
     const syncHotkeyLabel = async (reload = false) => {
@@ -379,9 +389,30 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
     return () => window.clearTimeout(timeout);
   }, [heroHasAdvanced, heroPaused, heroSlideIndex]);
 
+  useEffect(() => {
+    if (!focusedEntryId) return;
+
+    if (historyFilter !== "all") {
+      setHistoryFilter("all");
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      focusedRowRefs.current.get(focusedEntryId)?.scrollIntoView({
+        block: "center",
+        behavior: "smooth",
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusedEntryId, focusedEntryNonce, history, historyFilter]);
+
   const deleteEntry = async (id: string) => {
     await deleteHistoryEntry(id);
     setHistory((h) => h.filter((x) => x.id !== id));
+    setActiveAudioId((current) =>
+      current?.startsWith(`${id}:`) ? null : current,
+    );
     setEditingSpeakerEntryId((current) => (current === id ? null : current));
     await emit(HISTORY_DELETED_EVENT, { id });
   };
@@ -397,6 +428,7 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
 
     await clearHistory();
     setHistory([]);
+    setActiveAudioId(null);
     setIsClearArmed(false);
     await emit(HISTORY_CLEARED_EVENT);
   };
@@ -992,15 +1024,27 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                         return (
                           <tr
                             key={item.id}
+                            ref={(element) => {
+                              if (element) {
+                                focusedRowRefs.current.set(item.id, element);
+                              } else {
+                                focusedRowRefs.current.delete(item.id);
+                              }
+                            }}
                             onDoubleClick={() =>
                               navigator.clipboard.writeText(item.cleaned)
                             }
                             style={{
+                              background:
+                                focusedEntryId === item.id
+                                  ? "rgba(0,0,0,0.04)"
+                                  : "transparent",
                               borderBottom:
                                 index < group.items.length - 1
                                   ? "1px solid var(--table-row-border)"
                                   : "none",
                               cursor: "default",
+                              transition: "background 0.18s ease",
                             }}
                           >
                             <td
@@ -1034,9 +1078,7 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                                       letterSpacing: "0.02em",
                                     }}
                                   >
-                                    {item.processingTime < 1000
-                                      ? t("mainTab.durationMs", { value: item.processingTime })
-                                      : t("mainTab.durationS", { value: (item.processingTime / 1000).toFixed(1) })}
+                                    {formatDurationMs(item.processingTime, lang)}
                                   </span>
                                 )}
                                 {historyFilter === "all" && (
@@ -1154,6 +1196,24 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                                       onToggle={() => toggleExpanded(item.id)}
                                     />
                                   )}
+                                  {item.audioPath ||
+                                  item.audioBase64 ||
+                                  item.callTracks?.length ? (
+                                    <div
+                                      style={{
+                                        width: "100%",
+                                        maxWidth: 520,
+                                        margin: "0 auto",
+                                        minWidth: 0,
+                                      }}
+                                    >
+                                      <HistoryAudioTrack
+                                        entry={item}
+                                        activeAudioId={activeAudioId}
+                                        onActiveAudioChange={setActiveAudioId}
+                                      />
+                                    </div>
+                                  ) : null}
                                 </div>
                                 <div
                                   style={{
@@ -1189,7 +1249,7 @@ export function MainTab({ initialHistory = [] }: MainTabProps) {
                                   ) : (item.status === "failed" ||
                                       item.status === "interrupted") &&
                                     ((source === "voice" &&
-                                      Boolean(item.audioBase64)) ||
+                                      Boolean(item.audioPath || item.audioBase64)) ||
                                       (source === "call" &&
                                         Boolean(item.callTracks?.length)) ||
                                       (source === "file" &&

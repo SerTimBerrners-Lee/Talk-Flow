@@ -4,6 +4,7 @@ import type {
   RefAttributes,
 } from "react";
 
+import { ArrowUpIcon as RawIconArrowUp } from "@phosphor-icons/react/ArrowUp";
 import { SlidersHorizontalIcon as RawIconAdjustmentsHorizontal } from "@phosphor-icons/react/SlidersHorizontal";
 import { WarningCircleIcon as RawIconAlertCircle } from "@phosphor-icons/react/WarningCircle";
 import { WarningIcon as RawIconAlertTriangle } from "@phosphor-icons/react/Warning";
@@ -25,6 +26,7 @@ import { DownloadSimpleIcon as RawIconDownload } from "@phosphor-icons/react/Dow
 import { ArrowSquareOutIcon as RawIconExternalLink } from "@phosphor-icons/react/ArrowSquareOut";
 import { FileAudioIcon as RawIconFileMusic } from "@phosphor-icons/react/FileAudio";
 import { GaugeIcon as RawIconGauge } from "@phosphor-icons/react/Gauge";
+import { GlobeHemisphereWestIcon as RawIconGlobe } from "@phosphor-icons/react/GlobeHemisphereWest";
 import { HeadphonesIcon as RawIconHeadphones } from "@phosphor-icons/react/Headphones";
 import { QuestionIcon as RawIconHelpCircle } from "@phosphor-icons/react/Question";
 import { HouseIcon as RawIconHome } from "@phosphor-icons/react/House";
@@ -38,6 +40,7 @@ import { EnvelopeIcon as RawIconMail } from "@phosphor-icons/react/Envelope";
 import { ChatCircleIcon as RawIconMessage } from "@phosphor-icons/react/ChatCircle";
 import { MicrophoneIcon as RawIconMicrophone } from "@phosphor-icons/react/Microphone";
 import { MoonIcon as RawIconMoon } from "@phosphor-icons/react/Moon";
+import { PauseIcon as RawIconPause } from "@phosphor-icons/react/Pause";
 import { PencilSimpleIcon as RawIconPencil } from "@phosphor-icons/react/PencilSimple";
 import { PhoneCallIcon as RawIconPhoneCall } from "@phosphor-icons/react/PhoneCall";
 import { PlayIcon as RawIconPlayerPlay } from "@phosphor-icons/react/Play";
@@ -74,6 +77,7 @@ export type Icon = ForwardRefExoticComponent<IconProps>;
 const IconAdjustmentsHorizontal = RawIconAdjustmentsHorizontal as Icon;
 const IconAlertCircle = RawIconAlertCircle as Icon;
 const IconAlertTriangle = RawIconAlertTriangle as Icon;
+const IconArrowUp = RawIconArrowUp as Icon;
 const IconBolt = RawIconBolt as Icon;
 const IconBriefcase = RawIconBriefcase as Icon;
 const IconBroadcast = RawIconBroadcast as Icon;
@@ -92,6 +96,7 @@ const IconDownload = RawIconDownload as Icon;
 const IconExternalLink = RawIconExternalLink as Icon;
 const IconFileMusic = RawIconFileMusic as Icon;
 const IconGauge = RawIconGauge as Icon;
+const IconGlobe = RawIconGlobe as Icon;
 const IconHeadphones = RawIconHeadphones as Icon;
 const IconHelpCircle = RawIconHelpCircle as Icon;
 const IconHome = RawIconHome as Icon;
@@ -105,6 +110,7 @@ const IconMail = RawIconMail as Icon;
 const IconMessage = RawIconMessage as Icon;
 const IconMicrophone = RawIconMicrophone as Icon;
 const IconMoon = RawIconMoon as Icon;
+const IconPause = RawIconPause as Icon;
 const IconPencil = RawIconPencil as Icon;
 const IconPhoneCall = RawIconPhoneCall as Icon;
 const IconPlayerPlay = RawIconPlayerPlay as Icon;
@@ -128,6 +134,7 @@ export {
   IconAdjustmentsHorizontal,
   IconAlertCircle,
   IconAlertTriangle,
+  IconArrowUp,
   IconBolt,
   IconBriefcase,
   IconBroadcast,
@@ -146,6 +153,7 @@ export {
   IconExternalLink,
   IconFileMusic,
   IconGauge,
+  IconGlobe,
   IconHeadphones,
   IconHelpCircle,
   IconHome,
@@ -159,6 +167,7 @@ export {
   IconMessage,
   IconMicrophone,
   IconMoon,
+  IconPause,
   IconPencil,
   IconPhoneCall,
   IconPlayerPlay,

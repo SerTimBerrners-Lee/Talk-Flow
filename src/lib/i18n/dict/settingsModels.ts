@@ -204,16 +204,16 @@ export const settingsModels = {
     en: "Pick a model, download it through the local STT runtime, and use it without the cloud.",
   },
   "models.local.recommendedBadge": { ru: "Рекомендуем", en: "Recommended" },
-  "models.local.runtimeSuffix": { ru: "Runtime: {runtime}.", en: "Runtime: {runtime}." },
+  "models.local.streamingToggle": { ru: "Стриминг", en: "Streaming" },
+  "models.local.streamingToggleTitle": {
+    ru: "Включает streaming-режим для голосовой диктовки. При транскрибации файлов он всегда отключен.",
+    en: "Enables streaming mode for voice dictation. It is always disabled for file transcription.",
+  },
 
   // Per-model descriptions (ru = the original constant text)
   "models.local.whisper-large-v3-turbo.description": {
     ru: "Рекомендуемый Whisper-вариант: быстрый, качественный и хорошо подходит для диктовки.",
     en: "The recommended Whisper variant: fast, accurate, and well suited for dictation.",
-  },
-  "models.local.whisper-large-v3-turbo-quantized.description": {
-    ru: "Более легкий вариант Turbo для локальной работы с меньшим расходом памяти.",
-    en: "A lighter Turbo variant for local use with lower memory consumption.",
   },
   "models.local.whisper-small.description": {
     ru: "Баланс скорости и качества для слабых машин и быстрых коротких диктовок.",
@@ -222,10 +222,6 @@ export const settingsModels = {
   "models.local.whisper-large-v3.description": {
     ru: "Максимальное качество Whisper, но выше требования к памяти и времени обработки.",
     en: "Maximum Whisper quality, but with higher memory and processing-time requirements.",
-  },
-  "models.local.whisper-large-v2.description": {
-    ru: "Предыдущая large-версия Whisper для совместимости с существующими локальными установками.",
-    en: "The previous large Whisper version, for compatibility with existing local setups.",
   },
   "models.local.whisper-medium.description": {
     ru: "Промежуточный вариант между Small и Large: заметно качественнее Small, но тяжелее.",
@@ -247,6 +243,22 @@ export const settingsModels = {
     ru: "Стабильная английская Parakeet TDT-модель через transcribe.cpp GGUF runtime.",
     en: "A stable English Parakeet TDT model via the transcribe.cpp GGUF runtime.",
   },
+  "models.local.nemotron-35-asr-streaming-06b.description": {
+    ru: "Мультиязычная streaming ASR-модель Nemotron для очень быстрой локальной диктовки.",
+    en: "A multilingual Nemotron streaming ASR model for very fast local dictation.",
+  },
+  "models.local.nemotron-speech-streaming-en-06b.description": {
+    ru: "Английская streaming ASR-модель Nemotron с минимальной задержкой для live-диктовки.",
+    en: "An English Nemotron streaming ASR model with minimal latency for live dictation.",
+  },
+  "models.local.moonshine-streaming-tiny.description": {
+    ru: "Очень лёгкая английская streaming-модель для мгновенного локального распознавания.",
+    en: "A very small English streaming model for instant local recognition.",
+  },
+  "models.local.moonshine-streaming-small.description": {
+    ru: "Лёгкая английская streaming-модель: быстрее Whisper Small и подходит для live-ввода.",
+    en: "A lightweight English streaming model: faster than Whisper Small and suitable for live input.",
+  },
   "models.local.qwen3-asr-06b.description": {
     ru: "Компактная ASR-модель Qwen для локального распознавания через transcribe.cpp GGUF runtime.",
     en: "A compact Qwen ASR model for local recognition via the transcribe.cpp GGUF runtime.",
@@ -263,12 +275,16 @@ export const settingsModels = {
   "models.accuracyValue.basic": { ru: "базовая", en: "basic" },
   "models.accuracyValue.lowPlus": { ru: "низкая+", en: "low+" },
   "models.accuracyValue.utility": { ru: "служебная", en: "utility" },
+  "models.languageValue.english": { ru: "Английский", en: "English" },
+  "models.languageValue.count": { ru: "{value} языков", en: "{value} languages" },
 
   // ── Stat labels / titles ──
   "models.stat.speed": { ru: "Скорость", en: "Speed" },
   "models.stat.accuracy": { ru: "Точность", en: "Accuracy" },
+  "models.stat.streaming": { ru: "Стриминг", en: "Streaming" },
   "models.stat.speedTitle": { ru: "Скорость: {value}", en: "Speed: {value}" },
   "models.stat.accuracyTitle": { ru: "Точность: {value}", en: "Accuracy: {value}" },
+  "models.stat.languagesTitle": { ru: "Языки: {value}", en: "Languages: {value}" },
   "models.stat.downloadSizeTitle": { ru: "Размер загрузки: {value}", en: "Download size: {value}" },
 
   // ── Download size formatting ──

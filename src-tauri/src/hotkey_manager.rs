@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Mutex;
 use std::thread::{self, JoinHandle};
@@ -37,6 +38,37 @@ pub struct HandyHotkeyState {
 struct ActiveHotkey {
     id: HotkeyId,
     value: String,
+}
+
+#[derive(Default)]
+struct ActiveHotkeys {
+    by_id: HashMap<HotkeyId, ActiveHotkey>,
+    by_value: HashMap<String, HotkeyId>,
+}
+
+impl ActiveHotkeys {
+    fn contains_value(&self, value: &str) -> bool {
+        self.by_value.contains_key(value)
+    }
+
+    fn get_by_id(&self, id: HotkeyId) -> Option<&ActiveHotkey> {
+        self.by_id.get(&id)
+    }
+
+    fn insert(&mut self, hotkey: ActiveHotkey) {
+        self.by_value.insert(hotkey.value.clone(), hotkey.id);
+        self.by_id.insert(hotkey.id, hotkey);
+    }
+
+    fn remove_by_value(&mut self, value: &str) -> Option<ActiveHotkey> {
+        let id = self.by_value.remove(value)?;
+        self.by_id.remove(&id)
+    }
+
+    fn drain(&mut self) -> Vec<ActiveHotkey> {
+        self.by_value.clear();
+        self.by_id.drain().map(|(_, hotkey)| hotkey).collect()
+    }
 }
 
 impl HandyHotkeyState {
@@ -116,17 +148,14 @@ fn run_hotkey_thread(app: AppHandle, command_receiver: Receiver<HotkeyCommand>) 
 
     let manager_result = HotkeyManager::new_with_blocking()
         .map_err(|err| format!("Не удалось запустить handy-keys: {}", err));
-    let mut active_hotkey: Option<ActiveHotkey> = None;
+    let mut active_hotkeys = ActiveHotkeys::default();
 
     loop {
         if let Ok(manager) = manager_result.as_ref() {
             while let Some(event) = manager.try_recv() {
-                let Some(active) = active_hotkey.as_ref() else {
+                let Some(active) = active_hotkeys.get_by_id(event.id) else {
                     continue;
                 };
-                if event.id != active.id {
-                    continue;
-                }
 
                 let state = match event.state {
                     HotkeyState::Pressed => "Pressed",
@@ -147,7 +176,7 @@ fn run_hotkey_thread(app: AppHandle, command_receiver: Receiver<HotkeyCommand>) 
                 }
 
                 let result = match manager_result.as_ref() {
-                    Ok(manager) => handle_command(manager, command, &mut active_hotkey),
+                    Ok(manager) => handle_command(manager, command, &mut active_hotkeys),
                     Err(err) => reply_manager_error(command, err),
                 };
 
@@ -166,16 +195,16 @@ fn run_hotkey_thread(app: AppHandle, command_receiver: Receiver<HotkeyCommand>) 
 fn handle_command(
     manager: &HotkeyManager,
     command: HotkeyCommand,
-    active_hotkey: &mut Option<ActiveHotkey>,
+    active_hotkeys: &mut ActiveHotkeys,
 ) -> Result<(), String> {
     match command {
         HotkeyCommand::Register { hotkey, response } => {
-            let result = register_hotkey(manager, active_hotkey, &hotkey);
+            let result = register_hotkey(manager, active_hotkeys, &hotkey);
             let _ = response.send(result.clone());
             result
         }
         HotkeyCommand::Unregister { hotkey, response } => {
-            let result = unregister_hotkey(manager, active_hotkey, hotkey.as_deref());
+            let result = unregister_hotkey(manager, active_hotkeys, hotkey.as_deref());
             let _ = response.send(result.clone());
             result
         }
@@ -196,14 +225,11 @@ fn reply_manager_error(command: HotkeyCommand, err: &str) -> Result<(), String> 
 
 fn register_hotkey(
     manager: &HotkeyManager,
-    active_hotkey: &mut Option<ActiveHotkey>,
+    active_hotkeys: &mut ActiveHotkeys,
     raw_hotkey: &str,
 ) -> Result<(), String> {
     let hotkey_value = normalize_for_handy_keys(raw_hotkey);
-    if active_hotkey
-        .as_ref()
-        .is_some_and(|active| active.value == hotkey_value)
-    {
+    if active_hotkeys.contains_value(&hotkey_value) {
         return Ok(());
     }
 
@@ -217,12 +243,10 @@ fn register_hotkey(
         .register(hotkey)
         .map_err(|err| format!("Не удалось зарегистрировать «{}»: {}", raw_hotkey, err))?;
 
-    if let Some(previous) = active_hotkey.replace(ActiveHotkey {
+    active_hotkeys.insert(ActiveHotkey {
         id: next_id,
         value: hotkey_value.clone(),
-    }) {
-        let _ = manager.unregister(previous.id);
-    }
+    });
 
     logger::log_info(
         "HOTKEY",
@@ -233,20 +257,18 @@ fn register_hotkey(
 
 fn unregister_hotkey(
     manager: &HotkeyManager,
-    active_hotkey: &mut Option<ActiveHotkey>,
+    active_hotkeys: &mut ActiveHotkeys,
     raw_hotkey: Option<&str>,
 ) -> Result<(), String> {
-    let should_unregister = match (active_hotkey.as_ref(), raw_hotkey) {
-        (None, _) => false,
-        (Some(_), None) => true,
-        (Some(active), Some(value)) => active.value == normalize_for_handy_keys(value),
+    let previous_hotkeys = match raw_hotkey {
+        Some(value) => active_hotkeys
+            .remove_by_value(&normalize_for_handy_keys(value))
+            .into_iter()
+            .collect::<Vec<_>>(),
+        None => active_hotkeys.drain(),
     };
 
-    if !should_unregister {
-        return Ok(());
-    }
-
-    if let Some(previous) = active_hotkey.take() {
+    for previous in previous_hotkeys {
         manager
             .unregister(previous.id)
             .map_err(|err| format!("Не удалось снять hotkey «{}»: {}", previous.value, err))?;
@@ -277,7 +299,12 @@ fn normalize_for_handy_keys(raw_hotkey: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_for_handy_keys;
+    use super::{normalize_for_handy_keys, ActiveHotkey, ActiveHotkeys};
+    use handy_keys::HotkeyId;
+
+    fn hotkey_id(value: u32) -> HotkeyId {
+        serde_json::from_value(serde_json::json!(value)).expect("HotkeyId should deserialize")
+    }
 
     #[test]
     fn normalizes_talkis_hotkey_labels_for_handy_keys() {
@@ -286,5 +313,51 @@ mod tests {
             "Ctrl+Alt+Shift+Space"
         );
         assert_eq!(normalize_for_handy_keys("Command+K"), "Cmd+K");
+    }
+
+    #[test]
+    fn tracks_multiple_active_hotkeys() {
+        let mut active = ActiveHotkeys::default();
+        let first = hotkey_id(1);
+        let second = hotkey_id(2);
+
+        active.insert(ActiveHotkey {
+            id: first,
+            value: "Cmd+Alt+Y".to_string(),
+        });
+        active.insert(ActiveHotkey {
+            id: second,
+            value: "Ctrl+Alt+Space".to_string(),
+        });
+
+        assert!(active.contains_value("Cmd+Alt+Y"));
+        assert_eq!(
+            active.get_by_id(second).map(|hotkey| hotkey.value.as_str()),
+            Some("Ctrl+Alt+Space")
+        );
+
+        let removed = active.remove_by_value("Cmd+Alt+Y");
+        assert_eq!(removed.map(|hotkey| hotkey.id), Some(first));
+        assert!(!active.contains_value("Cmd+Alt+Y"));
+        assert!(active.contains_value("Ctrl+Alt+Space"));
+    }
+
+    #[test]
+    fn drains_all_active_hotkeys() {
+        let mut active = ActiveHotkeys::default();
+        active.insert(ActiveHotkey {
+            id: hotkey_id(1),
+            value: "Cmd+Alt+Y".to_string(),
+        });
+        active.insert(ActiveHotkey {
+            id: hotkey_id(2),
+            value: "Ctrl+Alt+Space".to_string(),
+        });
+
+        let drained = active.drain();
+
+        assert_eq!(drained.len(), 2);
+        assert!(!active.contains_value("Cmd+Alt+Y"));
+        assert!(!active.contains_value("Ctrl+Alt+Space"));
     }
 }

@@ -13,11 +13,13 @@ export function SlideOverModal({
   onClose,
   title,
   width = 440,
+  topOffset = 0,
   children,
 }: {
   onClose: () => void;
   title?: ReactNode;
   width?: number | string;
+  topOffset?: number | string;
   children: ReactNode;
 }) {
   const { t } = useI18n();
@@ -50,7 +52,10 @@ export function SlideOverModal({
       onClick={requestClose}
       style={{
         position: "fixed",
-        inset: 0,
+        top: topOffset,
+        right: 0,
+        bottom: 0,
+        left: 0,
         zIndex: 1000,
         display: "flex",
         justifyContent: "flex-end",

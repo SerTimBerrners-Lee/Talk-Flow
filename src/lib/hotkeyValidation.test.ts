@@ -1,5 +1,11 @@
 import { describe, test, expect } from "bun:test";
-import { validateHotkey, normalizeHotkey, formatHotkeyLabel } from "./store";
+import {
+  DEFAULT_SELECTION_TRANSLATION_HOTKEY,
+  validateHotkey,
+  normalizeHotkey,
+  formatHotkeyLabel,
+  normalizeSavedSettings,
+} from "./store";
 
 describe("validateHotkey", () => {
   test("accepts modifier + letter", () => {
@@ -109,5 +115,64 @@ describe("formatHotkeyLabel", () => {
   test("handles single key", () => {
     const label = formatHotkeyLabel("F5");
     expect(label).toBe("F5");
+  });
+});
+
+describe("translation selection hotkey settings", () => {
+  test("adds selected-text translation defaults for saved settings", () => {
+    const normalized = normalizeSavedSettings({
+      translation: {
+        widgetEnabled: true,
+        active: true,
+        targetLanguage: "en",
+      },
+    });
+
+    expect(normalized.translation?.selectionEnabled).toBe(false);
+    expect(normalized.translation?.selectionTargetLanguage).toBe("en");
+    expect(normalized.translation?.selectionHotkey).toBe(
+      normalizeHotkey(DEFAULT_SELECTION_TRANSLATION_HOTKEY).normalized,
+    );
+  });
+
+  test("defaults selected-text translation target to recognition language when it is set", () => {
+    const normalized = normalizeSavedSettings({
+      language: "ru",
+      translation: {
+        widgetEnabled: true,
+        active: true,
+        targetLanguage: "en",
+      },
+    });
+
+    expect(normalized.translation?.selectionTargetLanguage).toBe("ru");
+  });
+
+  test("normalizes saved selected-text translation hotkey", () => {
+    const normalized = normalizeSavedSettings({
+      translation: {
+        widgetEnabled: false,
+        active: false,
+        targetLanguage: "en",
+        selectionEnabled: true,
+        selectionHotkey: "cmd+alt+y",
+      },
+    });
+
+    expect(normalized.translation?.selectionEnabled).toBe(true);
+    expect(normalized.translation?.selectionHotkey).toBe("Alt+Command+Y");
+  });
+
+  test("defaults selected-text translation target to English when recognition is auto", () => {
+    const normalized = normalizeSavedSettings({
+      language: "auto",
+      translation: {
+        widgetEnabled: false,
+        active: false,
+        targetLanguage: "ru",
+      },
+    });
+
+    expect(normalized.translation?.selectionTargetLanguage).toBe("en");
   });
 });

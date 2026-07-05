@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import type { ReactElement } from "react";
+import type { CSSProperties, ReactElement } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -9,8 +9,8 @@ import {
   IconFileMusic,
   IconHome,
   IconCpu,
-  IconLanguage,
   IconLoader2,
+  IconMessage,
   IconSparkles,
   IconAdjustmentsHorizontal,
   Icon,
@@ -18,9 +18,9 @@ import {
 import { TitleBar } from "../../components/TitleBar";
 import { MainTab } from "./tabs/MainTab";
 import { FileTranscriptionTab } from "./tabs/FileTranscriptionTab";
-import { RealtimeInterpreterTab } from "./tabs/RealtimeInterpreterTab";
 import { SettingsTab } from "./tabs/SettingsTab";
 import { SettingsTabs } from "./tabs/SettingsTabs";
+import { DevChatTab } from "./tabs/DevChatTab";
 import { PermissionScreen } from "../../components/PermissionScreen";
 import {
   SETTINGS_NAVIGATE_EVENT,
@@ -48,12 +48,15 @@ import {
 } from "../../lib/updater";
 import { useI18n, type MsgKey } from "../../lib/i18n";
 
-type Tab = "main" | "file" | "interpreter" | "settings" | "model" | "style";
+type Tab = "main" | "file" | "interpreter" | "chat" | "settings" | "model" | "style";
 
-const SHOW_INTERPRETER_TAB = import.meta.env.DEV;
+const SHOW_INTERPRETER_TAB = false;
+const SHOW_DEV_CHAT_TAB = import.meta.env.DEV;
 
 function isVisibleTab(tab: Tab): boolean {
-  return tab !== "interpreter" || SHOW_INTERPRETER_TAB;
+  if (tab === "interpreter") return SHOW_INTERPRETER_TAB;
+  if (tab === "chat") return SHOW_DEV_CHAT_TAB;
+  return true;
 }
 
 function resolveInitialTab(): Tab {
@@ -61,12 +64,16 @@ function resolveInitialTab(): Tab {
 
   if (
     requestedTab === "file" ||
-    requestedTab === "interpreter" ||
+    requestedTab === "chat" ||
     requestedTab === "settings" ||
     requestedTab === "model" ||
     requestedTab === "style"
   ) {
     return isVisibleTab(requestedTab) ? requestedTab : "main";
+  }
+
+  if (requestedTab === "interpreter") {
+    return "settings";
   }
 
   return "main";
@@ -81,10 +88,10 @@ const TABS: { id: Tab; labelKey: MsgKey; icon: Icon; note: string }[] = [
     note: "Транскрибация",
   },
   {
-    id: "interpreter",
-    labelKey: "settingsApp.tab.interpreter",
-    icon: IconLanguage,
-    note: "Realtime Interpreter beta",
+    id: "chat",
+    labelKey: "settingsApp.tab.chat",
+    icon: IconMessage,
+    note: "Dev chat",
   },
   {
     id: "model",
@@ -345,6 +352,8 @@ export function SettingsApp() {
   const [focusedFileResultId, setFocusedFileResultId] = useState<string | null>(
     () => new URLSearchParams(window.location.search).get("resultId"),
   );
+  const [focusedHistoryEntryId, setFocusedHistoryEntryId] = useState<string | null>(null);
+  const [focusedHistoryEntryNonce, setFocusedHistoryEntryNonce] = useState(0);
   const [themePreference, setThemePreference] =
     useState<ThemePreference>("system");
   const [navigationNonce, setNavigationNonce] = useState(0);
@@ -409,7 +418,12 @@ export function SettingsApp() {
     const unlisten = listen<SettingsNavigatePayload>(
       SETTINGS_NAVIGATE_EVENT,
       ({ payload }) => {
-        const nextTab = isVisibleTab(payload.tab) ? payload.tab : "main";
+        const nextTab =
+          payload.tab === "interpreter"
+            ? "settings"
+            : isVisibleTab(payload.tab)
+              ? payload.tab
+              : "main";
         setActiveTab(nextTab);
         setFocusedFileResultId(
           nextTab === "file" ? payload.resultId || null : null,
@@ -434,6 +448,12 @@ export function SettingsApp() {
     setShowPermissions(false);
   };
 
+  const openHistoryEntryFromChat = (entryId: string): void => {
+    setFocusedHistoryEntryId(entryId);
+    setFocusedHistoryEntryNonce((current) => current + 1);
+    setActiveTab("main");
+  };
+
   if (showPermissions === null || initialHistory === null) {
     return (
       <div
@@ -453,16 +473,19 @@ export function SettingsApp() {
     );
   }
 
+  const isChatActive = activeTab === "chat";
+
   return (
     <div className={isMacPlatform() ? "app-root" : "app-root native-frame"}>
       <div
         style={{
+          "--summary-modal-top-offset": isMacPlatform() ? "48px" : "0px",
           display: "flex",
           flexDirection: "column",
           height: "100vh",
           position: "relative",
           zIndex: 1,
-        }}
+        } as CSSProperties}
       >
         {/* Windows/Linux use the native title bar + system window controls. */}
         {isMacPlatform() && <TitleBar />}
@@ -504,7 +527,8 @@ export function SettingsApp() {
             style={{
               flex: 1,
               padding: "18px 24px 24px",
-              overflowY: "auto",
+              minHeight: 0,
+              overflowY: isChatActive ? "hidden" : "auto",
               overflowX: "hidden",
               position: "relative",
               background: "var(--main-bg)",
@@ -512,9 +536,13 @@ export function SettingsApp() {
           >
             <div
               style={{
-                maxWidth: 920,
+                maxWidth: isChatActive ? "none" : 920,
                 margin: "0 auto",
                 minWidth: 0,
+                minHeight: 0,
+                height: isChatActive ? "100%" : undefined,
+                display: isChatActive ? "flex" : "block",
+                flexDirection: isChatActive ? "column" : undefined,
                 overflowX: "hidden",
               }}
             >
@@ -534,25 +562,39 @@ export function SettingsApp() {
               )}
               <div
                 key={navigationNonce}
-                style={{ animation: "slide-down 0.18s ease" }}
+                style={{
+                  animation: "slide-down 0.18s ease",
+                  flex: isChatActive ? "1 1 auto" : undefined,
+                  minHeight: isChatActive ? 0 : undefined,
+                }}
               >
                 <div
                   style={{ display: activeTab === "main" ? "block" : "none" }}
                 >
-                  <MainTab initialHistory={initialHistory} />
+                  <MainTab
+                    initialHistory={initialHistory}
+                    focusedEntryId={focusedHistoryEntryId}
+                    focusedEntryNonce={focusedHistoryEntryNonce}
+                  />
                 </div>
                 <div
                   style={{ display: activeTab === "file" ? "block" : "none" }}
                 >
                   <FileTranscriptionTab focusedEntryId={focusedFileResultId} />
                 </div>
-                {SHOW_INTERPRETER_TAB && (
+                {SHOW_DEV_CHAT_TAB && (
                   <div
                     style={{
-                      display: activeTab === "interpreter" ? "block" : "none",
+                      display: activeTab === "chat" ? "block" : "none",
+                      height: "100%",
+                      minHeight: 0,
+                      overflow: "hidden",
                     }}
                   >
-                    <RealtimeInterpreterTab />
+                    <DevChatTab
+                      isActive={activeTab === "chat"}
+                      onOpenHistoryEntry={openHistoryEntryFromChat}
+                    />
                   </div>
                 )}
                 <div

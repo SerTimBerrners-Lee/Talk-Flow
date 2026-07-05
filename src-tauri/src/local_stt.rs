@@ -112,38 +112,33 @@ struct LocalModelInfo {
 const LOCAL_WHISPER_MODELS: &[LocalModelInfo] = &[
     LocalModelInfo {
         id: "whisper-tiny",
-        file_name: "ggml-tiny.bin",
-        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
+        file_name: "whisper-tiny-q4_k.gguf",
+        url: "https://huggingface.co/oxide-lab/whisper-tiny-GGUF/resolve/main/whisper.cpp/whisper-tiny-q4_k.gguf",
     },
     LocalModelInfo {
         id: "whisper-base",
-        file_name: "ggml-base.bin",
-        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
+        file_name: "whisper-base-q4_k.gguf",
+        url: "https://huggingface.co/oxide-lab/whisper-base-GGUF/resolve/main/whisper.cpp/whisper-base-q4_k.gguf",
     },
     LocalModelInfo {
         id: "whisper-small",
-        file_name: "ggml-small.bin",
-        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
+        file_name: "whisper-small-q4_k.gguf",
+        url: "https://huggingface.co/oxide-lab/whisper-small-GGUF/resolve/main/whisper.cpp/whisper-small-q4_k.gguf",
     },
     LocalModelInfo {
         id: "whisper-medium",
-        file_name: "ggml-medium.bin",
-        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin",
-    },
-    LocalModelInfo {
-        id: "whisper-large-v2",
-        file_name: "ggml-large-v2.bin",
-        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v2.bin",
+        file_name: "whisper-medium-q4_k.gguf",
+        url: "https://huggingface.co/oxide-lab/whisper-medium-GGUF/resolve/main/whisper.cpp/whisper-medium-q4_k.gguf",
     },
     LocalModelInfo {
         id: "whisper-large-v3",
-        file_name: "ggml-large-v3.bin",
-        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin",
+        file_name: "whisper-large-v3-q4_k.gguf",
+        url: "https://huggingface.co/oxide-lab/whisper-large-v3-GGUF/resolve/main/whisper.cpp/whisper-large-v3-q4_k.gguf",
     },
     LocalModelInfo {
         id: "whisper-large-v3-turbo",
-        file_name: "ggml-large-v3-turbo.bin",
-        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin",
+        file_name: "whisper-large-v3-turbo-q4_k.gguf",
+        url: "https://huggingface.co/oxide-lab/whisper-large-v3-turbo-GGUF/resolve/main/whisper.cpp/whisper-large-v3-turbo-q4_k.gguf",
     },
     LocalModelInfo {
         id: "nvidia/parakeet-tdt-0.6b-v3",
@@ -154,6 +149,26 @@ const LOCAL_WHISPER_MODELS: &[LocalModelInfo] = &[
         id: "nvidia/parakeet-tdt-0.6b-v2",
         file_name: "parakeet-tdt-0.6b-v2-Q8_0.gguf",
         url: "https://huggingface.co/handy-computer/parakeet-tdt-0.6b-v2-gguf/resolve/main/parakeet-tdt-0.6b-v2-Q8_0.gguf",
+    },
+    LocalModelInfo {
+        id: "nvidia/nemotron-3.5-asr-streaming-0.6b",
+        file_name: "nemotron-3.5-asr-streaming-0.6b-Q8_0.gguf",
+        url: "https://huggingface.co/handy-computer/nemotron-3.5-asr-streaming-0.6b-gguf/resolve/main/nemotron-3.5-asr-streaming-0.6b-Q8_0.gguf",
+    },
+    LocalModelInfo {
+        id: "nvidia/nemotron-speech-streaming-en-0.6b",
+        file_name: "nemotron-speech-streaming-en-0.6b-Q8_0.gguf",
+        url: "https://huggingface.co/handy-computer/nemotron-speech-streaming-en-0.6b-gguf/resolve/main/nemotron-speech-streaming-en-0.6b-Q8_0.gguf",
+    },
+    LocalModelInfo {
+        id: "moonshine-streaming-tiny",
+        file_name: "moonshine-streaming-tiny-Q8_0.gguf",
+        url: "https://huggingface.co/handy-computer/moonshine-streaming-tiny-gguf/resolve/main/moonshine-streaming-tiny-Q8_0.gguf",
+    },
+    LocalModelInfo {
+        id: "moonshine-streaming-small",
+        file_name: "moonshine-streaming-small-Q8_0.gguf",
+        url: "https://huggingface.co/handy-computer/moonshine-streaming-small-gguf/resolve/main/moonshine-streaming-small-Q8_0.gguf",
     },
     LocalModelInfo {
         id: "Qwen/Qwen3-ASR-0.6B",
@@ -256,69 +271,58 @@ fn find_available_runtime_port(kind: LocalRuntimeKind, preferred_port: u16) -> R
 }
 
 fn runtime_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(local_stt_dir(app)?.join("runtime"))
-}
-
-fn local_stt_dir(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_data_dir()
         .map_err(|err| format!("Не удалось найти папку данных Talkis: {}", err))
-        .map(|dir| dir.join("local-stt"))
+        .map(|dir| dir.join("runtime").join("stt"))
 }
 
 pub fn default_models_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(local_stt_dir(app)?.join("models"))
+    app.path()
+        .app_data_dir()
+        .map_err(|err| format!("Не удалось найти папку данных Talkis: {}", err))
+        .map(|dir| dir.join("models").join("stt"))
 }
 
-fn resolve_models_dir(app: &AppHandle, custom_dir: Option<&str>) -> Result<PathBuf, String> {
-    custom_dir
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .map(Ok)
-        .unwrap_or_else(|| default_models_dir(app))
+fn resolve_models_dir(app: &AppHandle, _custom_dir: Option<&str>) -> Result<PathBuf, String> {
+    default_models_dir(app)
 }
 
 fn local_model_info(value: &str) -> Option<&'static LocalModelInfo> {
     let normalized = value.trim().to_lowercase();
     match normalized.as_str() {
-        "whisper-tiny" | "tiny" | "systran/faster-whisper-tiny" | "ggml-tiny.bin" => {
+        "whisper-tiny" | "tiny" | "systran/faster-whisper-tiny" | "whisper-tiny-q4_k.gguf" => {
             LOCAL_WHISPER_MODELS
                 .iter()
                 .find(|model| model.id == "whisper-tiny")
         }
-        "whisper-base" | "base" | "systran/faster-whisper-base" | "ggml-base.bin" => {
+        "whisper-base" | "base" | "systran/faster-whisper-base" | "whisper-base-q4_k.gguf" => {
             LOCAL_WHISPER_MODELS
                 .iter()
                 .find(|model| model.id == "whisper-base")
         }
-        "whisper-small" | "small" | "systran/faster-whisper-small" | "ggml-small.bin" => {
+        "whisper-small" | "small" | "systran/faster-whisper-small" | "whisper-small-q4_k.gguf" => {
             LOCAL_WHISPER_MODELS
                 .iter()
                 .find(|model| model.id == "whisper-small")
         }
-        "whisper-medium" | "medium" | "systran/faster-whisper-medium" | "ggml-medium.bin" => {
-            LOCAL_WHISPER_MODELS
-                .iter()
-                .find(|model| model.id == "whisper-medium")
-        }
-        "whisper-large-v2"
-        | "large-v2"
-        | "systran/faster-whisper-large-v2"
-        | "ggml-large-v2.bin" => LOCAL_WHISPER_MODELS
+        "whisper-medium"
+        | "medium"
+        | "systran/faster-whisper-medium"
+        | "whisper-medium-q4_k.gguf" => LOCAL_WHISPER_MODELS
             .iter()
-            .find(|model| model.id == "whisper-large-v2"),
+            .find(|model| model.id == "whisper-medium"),
         "whisper-large-v3"
         | "large-v3"
         | "systran/faster-whisper-large-v3"
-        | "ggml-large-v3.bin" => LOCAL_WHISPER_MODELS
+        | "whisper-large-v3-q4_k.gguf" => LOCAL_WHISPER_MODELS
             .iter()
             .find(|model| model.id == "whisper-large-v3"),
         "whisper-large-v3-turbo"
         | "large-v3-turbo"
         | "systran/faster-whisper-large-v3-turbo"
         | "mlx-community/whisper-large-v3-turbo-4bit"
-        | "ggml-large-v3-turbo.bin" => LOCAL_WHISPER_MODELS
+        | "whisper-large-v3-turbo-q4_k.gguf" => LOCAL_WHISPER_MODELS
             .iter()
             .find(|model| model.id == "whisper-large-v3-turbo"),
         "nvidia/parakeet-tdt-0.6b-v3"
@@ -335,6 +339,24 @@ fn local_model_info(value: &str) -> Option<&'static LocalModelInfo> {
         | "parakeet-tdt-0.6b-v2-q8_0.gguf" => LOCAL_WHISPER_MODELS
             .iter()
             .find(|model| model.id == "nvidia/parakeet-tdt-0.6b-v2"),
+        "nvidia/nemotron-3.5-asr-streaming-0.6b"
+        | "nemotron-35-asr-streaming-06b"
+        | "nemotron-3.5-asr-streaming-0.6b"
+        | "nemotron-3.5-asr-streaming-0.6b-q8_0.gguf" => LOCAL_WHISPER_MODELS
+            .iter()
+            .find(|model| model.id == "nvidia/nemotron-3.5-asr-streaming-0.6b"),
+        "nvidia/nemotron-speech-streaming-en-0.6b"
+        | "nemotron-speech-streaming-en-06b"
+        | "nemotron-speech-streaming-en-0.6b"
+        | "nemotron-speech-streaming-en-0.6b-q8_0.gguf" => LOCAL_WHISPER_MODELS
+            .iter()
+            .find(|model| model.id == "nvidia/nemotron-speech-streaming-en-0.6b"),
+        "moonshine-streaming-tiny" | "moonshine-streaming-tiny-q8_0.gguf" => LOCAL_WHISPER_MODELS
+            .iter()
+            .find(|model| model.id == "moonshine-streaming-tiny"),
+        "moonshine-streaming-small" | "moonshine-streaming-small-q8_0.gguf" => LOCAL_WHISPER_MODELS
+            .iter()
+            .find(|model| model.id == "moonshine-streaming-small"),
         "qwen/qwen3-asr-0.6b" | "qwen3-asr-06b" | "qwen3-asr-0.6b" | "qwen3-asr-0.6b-q8_0.gguf" => {
             LOCAL_WHISPER_MODELS
                 .iter()
@@ -403,7 +425,7 @@ pub async fn download_model_with_progress(
         .map_err(|err| format!("Не удалось подготовить директорию моделей: {}", err))?;
 
     let model_path = models_dir.join(info.file_name);
-    let marker_path = models_dir.join(format!("{}.json", info.id));
+    let marker_path = local_model_marker_path(&models_dir, info);
     let temp_path = model_path.with_extension("download");
     if model_path.is_file() {
         emit_download_progress(
@@ -501,6 +523,23 @@ fn write_model_marker(path: &Path, model: &LocalModelInfo) -> Result<(), String>
     })
 }
 
+fn local_model_marker_path(models_dir: &Path, model: &LocalModelInfo) -> PathBuf {
+    models_dir.join(format!("{}.json", safe_marker_file_stem(model.id)))
+}
+
+fn safe_marker_file_stem(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
 pub fn delete_downloaded_model(
     app: &AppHandle,
     custom_dir: Option<&str>,
@@ -514,7 +553,7 @@ pub fn delete_downloaded_model(
     })?;
     let models_dir = resolve_models_dir(app, custom_dir)?;
     let model_path = models_dir.join(info.file_name);
-    let marker_path = models_dir.join(format!("{}.json", info.id));
+    let marker_path = local_model_marker_path(&models_dir, info);
     let temp_path = model_path.with_extension("download");
 
     for path in [&model_path, &marker_path, &temp_path] {
@@ -598,7 +637,6 @@ pub fn resolve_installed_model_for_runtime(
                 "whisper-small",
                 "whisper-large-v3-turbo",
                 "whisper-large-v3",
-                "whisper-large-v2",
                 "whisper-tiny",
             ] {
                 if let Some(model) = local_model_info(model_id) {
@@ -633,7 +671,7 @@ fn runtime_manifest_url() -> String {
         .unwrap_or_else(|| DEFAULT_RUNTIME_MANIFEST_URL.to_string())
 }
 
-fn platform_asset<'a>(manifest: &'a RuntimeManifest) -> Option<&'a RuntimeAsset> {
+fn platform_asset(manifest: &RuntimeManifest) -> Option<&RuntimeAsset> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("macos", "aarch64") => manifest.macos_aarch64.as_ref(),
         ("macos", "x86_64") => manifest.macos_x86_64.as_ref(),
@@ -962,7 +1000,7 @@ async fn start_bundled_runtime(
     port: u16,
     models_dir: &Path,
 ) -> Result<(), String> {
-    let data_dir = local_stt_dir(app)?;
+    let data_dir = runtime_dir(app)?;
     let command = app
         .shell()
         .sidecar(kind.runtime_name())
@@ -995,7 +1033,7 @@ async fn start_downloaded_runtime(
     port: u16,
     models_dir: &Path,
 ) -> Result<(), String> {
-    let data_dir = local_stt_dir(app)?;
+    let data_dir = runtime_dir(app)?;
     let executable_path = match runtime_executable_path(app) {
         Ok(path) if path.is_file() => path,
         Ok(_) => download_runtime(app, client).await?,
@@ -1114,4 +1152,56 @@ pub async fn ensure_runtime(
 #[tauri::command]
 pub fn get_local_stt_default_models_dir(app: AppHandle) -> Result<String, String> {
     default_models_dir(&app).map(|path| path.to_string_lossy().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn marker_path_sanitizes_model_ids_with_slashes() {
+        let models_dir = PathBuf::from("/tmp/talkis-models");
+        let model = local_model_info("nvidia/nemotron-3.5-asr-streaming-0.6b").expect("model");
+
+        assert_eq!(
+            local_model_marker_path(&models_dir, model),
+            models_dir.join("nvidia_nemotron-3.5-asr-streaming-0.6b.json")
+        );
+    }
+
+    #[test]
+    fn new_streaming_models_resolve_aliases_and_marker_paths() {
+        let models_dir = PathBuf::from("/tmp/talkis-models");
+        let cases = [
+            (
+                "nemotron-35-asr-streaming-06b",
+                "nvidia/nemotron-3.5-asr-streaming-0.6b",
+                "nvidia_nemotron-3.5-asr-streaming-0.6b.json",
+            ),
+            (
+                "nemotron-speech-streaming-en-06b",
+                "nvidia/nemotron-speech-streaming-en-0.6b",
+                "nvidia_nemotron-speech-streaming-en-0.6b.json",
+            ),
+            (
+                "moonshine-streaming-tiny-q8_0.gguf",
+                "moonshine-streaming-tiny",
+                "moonshine-streaming-tiny.json",
+            ),
+            (
+                "moonshine-streaming-small-q8_0.gguf",
+                "moonshine-streaming-small",
+                "moonshine-streaming-small.json",
+            ),
+        ];
+
+        for (requested, expected_id, expected_marker) in cases {
+            let model = local_model_info(requested).expect("model");
+            assert_eq!(model.id, expected_id);
+            assert_eq!(
+                local_model_marker_path(&models_dir, model),
+                models_dir.join(expected_marker)
+            );
+        }
+    }
 }

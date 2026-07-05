@@ -34,6 +34,7 @@ export interface HistoryEntry {
   }[];
   status?: "processing" | "completed" | "failed" | "interrupted";
   errorMessage?: string;
+  audioPath?: string;
   audioBase64?: string;
   audioMimeType?: string;
   audioFileName?: string;
@@ -46,7 +47,7 @@ export interface HistoryEntry {
   mode?: "plain" | "speakers";
   speakers?: Speaker[];
   segments?: SpeakerTranscriptSegment[];
-  translation?: RealtimeTranslationHistory;
+  dictationTranslation?: DictationTranslationMetadata;
   /** Generated summaries for this record (newest first); persists across restarts. */
   summaries?: SummaryEntry[];
 }
@@ -83,6 +84,7 @@ export interface LocalModelSettings {
   message?: string;
   downloadedAt?: string;
   lastCheckedAt?: string;
+  streamingEnabled?: boolean;
 }
 
 /** Kind of text processing a prompt performs. */
@@ -106,37 +108,27 @@ export interface PromptPreset {
   updatedAt?: string;
 }
 
-export type RealtimeInterpreterApiMode = "cloud";
-export type RealtimeInterpreterLanguagePair =
-  | "ru_en"
-  | "ru_es"
-  | "ru_de"
-  | "ru_zh_hans";
-
-export interface RealtimeTranslationSegment {
-  direction: "user_to_remote" | "remote_to_user";
-  startMs?: number;
-  endMs?: number;
-  sourceText: string;
-  translatedText: string;
+export interface DictationTranslationMetadata {
+  provider: "cloud" | "custom" | "local";
   sourceLanguage: string;
   targetLanguage: string;
+  sourceText: string;
+  translatedText: string;
 }
 
-export interface RealtimeTranslationHistory {
-  provider: "talkis-cloud";
-  model: string;
-  languagePair: RealtimeInterpreterLanguagePair;
-  segments: RealtimeTranslationSegment[];
-}
-
-export interface RealtimeInterpreterSettings {
-  realMicDeviceId: string;
-  virtualMicOutputDeviceId: string;
-  localPlaybackDeviceId: string;
-  languagePair: RealtimeInterpreterLanguagePair;
-  apiMode: RealtimeInterpreterApiMode;
-  headphonesConfirmed: boolean;
+export interface TranslationSettings {
+  /** Show the translation toggle bubble in the widget. */
+  widgetEnabled: boolean;
+  /** Translate ordinary dictation after recognition, before paste. */
+  active: boolean;
+  /** Target language code for translated dictation. */
+  targetLanguage: string;
+  /** Target language code for selected-text translation. */
+  selectionTargetLanguage: string;
+  /** Enable translating selected text from any app via a separate hotkey. */
+  selectionEnabled: boolean;
+  /** Global hotkey for translating the currently selected text. */
+  selectionHotkey: string;
 }
 
 export interface AppSettings {
@@ -151,6 +143,8 @@ export interface AppSettings {
   localModelsDir: string;
   /** Optional custom directory for transcript history and call recordings; empty means default app storage */
   transcriptionStorageDir: string;
+  /** Save audio files for completed voice history entries. */
+  saveRecordingAudio: boolean;
   /** Separate API key for Whisper/STT endpoint (used in custom mode) */
   whisperApiKey: string;
   /** Separate API key for LLM endpoint (used in custom mode; empty = skip LLM) */
@@ -193,8 +187,8 @@ export interface AppSettings {
   deviceToken: string;
   /** Default file transcription mode: split uploaded files by speakers */
   fileSpeakerDiarization: boolean;
-  /** Beta realtime interpreter device and mode choices */
-  realtimeInterpreter: RealtimeInterpreterSettings;
+  /** Dictation translation mode controlled from the widget. */
+  translation: TranslationSettings;
 }
 
 export interface WidgetPosition {
@@ -206,6 +200,7 @@ const HISTORY_MAX_VOICE_ENTRIES = 1000;
 const HISTORY_MAX_FILE_ENTRIES = 200;
 const HISTORY_MAX_CALL_ENTRIES = 200;
 const HISTORY_MAX_TOTAL_BYTES = 50 * 1024 * 1024;
+export const HISTORY_MAX_VOICE_AUDIO_ENTRIES = 100;
 
 const MODIFIER_ORDER = ["Control", "Alt", "Shift", "Command"] as const;
 const MODIFIER_ALIASES: Record<string, (typeof MODIFIER_ORDER)[number]> = {
@@ -246,8 +241,17 @@ const MAIN_KEY_ALIASES: Record<string, string> = {
 const FUNCTION_KEY_PATTERN = /^F(?:[1-9]|1[0-2])$/;
 const DEFAULT_MAC_HOTKEY = "Command+Shift+Space";
 const DEFAULT_DESKTOP_HOTKEY = "Control+Alt+Space";
+const DEFAULT_MAC_SELECTION_TRANSLATION_HOTKEY = "Command+Alt+Y";
+const DEFAULT_DESKTOP_SELECTION_TRANSLATION_HOTKEY = "Control+Alt+Y";
 const BUNDLED_LOCAL_LLM_PORTS = new Set([8011]);
 const BUNDLED_LOCAL_LLM_MODEL_IDS = new Set([
+  "qwen3-1.7b-instruct-q4",
+  "qwen3-4b-instruct-q4",
+  "qwen3-8b-instruct-q4",
+  "granite-3.3-2b-instruct-q4",
+  "smollm3-3b-q4",
+  "phi-4-mini-instruct-q4",
+  "gemma-3-4b-it-q4",
   "qwen2.5-3b-instruct-q4",
   "qwen2.5-7b-instruct-q4",
 ]);
@@ -262,6 +266,15 @@ export function getDefaultHotkey(): string {
 }
 
 export const DEFAULT_HOTKEY = getDefaultHotkey();
+
+export function getDefaultSelectionTranslationHotkey(): string {
+  return isMacPlatform()
+    ? DEFAULT_MAC_SELECTION_TRANSLATION_HOTKEY
+    : DEFAULT_DESKTOP_SELECTION_TRANSLATION_HOTKEY;
+}
+
+export const DEFAULT_SELECTION_TRANSLATION_HOTKEY =
+  getDefaultSelectionTranslationHotkey();
 
 export function formatHotkeyLabel(hotkey: string): string {
   const parts = hotkey.split("+").map((part) => part.trim());
@@ -489,7 +502,9 @@ export const BUILTIN_PROMPTS: PromptPreset[] = [
   },
 ];
 
-const BUILTIN_PROMPT_ID_SET = new Set(BUILTIN_PROMPTS.map((preset) => preset.id));
+const BUILTIN_PROMPT_ID_SET = new Set(
+  BUILTIN_PROMPTS.map((preset) => preset.id),
+);
 
 function isLocalSttEndpoint(endpoint?: string): boolean {
   return /127\.0\.0\.1|localhost/i.test(endpoint || "");
@@ -521,7 +536,8 @@ function needsLocalSttSettingsMigration(saved: unknown): boolean {
   }
 
   const raw = saved as Record<string, unknown>;
-  const endpoint = typeof raw.whisperEndpoint === "string" ? raw.whisperEndpoint : "";
+  const endpoint =
+    typeof raw.whisperEndpoint === "string" ? raw.whisperEndpoint : "";
   if (!isLocalSttEndpoint(endpoint)) {
     return false;
   }
@@ -542,6 +558,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   localModels: {},
   localModelsDir: "",
   transcriptionStorageDir: "",
+  saveRecordingAudio: false,
   whisperApiKey: "",
   llmApiKey: "",
   provider: "openai",
@@ -563,13 +580,13 @@ const DEFAULT_SETTINGS: AppSettings = {
   useOwnKey: true,
   deviceToken: "",
   fileSpeakerDiarization: false,
-  realtimeInterpreter: {
-    realMicDeviceId: "",
-    virtualMicOutputDeviceId: "",
-    localPlaybackDeviceId: "",
-    languagePair: "ru_en",
-    apiMode: "cloud",
-    headphonesConfirmed: false,
+  translation: {
+    widgetEnabled: false,
+    active: false,
+    targetLanguage: "en",
+    selectionTargetLanguage: "en",
+    selectionEnabled: false,
+    selectionHotkey: DEFAULT_SELECTION_TRANSLATION_HOTKEY,
   },
 };
 
@@ -660,37 +677,90 @@ function parseBundledLocalLlmModelId(value: unknown): string | undefined {
   return BUNDLED_LOCAL_LLM_MODEL_IDS.has(modelId) ? modelId : undefined;
 }
 
-function parseRealtimeInterpreterSettings(
+function defaultTranslationTarget(sourceLanguage: string | undefined): string {
+  return sourceLanguage === "en" ? "ru" : "en";
+}
+
+function defaultSelectionTranslationTarget(
+  sourceLanguage: string | undefined,
+): string {
+  return sourceLanguage && sourceLanguage !== "auto" ? sourceLanguage : "en";
+}
+
+function normalizeTranslationSettings(
+  translation: TranslationSettings,
+  sourceLanguage: string,
+): TranslationSettings {
+  const source = sourceLanguage || DEFAULT_SETTINGS.language;
+  const fallbackTarget = defaultTranslationTarget(source);
+  const fallbackSelectionTarget =
+    defaultSelectionTranslationTarget(sourceLanguage);
+  const normalizedTarget =
+    translation.targetLanguage &&
+    translation.targetLanguage !== "auto" &&
+    (source === "auto" || translation.targetLanguage !== source)
+      ? translation.targetLanguage
+      : fallbackTarget;
+  const normalizedSelectionTarget =
+    translation.selectionTargetLanguage &&
+    translation.selectionTargetLanguage !== "auto"
+      ? translation.selectionTargetLanguage
+      : fallbackSelectionTarget;
+  const normalizedSelectionHotkey =
+    typeof translation.selectionHotkey === "string"
+      ? normalizeHotkey(translation.selectionHotkey).normalized
+      : undefined;
+  const selectionHotkey =
+    !isMacPlatform() &&
+    normalizedSelectionHotkey ===
+      normalizeHotkey(DEFAULT_MAC_SELECTION_TRANSLATION_HOTKEY).normalized
+      ? DEFAULT_DESKTOP_SELECTION_TRANSLATION_HOTKEY
+      : normalizedSelectionHotkey || DEFAULT_SELECTION_TRANSLATION_HOTKEY;
+
+  return {
+    widgetEnabled: translation.widgetEnabled,
+    active: translation.widgetEnabled ? translation.active : false,
+    targetLanguage: normalizedTarget,
+    selectionTargetLanguage: normalizedSelectionTarget,
+    selectionEnabled: translation.selectionEnabled,
+    selectionHotkey,
+  };
+}
+
+function parseTranslationSettings(
   value: unknown,
-): RealtimeInterpreterSettings | undefined {
+  sourceLanguage: string | undefined,
+): TranslationSettings | undefined {
   if (!value || typeof value !== "object") {
     return undefined;
   }
 
   const raw = value as Record<string, unknown>;
-  return {
-    realMicDeviceId:
-      typeof raw.realMicDeviceId === "string" ? raw.realMicDeviceId : "",
-    virtualMicOutputDeviceId:
-      typeof raw.virtualMicOutputDeviceId === "string"
-        ? raw.virtualMicOutputDeviceId
-        : "",
-    localPlaybackDeviceId:
-      typeof raw.localPlaybackDeviceId === "string"
-        ? raw.localPlaybackDeviceId
-        : "",
-    languagePair:
-      raw.languagePair === "ru_es" ||
-      raw.languagePair === "ru_de" ||
-      raw.languagePair === "ru_zh_hans"
-        ? raw.languagePair
-        : "ru_en",
-    apiMode: "cloud",
-    headphonesConfirmed:
-      typeof raw.headphonesConfirmed === "boolean"
-        ? raw.headphonesConfirmed
-        : false,
-  };
+  return normalizeTranslationSettings(
+    {
+      widgetEnabled:
+        typeof raw.widgetEnabled === "boolean" ? raw.widgetEnabled : false,
+      active: typeof raw.active === "boolean" ? raw.active : false,
+      targetLanguage:
+        typeof raw.targetLanguage === "string" && raw.targetLanguage.trim()
+          ? raw.targetLanguage.trim()
+          : defaultTranslationTarget(sourceLanguage),
+      selectionTargetLanguage:
+        typeof raw.selectionTargetLanguage === "string" &&
+        raw.selectionTargetLanguage.trim()
+          ? raw.selectionTargetLanguage.trim()
+          : defaultSelectionTranslationTarget(sourceLanguage),
+      selectionEnabled:
+        typeof raw.selectionEnabled === "boolean"
+          ? raw.selectionEnabled
+          : false,
+      selectionHotkey:
+        typeof raw.selectionHotkey === "string" && raw.selectionHotkey.trim()
+          ? raw.selectionHotkey.trim()
+          : DEFAULT_SELECTION_TRANSLATION_HOTKEY,
+    },
+    sourceLanguage || DEFAULT_SETTINGS.language,
+  );
 }
 
 export function normalizeSavedSettings(saved: unknown): Partial<AppSettings> {
@@ -766,6 +836,10 @@ export function normalizeSavedSettings(saved: unknown): Partial<AppSettings> {
               typeof model.lastCheckedAt === "string"
                 ? model.lastCheckedAt
                 : undefined,
+            streamingEnabled:
+              typeof model.streamingEnabled === "boolean"
+                ? model.streamingEnabled
+                : undefined,
           };
           return acc;
         }, {})
@@ -787,18 +861,22 @@ export function normalizeSavedSettings(saved: unknown): Partial<AppSettings> {
         ? raw.selectedApiAdapter
         : undefined,
     localModels: rawLocalModels,
-    localModelsDir:
-      typeof raw.localModelsDir === "string" ? raw.localModelsDir : undefined,
-    transcriptionStorageDir:
-      typeof raw.transcriptionStorageDir === "string"
-        ? raw.transcriptionStorageDir
+    localModelsDir: "",
+    transcriptionStorageDir: "",
+    saveRecordingAudio:
+      typeof raw.saveRecordingAudio === "boolean"
+        ? raw.saveRecordingAudio
         : undefined,
     whisperApiKey:
       typeof raw.whisperApiKey === "string" ? raw.whisperApiKey : undefined,
     llmApiKey: typeof raw.llmApiKey === "string" ? raw.llmApiKey : undefined,
     provider: parseProvider(raw.provider),
     whisperModel:
-      typeof raw.whisperModel === "string" ? raw.whisperModel : undefined,
+      raw.whisperModel === "whisper-large-v2"
+        ? "whisper-large-v3-turbo"
+        : typeof raw.whisperModel === "string"
+          ? raw.whisperModel
+          : undefined,
     llmModel: typeof raw.llmModel === "string" ? raw.llmModel : undefined,
     hotkey,
     widgetScale:
@@ -847,13 +925,16 @@ export function normalizeSavedSettings(saved: unknown): Partial<AppSettings> {
       typeof raw.fileSpeakerDiarization === "boolean"
         ? raw.fileSpeakerDiarization
         : undefined,
-    realtimeInterpreter: parseRealtimeInterpreterSettings(
-      raw.realtimeInterpreter,
+    translation: parseTranslationSettings(
+      raw.translation,
+      typeof raw.language === "string" ? raw.language : undefined,
     ),
   };
 
   if (isLocalSttEndpoint(normalized.whisperEndpoint)) {
-    normalized.whisperEndpoint = normalizeLocalSttEndpoint(normalized.whisperEndpoint);
+    normalized.whisperEndpoint = normalizeLocalSttEndpoint(
+      normalized.whisperEndpoint,
+    );
     normalized.useOwnKey = true;
     normalized.provider = "custom";
     normalized.whisperApiKey = "";
@@ -863,12 +944,46 @@ export function normalizeSavedSettings(saved: unknown): Partial<AppSettings> {
 }
 
 let _store: Awaited<ReturnType<typeof load>> | null = null;
+let _appDataLayoutMigration: Promise<void> | null = null;
 
 async function getStore() {
   if (!_store) {
     _store = await load("talkis.json");
   }
   return _store;
+}
+
+function readLegacyPath(
+  saved: unknown,
+  key: "localModelsDir" | "transcriptionStorageDir",
+): string {
+  if (!saved || typeof saved !== "object") {
+    return "";
+  }
+
+  const value = (saved as Record<string, unknown>)[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+async function migrateAppDataLayoutOnce(saved: unknown): Promise<void> {
+  if (_appDataLayoutMigration) {
+    return _appDataLayoutMigration;
+  }
+
+  _appDataLayoutMigration = (async () => {
+    const store = await getStore();
+    const legacyHistory = (await store.get<HistoryEntry[]>("history")) || [];
+    await invoke("migrate_app_data_layout", {
+      legacyLocalModelsDir: readLegacyPath(saved, "localModelsDir") || null,
+      legacyTranscriptionStorageDir:
+        readLegacyPath(saved, "transcriptionStorageDir") || null,
+      legacyHistory,
+    });
+  })().catch((error) => {
+    console.warn("Failed to migrate app data layout", error);
+  });
+
+  return _appDataLayoutMigration;
 }
 
 function getHistoryEntrySource(
@@ -933,6 +1048,38 @@ function pruneHistory(history: HistoryEntry[]): HistoryEntry[] {
   return limitedByType;
 }
 
+function isVoiceHistoryEntry(entry: HistoryEntry): boolean {
+  return getHistoryEntrySource(entry) === "voice";
+}
+
+export function pruneHistoryAudioRetention(history: HistoryEntry[]): {
+  history: HistoryEntry[];
+  pathsToDelete: string[];
+} {
+  let voiceAudioCount = 0;
+  const pathsToDelete: string[] = [];
+  const updated = history.map((entry) => {
+    if (!isVoiceHistoryEntry(entry) || !entry.audioPath) {
+      return entry;
+    }
+
+    voiceAudioCount += 1;
+    if (voiceAudioCount <= HISTORY_MAX_VOICE_AUDIO_ENTRIES) {
+      return entry;
+    }
+
+    pathsToDelete.push(entry.audioPath);
+    return {
+      ...entry,
+      audioPath: undefined,
+      audioMimeType: undefined,
+      audioFileName: undefined,
+    };
+  });
+
+  return { history: updated, pathsToDelete };
+}
+
 interface GetSettingsOptions {
   reload?: boolean;
 }
@@ -952,6 +1099,7 @@ export async function getSettings(
     }
   }
   const saved = await store.get<unknown>("settings");
+  await migrateAppDataLayoutOnce(saved);
   const normalized = normalizeSavedSettings(saved);
   // Remove undefined keys so they don't overwrite defaults
   const defined = Object.fromEntries(
@@ -959,12 +1107,25 @@ export async function getSettings(
   );
   const result = { ...DEFAULT_SETTINGS, ...defined } as AppSettings;
   if (isLocalSttEndpoint(result.whisperEndpoint)) {
-    result.whisperEndpoint = normalizeLocalSttEndpoint(result.whisperEndpoint) || result.whisperEndpoint;
+    result.whisperEndpoint =
+      normalizeLocalSttEndpoint(result.whisperEndpoint) ||
+      result.whisperEndpoint;
     result.useOwnKey = true;
     result.provider = "custom";
     result.whisperApiKey = "";
   }
-  if (needsLocalSttSettingsMigration(saved)) {
+  result.translation = normalizeTranslationSettings(
+    result.translation,
+    result.language,
+  );
+  if (
+    needsLocalSttSettingsMigration(saved) ||
+    (saved &&
+      typeof saved === "object" &&
+      (saved as Record<string, unknown>).whisperModel === "whisper-large-v2") ||
+    readLegacyPath(saved, "localModelsDir") ||
+    readLegacyPath(saved, "transcriptionStorageDir")
+  ) {
     try {
       await store.set("settings", result);
       await store.save();
@@ -995,12 +1156,22 @@ export async function saveSettings(
     nextSettings.widgetScale = normalizeWidgetScale(settings.widgetScale);
   }
 
+  nextSettings.translation = normalizeTranslationSettings(
+    nextSettings.translation,
+    nextSettings.language,
+  );
+  nextSettings.localModelsDir = "";
+  nextSettings.transcriptionStorageDir = "";
+
   await store.set("settings", nextSettings);
   await store.save();
 }
 
 export function makePromptId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
     return `prompt-${crypto.randomUUID()}`;
   }
 
@@ -1135,17 +1306,26 @@ export async function addHistoryEntry(entry: HistoryEntry): Promise<void> {
 
 export async function updateHistoryEntry(entry: HistoryEntry): Promise<void> {
   const history = await getHistory();
+  const previous = history.find((item) => item.id === entry.id);
   const updated = pruneHistory(
     history.map((item) => (item.id === entry.id ? entry : item)),
   );
   await writeHistory(updated);
+  if (previous) {
+    const nextPaths = new Set(historyAudioPaths(entry));
+    await deleteHistoryAudioFiles(
+      historyAudioPaths(previous).filter((path) => !nextPaths.has(path)),
+    );
+  }
   // Counts a retried entry that only now succeeded; duplicates are ignored.
   await recordTranscriptionStats(entry);
 }
 
 export async function deleteHistoryEntry(id: string): Promise<void> {
   const history = await getHistory();
+  const removed = history.find((entry) => entry.id === id);
   await writeHistory(history.filter((e) => e.id !== id));
+  await deleteHistoryAudioForEntry(removed);
 }
 
 /** Prepend a generated summary to a history entry and persist. Returns the updated entry. */
@@ -1236,25 +1416,28 @@ export async function reconcileInterruptedProcessing(): Promise<boolean> {
 }
 
 export async function clearHistory(): Promise<void> {
+  const history = await getHistory();
   await writeHistory([]);
+  await deleteHistoryAudioFiles(history.flatMap(historyAudioPaths));
 }
 
 async function getHistoryStorageDir(): Promise<string> {
-  const settings = await getSettings({ reload: true });
-  return settings.transcriptionStorageDir.trim();
+  return "";
 }
 
 async function readHistoryFromDefaultStorage(): Promise<HistoryEntry[]> {
-  const store = await getStore();
-  return (await store.get<HistoryEntry[]>("history")) || [];
+  return readHistoryFromStorageDir("");
 }
 
 export async function writeHistoryToDefaultStorage(
   history: HistoryEntry[],
 ): Promise<void> {
-  const store = await getStore();
-  await store.set("history", pruneHistory(history));
-  await store.save();
+  const { history: retained, pathsToDelete } = prepareHistoryForWrite(history);
+  await invoke("write_history_file", {
+    storageDir: "",
+    history: retained,
+  });
+  await deleteHistoryAudioFiles(pathsToDelete);
 }
 
 async function readHistoryFromStorageDir(
@@ -1267,10 +1450,12 @@ export async function writeHistoryToStorageDir(
   storageDir: string,
   history: HistoryEntry[],
 ): Promise<void> {
+  const { history: retained, pathsToDelete } = prepareHistoryForWrite(history);
   await invoke("write_history_file", {
     storageDir,
-    history: pruneHistory(history),
+    history: retained,
   });
+  await deleteHistoryAudioFiles(pathsToDelete);
 }
 
 async function writeHistory(history: HistoryEntry[]): Promise<void> {
@@ -1281,6 +1466,116 @@ async function writeHistory(history: HistoryEntry[]): Promise<void> {
   }
 
   await writeHistoryToDefaultStorage(history);
+}
+
+function prepareHistoryForWrite(history: HistoryEntry[]): {
+  history: HistoryEntry[];
+  pathsToDelete: string[];
+} {
+  const pruned = pruneHistory(history);
+  const retainedIds = new Set(pruned.map((entry) => entry.id));
+  const droppedPaths = history
+    .filter((entry) => !retainedIds.has(entry.id))
+    .flatMap(historyAudioPaths);
+  const retained = pruneHistoryAudioRetention(pruned);
+
+  return {
+    history: retained.history,
+    pathsToDelete: [
+      ...droppedPaths.filter((path): path is string => Boolean(path)),
+      ...retained.pathsToDelete,
+    ],
+  };
+}
+
+export interface SavedHistoryAudio {
+  path: string;
+  mimeType: string;
+  fileName: string;
+}
+
+export interface ReadHistoryAudio {
+  audioBase64: string;
+  mimeType: string;
+}
+
+export async function saveHistoryAudio({
+  storageDir,
+  entryId,
+  audioBase64,
+  mimeType,
+}: {
+  storageDir?: string;
+  entryId: string;
+  audioBase64: string;
+  mimeType: string;
+}): Promise<SavedHistoryAudio> {
+  return invoke<SavedHistoryAudio>("save_history_audio", {
+    storageDir: storageDir ?? (await getHistoryStorageDir()),
+    entryId,
+    audioBase64,
+    mimeType,
+  });
+}
+
+export async function readHistoryAudio(
+  path: string,
+): Promise<ReadHistoryAudio> {
+  return invoke<ReadHistoryAudio>("read_history_audio", {
+    storageDir: await getHistoryStorageDir(),
+    path,
+  });
+}
+
+export async function deleteHistoryAudio(path: string): Promise<void> {
+  await invoke("delete_history_audio", {
+    storageDir: await getHistoryStorageDir(),
+    path,
+  });
+}
+
+async function deleteHistoryAudioFiles(
+  paths: Array<string | undefined>,
+): Promise<void> {
+  const uniquePaths = [
+    ...new Set(paths.filter((path): path is string => Boolean(path))),
+  ];
+
+  await Promise.all(
+    uniquePaths.map(async (path) => {
+      try {
+        await deleteHistoryAudio(path);
+      } catch (error) {
+        console.warn("Failed to delete history audio", path, error);
+      }
+    }),
+  );
+}
+
+function historyAudioPaths(entry: HistoryEntry): string[] {
+  const paths: string[] = [];
+
+  if (isVoiceHistoryEntry(entry) && entry.audioPath) {
+    paths.push(entry.audioPath);
+  }
+
+  if (entry.source === "call" && entry.callTracks?.length) {
+    for (const track of entry.callTracks) {
+      if (track.path) {
+        paths.push(track.path);
+      }
+    }
+  }
+
+  return paths;
+}
+
+async function deleteHistoryAudioForEntry(entry?: HistoryEntry): Promise<void> {
+  if (!entry) {
+    return;
+  }
+
+  await deleteHistoryAudioFiles(historyAudioPaths(entry));
 }
 
 const PERMISSIONS_PASSED_KEY = "permissions_passed";
@@ -1308,7 +1603,9 @@ export async function setPermissionsPassed(value: boolean): Promise<void> {
 
 export async function getSystemAudioPermissionPassed(): Promise<boolean> {
   const store = await getStore();
-  return (await store.get<boolean>(SYSTEM_AUDIO_PERMISSION_PASSED_KEY)) ?? false;
+  return (
+    (await store.get<boolean>(SYSTEM_AUDIO_PERMISSION_PASSED_KEY)) ?? false
+  );
 }
 
 export async function setSystemAudioPermissionPassed(

@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for all windows",
-  "windows": ["widget", "settings", "widget-notice"],
+  "windows": ["widget", "settings", "widget-notice", "widget-text"],
   "permissions": [
     "core:default",
     "core:window:allow-close",
@@ -14,6 +14,15 @@
     "core:window:allow-set-position",
     "core:window:allow-show",
     "opener:default",
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [
+        { "path": "$APPDATA" },
+        { "path": "$APPDATA/**" },
+        { "path": "/Applications" },
+        { "path": "/Applications/**" }
+      ]
+    },
     "dialog:default",
     "store:allow-load",
     "store:allow-get",

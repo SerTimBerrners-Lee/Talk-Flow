@@ -131,7 +131,7 @@ export async function fetchCloudProfile({ force = false }: { force?: boolean } =
       setCachedCloudProfile(profile);
       return profile;
     } catch (error) {
-      logError("CLOUD", `Failed to fetch profile: ${error instanceof Error ? error.message : String(error)}`);
+      logInfo("CLOUD", `Cloud profile refresh skipped: ${error instanceof Error ? error.message : String(error)}`);
       return cachedCloudProfile ?? null;
     }
   })();

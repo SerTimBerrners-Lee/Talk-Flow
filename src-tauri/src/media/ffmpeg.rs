@@ -104,7 +104,7 @@ pub(super) async fn run_ffmpeg(
             "MEDIA",
             &format!("System ffmpeg fallback failed in {}ms", elapsed_ms),
         );
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
     }
 
     #[cfg(not(debug_assertions))]

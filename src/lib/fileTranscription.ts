@@ -20,13 +20,12 @@ const CLOUD_CAPABILITIES_CACHE_MS = 60_000;
 const DIARIZED_WHISPER_MODEL_OPTIONS = [
   "whisper-large-v3-turbo",
   "whisper-large-v3",
-  "whisper-large-v2",
   "whisper-medium",
   "whisper-small",
   "whisper-base",
   "whisper-tiny",
 ] as const;
-const STRONG_DIARIZED_WHISPER_MODELS = new Set(["whisper-large-v3-turbo", "whisper-large-v3", "whisper-large-v2", "whisper-medium"]);
+const STRONG_DIARIZED_WHISPER_MODELS = new Set(["whisper-large-v3-turbo", "whisper-large-v3", "whisper-medium"]);
 
 const DIRECT_EXTENSIONS = new Set(["flac", "mp3", "mp4", "mpeg", "mpga", "m4a", "ogg", "wav", "webm"]);
 const MIME_BY_EXTENSION: Record<string, string> = {

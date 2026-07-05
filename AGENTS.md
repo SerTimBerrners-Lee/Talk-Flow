@@ -111,6 +111,7 @@ Nav items, cards, and interactive elements follow a **soft** style:
 - **Active state:** `background: rgba(0,0,0,0.04)` + `font-weight: 600` + `color: var(--text-hi)` — never inverted black
 - **Hover:** `background: rgba(0,0,0,0.04)`
 - **Icons:** `size={18}`, `strokeWidth` active `2.2`, inactive `1.6`
+- **Reuse first:** before adding or changing product UI cards, rows, forms, tabs, or controls, inspect the existing screen for the closest matching pattern and reuse that structure/classes/styles. Do not invent one-off card layouts when an API/model/settings card already exists.
 
 ### Buttons
 

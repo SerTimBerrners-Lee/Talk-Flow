@@ -21,6 +21,7 @@ Widget hotkey/button
 -> native_voice_recorder.rs first
 -> processRecordingBlob()
 -> ai::transcribe_and_clean()
+-> optional dictation translation via configured text backend
 -> paste_text
 ```
 
@@ -43,18 +44,6 @@ Widget call mode
 -> recordingRuntime.ts for mic track
 -> transcribeCallCaptureSession()
 -> file transcription pipeline
-```
-
-Realtime Interpreter:
-
-```text
-Settings / Realtime Interpreter beta
--> src/lib/realtimeInterpreter.ts
--> realtime_interpreter.rs
--> real mic + system audio adapters
--> Talkis Cloud WebSocket proxy
--> Gemini Live Translate sessions
--> virtual mic output + local playback
 ```
 
 ## Voice Dictation
@@ -80,6 +69,29 @@ The primary voice path is native Rust capture:
 The recorder uses `cpal`, stores microphone samples in memory, converts to mono, resamples to `16 kHz`, writes PCM16 WAV, and logs stats on stop.
 
 Important implementation detail: on macOS, `cpal::Stream` is not safe to keep in a global static. Keep the stream alive on its own recorder thread and store only thread-safe control handles in global state.
+
+## Dictation Translation
+
+Translation is an optional post-processing step for ordinary voice dictation
+only. The widget records and transcribes the same way as normal dictation; after
+successful recognition, `src/windows/widget/services/transcriptionPipeline.ts`
+can send the cleaned text to the configured text backend through
+`resolveSummaryBackend(settings)`.
+
+Rules:
+
+- Source language is `settings.language`; the translator UI must not maintain a
+  separate source selector.
+- Target language is `settings.translation.targetLanguage`.
+- `settings.translation.widgetEnabled` only controls whether the widget bubble is
+  visible.
+- `settings.translation.active` is toggled from the widget bubble and controls
+  whether the post-STT translation step runs.
+- If the text backend is unavailable or translation fails, mark the history entry
+  as failed and do not silently paste the untranslated text.
+- Preserve the recognized text in `raw`, put the final translated text in
+  `cleaned`, and store translation evidence in `dictationTranslation`.
+- Do not apply this path to file transcription or call capture.
 
 ## Voice Fallback
 
@@ -184,47 +196,6 @@ System audio capture level: max=... dBFS, frames_above_noise_floor=...
 ```
 
 If `max=-120.0 dBFS` and `frames_above_noise_floor=0`, the system track is silent. The transcript should not treat that as usable remote-speaker audio.
-
-## Realtime Interpreter
-
-Realtime Interpreter is a separate beta audio path. It must not be wired into
-`transcribeCallCaptureSession()`. Realtime translation history is allowed only
-from final live transcript segments collected by the interpreter session itself.
-
-Current contract:
-
-- Tauri commands live in `src-tauri/src/realtime_interpreter.rs`.
-- Frontend command wrappers live in `src/lib/realtimeInterpreter.ts`.
-- Settings UI lives in `src/windows/settings/tabs/RealtimeInterpreterTab.tsx`.
-- V1 is cloud-only. The desktop must use the saved Talkis `deviceToken`; do not
-  expose Google API keys, BYOK, or direct Google WebSocket credentials in the UI.
-- Desktop defaults to `wss://proxy.talkis.ru/api/realtime-translate`.
-- The proxy is responsible for JWT/subscription checks and for bridging to
-  Gemini Live Translate with `gemini-3.5-live-translate-preview`.
-- Gemini Live Translate input is raw PCM16, 16 kHz, mono, little-endian, sent as
-  `audio/pcm;rate=16000`. Output audio is raw PCM16, 24 kHz, mono, returned as
-  `audio/pcm;rate=24000`.
-- Transcript events should carry both source and translated text from
-  `inputAudioTranscription` and `outputAudioTranscription`.
-- External virtual audio drivers are required for MVP routing: BlackHole on
-  macOS, VB-CABLE on Windows, PipeWire virtual source/sink on Linux.
-- Supported v1 language pairs keep Russian as the local user language:
-  RU -> EN / EN -> RU, RU -> ES / ES -> RU, RU -> DE / DE -> RU, and
-  RU -> zh-Hans / zh-Hans -> RU.
-- Start requests must validate a virtual mic output, Talkis Cloud credentials,
-  system-audio support, and a headphones/separate-output confirmation before any
-  streaming begins.
-- `test_virtual_mic_output` may play a short test tone to the selected virtual
-  output; it must not silently fall back to the real speakers.
-- On stop, if final transcript segments exist, save a call-like history entry:
-  `source: "call"`, `fileName: "Перевод звонка"`, `callSessionId`, `duration`,
-  `status`, original text in `raw`, bilingual translated text in `cleaned`, and
-  optional `translation` metadata with provider/model/language pair/segments.
-- Do not retry realtime translation from history unless raw audio tracks are
-  explicitly saved in a later feature.
-
-Do not present realtime translation as fully running until the Talkis proxy
-WebSocket transport and platform audio routing are implemented and verified.
 
 ## Speaker Diarization
 

@@ -6,6 +6,7 @@ export const common = {
   "common.delete": { ru: "Удалить", en: "Delete" },
   "common.change": { ru: "Изменить", en: "Change" },
   "common.default": { ru: "По умолчанию", en: "Default" },
+  "common.open": { ru: "Открыть", en: "Open" },
   "common.download": { ru: "Скачать", en: "Download" },
   "common.notFound": { ru: "Не найдено", en: "Not found" },
 } as const;

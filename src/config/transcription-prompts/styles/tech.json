@@ -10,7 +10,7 @@
     "Fix misrecognitions of English technical terms to their correct spelling.",
     "Do not aggressively shorten or restructure sentences. The output length should be similar to the input length."
   ],
-  "temperature": 0.1,
+  "temperature": 0.15,
   "examples": [
     {
       "raw": "нам нужно использовать юз стейт для хранения данных",

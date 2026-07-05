@@ -3,8 +3,9 @@ mod routing;
 
 use self::routing::{
     is_likely_local_url, local_runtime_kind_from_endpoint, port_from_url,
-    resolve_chat_completions_url, resolve_managed_models_url, resolve_managed_transcription_url,
-    resolve_whisper_model_download_url, resolve_whisper_models_url, resolve_whisper_url,
+    resolve_chat_completions_url, resolve_embeddings_url, resolve_managed_models_url,
+    resolve_managed_transcription_url, resolve_whisper_model_download_url,
+    resolve_whisper_models_url, resolve_whisper_url,
 };
 use crate::local_stt;
 use crate::logger;
@@ -63,6 +64,7 @@ pub struct TranscribeRequest {
     pub file_name: Option<String>,
     pub mime_type: Option<String>,
     pub mode: Option<String>,
+    pub streaming_enabled: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -77,17 +79,12 @@ pub struct TranscribeResponse {
     pub segments: Option<Vec<SpeakerTranscriptSegment>>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum TranscriptionMode {
+    #[default]
     Plain,
     Speakers,
-}
-
-impl Default for TranscriptionMode {
-    fn default() -> Self {
-        Self::Plain
-    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -161,8 +158,7 @@ fn is_known_whisper_hallucination(text: &str) -> bool {
         || normalized.contains("correction by");
     let has_known_name = normalized.contains("синецк") || normalized.contains("егоров");
 
-    (has_subtitle_credit_pattern && has_proofreader_pattern)
-        || (has_subtitle_credit_pattern && has_known_name)
+    has_subtitle_credit_pattern && (has_proofreader_pattern || has_known_name)
 }
 
 #[derive(Deserialize, Debug)]
@@ -571,8 +567,20 @@ async fn transcribe_audio_bytes_internal(
             },
         );
 
-        if !lang_param.is_empty() {
-            form = form.text("language", lang_param);
+        let use_streaming = req.streaming_enabled.unwrap_or(false) && !require_segments;
+        if !lang_param.is_empty() || (use_streaming && req.language == "auto") {
+            form = form.text(
+                "language",
+                if use_streaming && req.language == "auto" {
+                    "auto".to_string()
+                } else {
+                    lang_param
+                },
+            );
+        }
+
+        if use_streaming {
+            form = form.text("streaming", "true");
         }
 
         if let Some(prompt) = build_whisper_prompt(&req.language, "classic") {
@@ -1258,8 +1266,9 @@ pub async fn transcribe_file_path(
         return result;
     }
 
+    let mut diarization_audio = None;
     let diarization_segments = if req.speaker_diarization {
-        let diarization_audio =
+        let prepared_diarization_audio =
             media::prepare_media_file_for_diarization(&app, &input_path).await?;
         emit_file_progress(
             &app,
@@ -1269,19 +1278,44 @@ pub async fn transcribe_file_path(
             0,
             "Разделяем говорящих",
         );
-        let result = diarize_audio_file(&app, &req, &diarization_audio.path).await;
-        let _ = fs::remove_dir_all(&diarization_audio.temp_dir);
-        Some(result?)
+        let result = diarize_audio_file(&app, &req, &prepared_diarization_audio.path).await;
+        match result {
+            Ok(segments) => {
+                logger::log_info(
+                    "FILE_TRANSCRIPTION",
+                    "Reusing diarization WAV as input for local transcription chunks",
+                );
+                diarization_audio = Some(prepared_diarization_audio);
+                Some(segments)
+            }
+            Err(err) => {
+                let _ = fs::remove_dir_all(&prepared_diarization_audio.temp_dir);
+                return Err(err);
+            }
+        }
     } else {
         None
     };
 
-    let prepared = media::prepare_media_file_chunks_for_transcription(
+    let chunk_input_path = diarization_audio
+        .as_ref()
+        .map(|audio| audio.path.as_path())
+        .unwrap_or(input_path.as_path());
+    let prepared = match media::prepare_media_file_chunks_for_transcription(
         &app,
-        &input_path,
+        chunk_input_path,
         is_local_stt_endpoint,
     )
-    .await?;
+    .await
+    {
+        Ok(prepared) => prepared,
+        Err(err) => {
+            if let Some(audio) = &diarization_audio {
+                let _ = fs::remove_dir_all(&audio.temp_dir);
+            }
+            return Err(err);
+        }
+    };
     let total_chunks = prepared.chunks.len();
     emit_file_progress(
         &app,
@@ -1307,6 +1341,7 @@ pub async fn transcribe_file_path(
         file_name: None,
         mime_type: None,
         mode: Some("transcribe_only".to_string()),
+        streaming_enabled: Some(false),
     };
 
     let mut parts = Vec::with_capacity(total_chunks);
@@ -1336,6 +1371,9 @@ pub async fn transcribe_file_path(
                 Ok(result) => result,
                 Err(err) => {
                     let _ = fs::remove_dir_all(&prepared.temp_dir);
+                    if let Some(audio) = &diarization_audio {
+                        let _ = fs::remove_dir_all(&audio.temp_dir);
+                    }
                     return Err(err);
                 }
             };
@@ -1369,11 +1407,17 @@ pub async fn transcribe_file_path(
                     }
                     Err(err) => {
                         let _ = fs::remove_dir_all(&prepared.temp_dir);
+                        if let Some(audio) = &diarization_audio {
+                            let _ = fs::remove_dir_all(&audio.temp_dir);
+                        }
                         return Err(err);
                     }
                 },
                 Err(err) => {
                     let _ = fs::remove_dir_all(&prepared.temp_dir);
+                    if let Some(audio) = &diarization_audio {
+                        let _ = fs::remove_dir_all(&audio.temp_dir);
+                    }
                     return Err(format!("Не удалось прочитать фрагмент аудио: {}", err));
                 }
             }
@@ -1386,6 +1430,9 @@ pub async fn transcribe_file_path(
     }
 
     let _ = fs::remove_dir_all(&prepared.temp_dir);
+    if let Some(audio) = &diarization_audio {
+        let _ = fs::remove_dir_all(&audio.temp_dir);
+    }
 
     if let Some(diarization_segments) = diarization_segments {
         emit_file_progress(
@@ -1469,6 +1516,8 @@ pub struct ProcessTextRequest {
     pub prompt: String,
     #[serde(default)]
     pub temperature: Option<f64>,
+    #[serde(default)]
+    pub max_tokens: Option<i32>,
     /// OpenAI-compatible endpoint (cloud / local runtime / custom). Empty = OpenAI.
     #[serde(default)]
     pub endpoint: Option<String>,
@@ -1481,6 +1530,25 @@ pub struct ProcessTextRequest {
 #[derive(Serialize)]
 pub struct ProcessTextResponse {
     pub result: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct EmbedTextRequest {
+    pub input: Vec<String>,
+    /// OpenAI-compatible endpoint (cloud / local runtime / custom). Empty = OpenAI.
+    #[serde(default)]
+    pub endpoint: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub dimensions: Option<u32>,
+}
+
+#[derive(Serialize)]
+pub struct EmbedTextResponse {
+    pub embeddings: Vec<Vec<f32>>,
 }
 
 /// Run an explicit, user-initiated text-processing prompt (e.g. summary) against
@@ -1529,7 +1597,7 @@ pub async fn process_text(req: ProcessTextRequest) -> Result<ProcessTextResponse
         ),
     );
 
-    let payload = serde_json::json!({
+    let mut payload = serde_json::json!({
         "model": model,
         "messages": [
             { "role": "system", "content": prompt },
@@ -1538,6 +1606,10 @@ pub async fn process_text(req: ProcessTextRequest) -> Result<ProcessTextResponse
         "temperature": req.temperature.unwrap_or(0.3),
         "stream": false,
     });
+    if is_local {
+        let max_tokens = req.max_tokens.unwrap_or(1024).clamp(64, 2048);
+        payload["max_tokens"] = serde_json::json!(max_tokens);
+    }
 
     let client = if is_local {
         long_http_client()
@@ -1597,6 +1669,122 @@ pub async fn process_text(req: ProcessTextRequest) -> Result<ProcessTextResponse
     }
 
     Ok(ProcessTextResponse { result })
+}
+
+#[tauri::command]
+pub async fn embed_text(req: EmbedTextRequest) -> Result<EmbedTextResponse, String> {
+    let input: Vec<String> = req
+        .input
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect();
+
+    if input.is_empty() {
+        return Err("Нет текста для embeddings".to_string());
+    }
+    if input.len() > 64 {
+        return Err("Слишком много фрагментов для embeddings за один запрос".to_string());
+    }
+    let input_count = input.len();
+
+    let url = resolve_embeddings_url(req.endpoint.as_deref());
+    let is_local = is_likely_local_url(&url);
+    let model = req
+        .model
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("text-embedding-3-small")
+        .to_string();
+    let api_key = req
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    if api_key.is_none() && !is_local {
+        return Err("Не указан API-ключ для embeddings".to_string());
+    }
+
+    logger::log_info(
+        "LLM",
+        &format!(
+            "embed_text -> {} (model={}, local={}, chunks={})",
+            url, model, is_local, input_count
+        ),
+    );
+
+    let mut payload = serde_json::json!({
+        "model": model,
+        "input": input,
+    });
+    if let Some(dimensions) = req.dimensions {
+        payload["dimensions"] = serde_json::json!(dimensions);
+    }
+
+    let client = if is_local {
+        long_http_client()
+    } else {
+        http_client()
+    };
+    let mut request = client.post(&url).json(&payload);
+    if let Some(key) = api_key {
+        request = request.bearer_auth(key);
+    }
+
+    let response = request
+        .send()
+        .await
+        .map_err(|err| format!("Запрос embeddings не удался: {}", err))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|err| format!("Не удалось прочитать ответ embeddings: {}", err))?;
+
+    if !status.is_success() {
+        let snippet: String = body.chars().take(500).collect();
+        return Err(format!("Ошибка embeddings ({}): {}", status, snippet));
+    }
+
+    #[derive(Deserialize)]
+    struct EmbeddingData {
+        embedding: Vec<f32>,
+        index: Option<usize>,
+    }
+    #[derive(Deserialize)]
+    struct EmbeddingsResponse {
+        data: Vec<EmbeddingData>,
+    }
+
+    let parsed = serde_json::from_str::<EmbeddingsResponse>(&body)
+        .map_err(|err| format!("Embeddings endpoint вернул некорректный ответ: {}", err))?;
+    let mut indexed = parsed
+        .data
+        .into_iter()
+        .enumerate()
+        .map(|(fallback_index, item)| (item.index.unwrap_or(fallback_index), item.embedding))
+        .collect::<Vec<_>>();
+    indexed.sort_by_key(|(index, _)| *index);
+
+    let embeddings = indexed
+        .into_iter()
+        .map(|(_, embedding)| embedding)
+        .collect::<Vec<_>>();
+
+    if embeddings.is_empty() {
+        return Err("Embeddings endpoint вернул пустой ответ".to_string());
+    }
+    if embeddings.len() != input_count {
+        return Err(format!(
+            "Embeddings endpoint вернул {} vectors для {} фрагментов",
+            embeddings.len(),
+            input_count
+        ));
+    }
+
+    Ok(EmbedTextResponse { embeddings })
 }
 
 async fn test_stt_connection(
@@ -1928,9 +2116,8 @@ pub async fn install_stt_model(
         let runtime_base_url =
             local_stt::ensure_runtime(&app, client, &models_url, req.local_models_dir.as_deref())
                 .await
-                .map_err(|message| {
-                    logger::log_error("STT_INSTALL", &message);
-                    message
+                .inspect_err(|message| {
+                    logger::log_error("STT_INSTALL", message);
                 })?;
         effective_whisper_endpoint = Some(runtime_base_url.clone());
         let installed_model = local_stt::download_model_with_progress(
@@ -1940,9 +2127,8 @@ pub async fn install_stt_model(
             requested_model,
         )
         .await
-        .map_err(|message| {
-            logger::log_error("STT_INSTALL", &message);
-            message
+        .inspect_err(|message| {
+            logger::log_error("STT_INSTALL", message);
         })?;
 
         logger::log_info(
@@ -1979,9 +2165,8 @@ pub async fn install_stt_model(
         let runtime_base_url =
             local_stt::ensure_runtime(&app, client, &models_url, req.local_models_dir.as_deref())
                 .await
-                .map_err(|message| {
-                    logger::log_error("STT_INSTALL", &message);
-                    message
+                .inspect_err(|message| {
+                    logger::log_error("STT_INSTALL", message);
                 })?;
         effective_whisper_endpoint = Some(runtime_base_url.clone());
         models_url = resolve_managed_models_url(&runtime_base_url);
@@ -2233,14 +2418,12 @@ pub async fn delete_stt_model(
     if local_stt::is_managed_whisper_runtime_url(&models_url) {
         local_stt::ensure_runtime(&app, client, &models_url, req.local_models_dir.as_deref())
             .await
-            .map_err(|message| {
-                logger::log_error("STT_DELETE", &message);
-                message
+            .inspect_err(|message| {
+                logger::log_error("STT_DELETE", message);
             })?;
         local_stt::delete_downloaded_model(&app, req.local_models_dir.as_deref(), requested_model)
-            .map_err(|message| {
-                logger::log_error("STT_DELETE", &message);
-                message
+            .inspect_err(|message| {
+                logger::log_error("STT_DELETE", message);
             })?;
 
         return Ok(DeleteSttModelResult {
@@ -2253,9 +2436,8 @@ pub async fn delete_stt_model(
         let runtime_base_url =
             local_stt::ensure_runtime(&app, client, &models_url, req.local_models_dir.as_deref())
                 .await
-                .map_err(|message| {
-                    logger::log_error("STT_DELETE", &message);
-                    message
+                .inspect_err(|message| {
+                    logger::log_error("STT_DELETE", message);
                 })?;
         models_url = resolve_managed_models_url(&runtime_base_url);
         delete_url = resolve_whisper_model_download_url(&models_url, requested_model);

@@ -7,11 +7,19 @@ use std::io::{Cursor, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::sync::Once;
-use transcribe_cpp::{ExtSlot, Model, RunExtension, RunOptions, TimestampKind, WhisperRunOptions};
+use transcribe_cpp::{
+    CommitPolicy, ExtSlot, Model, MoonshineStreamingOptions, ParakeetBufferedStreamOptions,
+    ParakeetStreamOptions, RunExtension, RunOptions, StreamExtension, StreamOptions, TimestampKind,
+    VoxtralRealtimeStreamOptions, WhisperRunOptions,
+};
 
 const SERVER_NAME: &str = "talkis-stt";
 const MAX_REQUEST_BYTES: usize = 128 * 1024 * 1024;
 const WHISPER_RUN_EXT_KIND: u32 = 0x4E524857;
+const PARAKEET_STREAM_EXT_KIND: u32 = 0x54534B50;
+const PARAKEET_BUFFERED_STREAM_EXT_KIND: u32 = 0x53424B50;
+const MOONSHINE_STREAMING_EXT_KIND: u32 = 0x5453534D;
+const VOXTRAL_REALTIME_EXT_KIND: u32 = 0x54535256;
 static INIT_TRANSCRIBE_CPP: Once = Once::new();
 
 struct RuntimeConfig {
@@ -34,6 +42,7 @@ struct WhisperModel {
     file_name: &'static str,
     gguf_file_name: &'static str,
     url: &'static str,
+    supports_streaming: bool,
 }
 
 struct MultipartData {
@@ -48,12 +57,12 @@ const WHISPER_MODELS: &[WhisperModel] = &[
             "tiny",
             "Systran/faster-whisper-tiny",
             "openai/whisper-tiny",
-            "ggml-tiny.bin",
-            "whisper-tiny.gguf",
+            "whisper-tiny-q4_k.gguf",
         ],
-        file_name: "ggml-tiny.bin",
-        gguf_file_name: "whisper-tiny.gguf",
-        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
+        file_name: "whisper-tiny-q4_k.gguf",
+        gguf_file_name: "whisper-tiny-q4_k.gguf",
+        url: "https://huggingface.co/oxide-lab/whisper-tiny-GGUF/resolve/main/whisper.cpp/whisper-tiny-q4_k.gguf",
+        supports_streaming: false,
     },
     WhisperModel {
         id: "whisper-base",
@@ -61,12 +70,12 @@ const WHISPER_MODELS: &[WhisperModel] = &[
             "base",
             "Systran/faster-whisper-base",
             "openai/whisper-base",
-            "ggml-base.bin",
-            "whisper-base.gguf",
+            "whisper-base-q4_k.gguf",
         ],
-        file_name: "ggml-base.bin",
-        gguf_file_name: "whisper-base.gguf",
-        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
+        file_name: "whisper-base-q4_k.gguf",
+        gguf_file_name: "whisper-base-q4_k.gguf",
+        url: "https://huggingface.co/oxide-lab/whisper-base-GGUF/resolve/main/whisper.cpp/whisper-base-q4_k.gguf",
+        supports_streaming: false,
     },
     WhisperModel {
         id: "whisper-small",
@@ -74,12 +83,12 @@ const WHISPER_MODELS: &[WhisperModel] = &[
             "small",
             "Systran/faster-whisper-small",
             "openai/whisper-small",
-            "ggml-small.bin",
-            "whisper-small.gguf",
+            "whisper-small-q4_k.gguf",
         ],
-        file_name: "ggml-small.bin",
-        gguf_file_name: "whisper-small.gguf",
-        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
+        file_name: "whisper-small-q4_k.gguf",
+        gguf_file_name: "whisper-small-q4_k.gguf",
+        url: "https://huggingface.co/oxide-lab/whisper-small-GGUF/resolve/main/whisper.cpp/whisper-small-q4_k.gguf",
+        supports_streaming: false,
     },
     WhisperModel {
         id: "whisper-medium",
@@ -87,25 +96,12 @@ const WHISPER_MODELS: &[WhisperModel] = &[
             "medium",
             "Systran/faster-whisper-medium",
             "openai/whisper-medium",
-            "ggml-medium.bin",
-            "whisper-medium.gguf",
+            "whisper-medium-q4_k.gguf",
         ],
-        file_name: "ggml-medium.bin",
-        gguf_file_name: "whisper-medium.gguf",
-        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin",
-    },
-    WhisperModel {
-        id: "whisper-large-v2",
-        aliases: &[
-            "large-v2",
-            "Systran/faster-whisper-large-v2",
-            "openai/whisper-large-v2",
-            "ggml-large-v2.bin",
-            "whisper-large-v2.gguf",
-        ],
-        file_name: "ggml-large-v2.bin",
-        gguf_file_name: "whisper-large-v2.gguf",
-        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v2.bin",
+        file_name: "whisper-medium-q4_k.gguf",
+        gguf_file_name: "whisper-medium-q4_k.gguf",
+        url: "https://huggingface.co/oxide-lab/whisper-medium-GGUF/resolve/main/whisper.cpp/whisper-medium-q4_k.gguf",
+        supports_streaming: false,
     },
     WhisperModel {
         id: "whisper-large-v3",
@@ -113,12 +109,12 @@ const WHISPER_MODELS: &[WhisperModel] = &[
             "large-v3",
             "Systran/faster-whisper-large-v3",
             "openai/whisper-large-v3",
-            "ggml-large-v3.bin",
-            "whisper-large-v3.gguf",
+            "whisper-large-v3-q4_k.gguf",
         ],
-        file_name: "ggml-large-v3.bin",
-        gguf_file_name: "whisper-large-v3.gguf",
-        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin",
+        file_name: "whisper-large-v3-q4_k.gguf",
+        gguf_file_name: "whisper-large-v3-q4_k.gguf",
+        url: "https://huggingface.co/oxide-lab/whisper-large-v3-GGUF/resolve/main/whisper.cpp/whisper-large-v3-q4_k.gguf",
+        supports_streaming: false,
     },
     WhisperModel {
         id: "whisper-large-v3-turbo",
@@ -127,12 +123,12 @@ const WHISPER_MODELS: &[WhisperModel] = &[
             "Systran/faster-whisper-large-v3-turbo",
             "mlx-community/whisper-large-v3-turbo-4bit",
             "openai/whisper-large-v3-turbo",
-            "ggml-large-v3-turbo.bin",
-            "whisper-large-v3-turbo.gguf",
+            "whisper-large-v3-turbo-q4_k.gguf",
         ],
-        file_name: "ggml-large-v3-turbo.bin",
-        gguf_file_name: "whisper-large-v3-turbo.gguf",
-        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin",
+        file_name: "whisper-large-v3-turbo-q4_k.gguf",
+        gguf_file_name: "whisper-large-v3-turbo-q4_k.gguf",
+        url: "https://huggingface.co/oxide-lab/whisper-large-v3-turbo-GGUF/resolve/main/whisper.cpp/whisper-large-v3-turbo-q4_k.gguf",
+        supports_streaming: false,
     },
     WhisperModel {
         id: "nvidia/parakeet-tdt-0.6b-v3",
@@ -145,6 +141,7 @@ const WHISPER_MODELS: &[WhisperModel] = &[
         file_name: "parakeet-tdt-0.6b-v3-Q8_0.gguf",
         gguf_file_name: "parakeet-tdt-0.6b-v3-Q8_0.gguf",
         url: "https://huggingface.co/handy-computer/parakeet-tdt-0.6b-v3-gguf/resolve/main/parakeet-tdt-0.6b-v3-Q8_0.gguf",
+        supports_streaming: false,
     },
     WhisperModel {
         id: "nvidia/parakeet-tdt-0.6b-v2",
@@ -157,6 +154,47 @@ const WHISPER_MODELS: &[WhisperModel] = &[
         file_name: "parakeet-tdt-0.6b-v2-Q8_0.gguf",
         gguf_file_name: "parakeet-tdt-0.6b-v2-Q8_0.gguf",
         url: "https://huggingface.co/handy-computer/parakeet-tdt-0.6b-v2-gguf/resolve/main/parakeet-tdt-0.6b-v2-Q8_0.gguf",
+        supports_streaming: false,
+    },
+    WhisperModel {
+        id: "nvidia/nemotron-3.5-asr-streaming-0.6b",
+        aliases: &[
+            "nemotron-35-asr-streaming-06b",
+            "nemotron-3.5-asr-streaming-0.6b",
+            "nemotron-3.5-asr-streaming-0.6b-Q8_0.gguf",
+        ],
+        file_name: "nemotron-3.5-asr-streaming-0.6b-Q8_0.gguf",
+        gguf_file_name: "nemotron-3.5-asr-streaming-0.6b-Q8_0.gguf",
+        url: "https://huggingface.co/handy-computer/nemotron-3.5-asr-streaming-0.6b-gguf/resolve/main/nemotron-3.5-asr-streaming-0.6b-Q8_0.gguf",
+        supports_streaming: true,
+    },
+    WhisperModel {
+        id: "nvidia/nemotron-speech-streaming-en-0.6b",
+        aliases: &[
+            "nemotron-speech-streaming-en-06b",
+            "nemotron-speech-streaming-en-0.6b",
+            "nemotron-speech-streaming-en-0.6b-Q8_0.gguf",
+        ],
+        file_name: "nemotron-speech-streaming-en-0.6b-Q8_0.gguf",
+        gguf_file_name: "nemotron-speech-streaming-en-0.6b-Q8_0.gguf",
+        url: "https://huggingface.co/handy-computer/nemotron-speech-streaming-en-0.6b-gguf/resolve/main/nemotron-speech-streaming-en-0.6b-Q8_0.gguf",
+        supports_streaming: true,
+    },
+    WhisperModel {
+        id: "moonshine-streaming-tiny",
+        aliases: &["moonshine-streaming-tiny-Q8_0.gguf"],
+        file_name: "moonshine-streaming-tiny-Q8_0.gguf",
+        gguf_file_name: "moonshine-streaming-tiny-Q8_0.gguf",
+        url: "https://huggingface.co/handy-computer/moonshine-streaming-tiny-gguf/resolve/main/moonshine-streaming-tiny-Q8_0.gguf",
+        supports_streaming: true,
+    },
+    WhisperModel {
+        id: "moonshine-streaming-small",
+        aliases: &["moonshine-streaming-small-Q8_0.gguf"],
+        file_name: "moonshine-streaming-small-Q8_0.gguf",
+        gguf_file_name: "moonshine-streaming-small-Q8_0.gguf",
+        url: "https://huggingface.co/handy-computer/moonshine-streaming-small-gguf/resolve/main/moonshine-streaming-small-Q8_0.gguf",
+        supports_streaming: true,
     },
     WhisperModel {
         id: "Qwen/Qwen3-ASR-0.6B",
@@ -169,6 +207,7 @@ const WHISPER_MODELS: &[WhisperModel] = &[
         file_name: "Qwen3-ASR-0.6B-Q8_0.gguf",
         gguf_file_name: "Qwen3-ASR-0.6B-Q8_0.gguf",
         url: "https://huggingface.co/handy-computer/Qwen3-ASR-0.6B-gguf/resolve/main/Qwen3-ASR-0.6B-Q8_0.gguf",
+        supports_streaming: false,
     },
 ];
 
@@ -426,20 +465,30 @@ fn find_model(value: &str) -> Option<&'static WhisperModel> {
 }
 
 fn model_path(config: &RuntimeConfig, model: &WhisperModel) -> PathBuf {
-    let gguf_path = config.models_dir.join(model.gguf_file_name);
-    if gguf_path.is_file() {
-        gguf_path
-    } else {
-        config.models_dir.join(model.file_name)
-    }
+    config.models_dir.join(model.gguf_file_name)
 }
 
 fn marker_path(config: &RuntimeConfig, model: &WhisperModel) -> PathBuf {
-    config.models_dir.join(format!("{}.json", model.id))
+    config
+        .models_dir
+        .join(format!("{}.json", safe_marker_file_stem(model.id)))
 }
 
 fn download_model_path(config: &RuntimeConfig, model: &WhisperModel) -> PathBuf {
-    config.models_dir.join(model.file_name)
+    model_path(config, model)
+}
+
+fn safe_marker_file_stem(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 fn install_model(config: &RuntimeConfig, requested: &str) -> Result<String, (u16, String)> {
@@ -567,10 +616,7 @@ fn write_model_marker(config: &RuntimeConfig, model: &WhisperModel) -> Result<()
 fn installed_models(config: &RuntimeConfig) -> Vec<String> {
     let mut models = WHISPER_MODELS
         .iter()
-        .filter(|model| {
-            config.models_dir.join(model.file_name).is_file()
-                || config.models_dir.join(model.gguf_file_name).is_file()
-        })
+        .filter(|model| model_path(config, model).is_file())
         .map(|model| model.id.to_string())
         .collect::<Vec<_>>();
     models.sort();
@@ -621,11 +667,43 @@ fn transcribe(request: &HttpRequest, config: &RuntimeConfig) -> Result<String, (
             format!("Не удалось создать transcribe.cpp session: {}", err),
         )
     })?;
-    let options = run_options_from_fields(
-        &multipart.fields,
-        capabilities.max_timestamp_kind,
-        supports_whisper_options,
-    );
+    let streaming_requested = streaming_requested_from_fields(&multipart.fields);
+    let mut options = if streaming_requested {
+        run_options_from_fields_with_auto(
+            &multipart.fields,
+            capabilities.max_timestamp_kind,
+            supports_whisper_options,
+            true,
+        )
+    } else {
+        run_options_from_fields(
+            &multipart.fields,
+            capabilities.max_timestamp_kind,
+            supports_whisper_options,
+        )
+    };
+    if streaming_requested {
+        options.language = normalize_streaming_language(model, options.language.as_deref());
+        if !model.supports_streaming {
+            return Err((
+                400,
+                format!("Модель «{}» не поддерживает streaming-режим.", model.id),
+            ));
+        }
+
+        let Some(stream_extension) = stream_extension_for_model(&loaded_model) else {
+            return Err((
+                400,
+                format!(
+                    "transcribe.cpp не сообщил streaming extension для модели «{}».",
+                    model.id
+                ),
+            ));
+        };
+        let text = run_streaming_transcription(&mut session, &audio, &options, stream_extension)?;
+        return transcription_response(text, Vec::new(), &multipart.fields);
+    }
+
     let transcript = session.run(&audio, &options).map_err(|err| {
         (
             500,
@@ -675,10 +753,19 @@ fn run_options_from_fields(
     max_timestamp_kind: TimestampKind,
     supports_whisper_options: bool,
 ) -> RunOptions {
+    run_options_from_fields_with_auto(fields, max_timestamp_kind, supports_whisper_options, false)
+}
+
+fn run_options_from_fields_with_auto(
+    fields: &HashMap<String, String>,
+    max_timestamp_kind: TimestampKind,
+    supports_whisper_options: bool,
+    keep_auto_language: bool,
+) -> RunOptions {
     let language = fields
         .get("language")
         .map(|language| language.trim())
-        .filter(|language| !language.is_empty() && *language != "auto")
+        .filter(|language| !language.is_empty() && (keep_auto_language || *language != "auto"))
         .map(ToString::to_string);
 
     RunOptions {
@@ -701,6 +788,121 @@ fn run_options_from_fields(
         }),
         ..Default::default()
     }
+}
+
+fn streaming_requested_from_fields(fields: &HashMap<String, String>) -> bool {
+    fields
+        .get("streaming")
+        .map(|value| {
+            matches!(
+                value.trim().to_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn normalize_streaming_language(model: &WhisperModel, language: Option<&str>) -> Option<String> {
+    let trimmed = language.map(str::trim).filter(|value| !value.is_empty());
+
+    if model.id == "nvidia/nemotron-3.5-asr-streaming-0.6b" {
+        return Some(
+            match trimmed.unwrap_or("auto") {
+                "auto" => "auto",
+                "ru" => "ru-RU",
+                "en" => "en-US",
+                "de" => "de-DE",
+                "fr" => "fr-FR",
+                "es" => "es-ES",
+                "it" => "it-IT",
+                "pt" => "pt-BR",
+                "zh" | "zh-Hans" => "zh-CN",
+                "ja" => "ja-JP",
+                "ko" => "ko-KR",
+                "hi" => "hi-IN",
+                "ar" => "ar-AR",
+                value => value,
+            }
+            .to_string(),
+        );
+    }
+
+    if model.id == "nvidia/nemotron-speech-streaming-en-0.6b" {
+        return Some("en-US".to_string());
+    }
+
+    if model.id.starts_with("moonshine-streaming-") {
+        return None;
+    }
+
+    trimmed.map(ToString::to_string)
+}
+
+fn stream_extension_for_model(model: &Model) -> Option<StreamExtension> {
+    if model.accepts_ext(ExtSlot::Stream, PARAKEET_STREAM_EXT_KIND) {
+        return Some(StreamExtension::ParakeetStream(
+            ParakeetStreamOptions::default(),
+        ));
+    }
+
+    if model.accepts_ext(ExtSlot::Stream, PARAKEET_BUFFERED_STREAM_EXT_KIND) {
+        return Some(StreamExtension::ParakeetBuffered(
+            ParakeetBufferedStreamOptions::default(),
+        ));
+    }
+
+    if model.accepts_ext(ExtSlot::Stream, MOONSHINE_STREAMING_EXT_KIND) {
+        return Some(StreamExtension::MoonshineStreaming(
+            MoonshineStreamingOptions::default(),
+        ));
+    }
+
+    if model.accepts_ext(ExtSlot::Stream, VOXTRAL_REALTIME_EXT_KIND) {
+        return Some(StreamExtension::VoxtralRealtime(
+            VoxtralRealtimeStreamOptions::default(),
+        ));
+    }
+
+    None
+}
+
+fn run_streaming_transcription(
+    session: &mut transcribe_cpp::Session,
+    audio: &[f32],
+    run_options: &RunOptions,
+    stream_extension: StreamExtension,
+) -> Result<String, (u16, String)> {
+    let stream_options = StreamOptions {
+        commit_policy: CommitPolicy::Auto,
+        family: Some(stream_extension),
+        ..Default::default()
+    };
+    let mut stream = session
+        .stream(run_options, &stream_options)
+        .map_err(|err| {
+            (
+                500,
+                format!("transcribe.cpp не смог начать streaming: {}", err),
+            )
+        })?;
+
+    for chunk in audio.chunks(1600) {
+        stream.feed(chunk).map_err(|err| {
+            (
+                500,
+                format!("transcribe.cpp streaming feed failed: {}", err),
+            )
+        })?;
+    }
+
+    stream.finalize().map_err(|err| {
+        (
+            500,
+            format!("transcribe.cpp streaming finalize failed: {}", err),
+        )
+    })?;
+
+    Ok(stream.text().display().trim().to_string())
 }
 
 fn transcription_response(
@@ -934,7 +1136,124 @@ mod tests {
     }
 
     #[test]
-    fn model_path_prefers_existing_gguf_over_legacy_bin() {
+    fn streaming_fields_parse_boolean_values() {
+        let mut fields = HashMap::new();
+        assert!(!streaming_requested_from_fields(&fields));
+
+        fields.insert("streaming".to_string(), "true".to_string());
+        assert!(streaming_requested_from_fields(&fields));
+
+        fields.insert("streaming".to_string(), "0".to_string());
+        assert!(!streaming_requested_from_fields(&fields));
+    }
+
+    #[test]
+    fn streaming_run_options_keep_auto_language() {
+        let mut fields = HashMap::new();
+        fields.insert("language".to_string(), "auto".to_string());
+
+        let options =
+            run_options_from_fields_with_auto(&fields, TimestampKind::Segment, false, true);
+
+        assert_eq!(options.language.as_deref(), Some("auto"));
+        assert_eq!(options.timestamps, TimestampKind::Segment);
+    }
+
+    #[test]
+    fn marker_path_sanitizes_model_ids_with_slashes() {
+        let root = env::temp_dir().join("talkis-stt-marker-test");
+        let config = RuntimeConfig {
+            host: "127.0.0.1".to_string(),
+            port: 0,
+            data_dir: root.clone(),
+            models_dir: root.join("models"),
+        };
+        let model = find_model("nvidia/nemotron-3.5-asr-streaming-0.6b").expect("model");
+
+        assert_eq!(
+            marker_path(&config, model),
+            config
+                .models_dir
+                .join("nvidia_nemotron-3.5-asr-streaming-0.6b.json")
+        );
+    }
+
+    #[test]
+    fn new_streaming_models_resolve_aliases_and_marker_paths() {
+        let root = env::temp_dir().join("talkis-stt-new-streaming-test");
+        let config = RuntimeConfig {
+            host: "127.0.0.1".to_string(),
+            port: 0,
+            data_dir: root.clone(),
+            models_dir: root.join("models"),
+        };
+        let cases = [
+            (
+                "nemotron-35-asr-streaming-06b",
+                "nvidia/nemotron-3.5-asr-streaming-0.6b",
+                "nvidia_nemotron-3.5-asr-streaming-0.6b.json",
+            ),
+            (
+                "nemotron-speech-streaming-en-06b",
+                "nvidia/nemotron-speech-streaming-en-0.6b",
+                "nvidia_nemotron-speech-streaming-en-0.6b.json",
+            ),
+            (
+                "moonshine-streaming-tiny-Q8_0.gguf",
+                "moonshine-streaming-tiny",
+                "moonshine-streaming-tiny.json",
+            ),
+            (
+                "moonshine-streaming-small-Q8_0.gguf",
+                "moonshine-streaming-small",
+                "moonshine-streaming-small.json",
+            ),
+        ];
+
+        for (requested, expected_id, expected_marker) in cases {
+            let model = find_model(requested).expect("model");
+            assert_eq!(model.id, expected_id);
+            assert!(model.supports_streaming);
+            assert_eq!(
+                marker_path(&config, model),
+                config.models_dir.join(expected_marker)
+            );
+        }
+    }
+
+    #[test]
+    fn nemotron_streaming_normalizes_simple_language_to_locale() {
+        let model = find_model("nvidia/nemotron-3.5-asr-streaming-0.6b").expect("model");
+
+        assert_eq!(
+            normalize_streaming_language(model, Some("ru")).as_deref(),
+            Some("ru-RU")
+        );
+        assert_eq!(
+            normalize_streaming_language(model, Some("auto")).as_deref(),
+            Some("auto")
+        );
+    }
+
+    #[test]
+    fn english_nemotron_streaming_forces_english_locale() {
+        let model = find_model("nvidia/nemotron-speech-streaming-en-0.6b").expect("model");
+
+        assert_eq!(
+            normalize_streaming_language(model, Some("ru")).as_deref(),
+            Some("en-US")
+        );
+    }
+
+    #[test]
+    fn moonshine_streaming_omits_language_hint() {
+        let model = find_model("moonshine-streaming-tiny").expect("model");
+
+        assert_eq!(normalize_streaming_language(model, Some("ru")), None);
+    }
+
+    #[test]
+    fn model_path_uses_gguf_only() {
         let root = env::temp_dir().join(format!(
             "talkis-stt-test-{}",
             SystemTime::now()
@@ -946,9 +1265,7 @@ mod tests {
         fs::create_dir_all(&models_dir).expect("models dir");
 
         let model = find_model("whisper-base").expect("model");
-        let legacy_path = models_dir.join(model.file_name);
         let gguf_path = models_dir.join(model.gguf_file_name);
-        fs::write(&legacy_path, b"legacy").expect("legacy");
         fs::write(&gguf_path, b"gguf").expect("gguf");
 
         let config = RuntimeConfig {
@@ -959,7 +1276,7 @@ mod tests {
         };
 
         assert_eq!(model_path(&config, model), gguf_path);
-        assert_eq!(download_model_path(&config, model), legacy_path);
+        assert_eq!(download_model_path(&config, model), gguf_path);
 
         let _ = fs::remove_dir_all(root);
     }

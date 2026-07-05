@@ -25,13 +25,36 @@ export const CALL_BUBBLE_GAP = 1;
 export const CALL_STACK_WIDGET_WIDTH =
   IDLE_WIDGET_WIDTH + CALL_BUBBLE_GAP + CALL_BUBBLE_SIZE;
 export const CALL_STACK_WIDGET_HEIGHT = IDLE_WIDGET_HEIGHT;
+export const TRANSLATION_STACK_WIDGET_WIDTH =
+  CALL_STACK_WIDGET_WIDTH + CALL_BUBBLE_GAP + CALL_BUBBLE_SIZE;
+export const TRANSLATION_STACK_WIDGET_HEIGHT = IDLE_WIDGET_HEIGHT;
 export const FILE_DROP_WIDGET_WIDTH = 236;
 export const FILE_DROP_WIDGET_HEIGHT = 82;
 export const FILE_DROP_STACK_WIDGET_WIDTH =
   FILE_DROP_WIDGET_WIDTH + CALL_BUBBLE_GAP + CALL_BUBBLE_SIZE;
 export const FILE_DROP_STACK_WIDGET_HEIGHT = FILE_DROP_WIDGET_HEIGHT;
+export const FILE_DROP_TRANSLATION_STACK_WIDGET_WIDTH =
+  FILE_DROP_STACK_WIDGET_WIDTH + CALL_BUBBLE_GAP + CALL_BUBBLE_SIZE;
+export const FILE_DROP_TRANSLATION_STACK_WIDGET_HEIGHT = FILE_DROP_WIDGET_HEIGHT;
 export const NOTICE_WIDGET_WIDTH = 212;
 export const NOTICE_AREA_HEIGHT = 52;
 /** Must match NOTICE_GAP in src-tauri/src/lib.rs (logical pixels). */
 export const NOTICE_WIDGET_GAP = 2;
 export const WIDGET_NOTICE_EVENT = "widget-notice:update";
+export const TEXT_OVERLAY_WIDGET_WIDTH = 324;
+export const TEXT_OVERLAY_WIDGET_HEIGHT = 182;
+export const TEXT_OVERLAY_EVENT = "widget-text:update";
+
+export type WidgetTextOverlayStatus =
+  | "copying"
+  | "translating"
+  | "done"
+  | "error";
+
+export interface WidgetTextOverlayState {
+  status: WidgetTextOverlayStatus;
+  sourceText: string;
+  translatedText: string;
+  targetLanguage: string;
+  message?: string;
+}

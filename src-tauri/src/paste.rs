@@ -1,5 +1,5 @@
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::logger;
 
@@ -311,7 +311,7 @@ fn focus_remembered_linux_paste_target() {
 /// macOS always sees the V keystroke as "Cmd+V", eliminating the intermittent
 /// bug where a bare "v" character is typed instead of paste.
 #[cfg(target_os = "macos")]
-fn simulate_cmd_v() -> Result<(), String> {
+fn simulate_macos_command_shortcut(keycode: u16) -> Result<(), String> {
     use std::ffi::c_void;
 
     type CGEventRef = *mut c_void;
@@ -342,8 +342,7 @@ fn simulate_cmd_v() -> Result<(), String> {
             return Err("CGEventSourceCreate returned null".into());
         }
 
-        // V key down with Command flag
-        let key_down = CGEventCreateKeyboardEvent(source, 0x09, true);
+        let key_down = CGEventCreateKeyboardEvent(source, keycode, true);
         if key_down.is_null() {
             CFRelease(source as *const c_void);
             return Err("CGEventCreateKeyboardEvent (down) returned null".into());
@@ -353,8 +352,7 @@ fn simulate_cmd_v() -> Result<(), String> {
 
         std::thread::sleep(Duration::from_millis(20));
 
-        // V key up with Command flag
-        let key_up = CGEventCreateKeyboardEvent(source, 0x09, false);
+        let key_up = CGEventCreateKeyboardEvent(source, keycode, false);
         if key_up.is_null() {
             CFRelease(key_down as *const c_void);
             CFRelease(source as *const c_void);
@@ -369,6 +367,22 @@ fn simulate_cmd_v() -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Simulate Cmd+V using CoreGraphics directly.
+///
+/// Unlike enigo (which sends separate Meta-press and V-click events that can
+/// race), this creates key events with the Command flag baked into each event.
+/// macOS always sees the V keystroke as "Cmd+V", eliminating the intermittent
+/// bug where a bare "v" character is typed instead of paste.
+#[cfg(target_os = "macos")]
+fn simulate_cmd_v() -> Result<(), String> {
+    simulate_macos_command_shortcut(0x09)
+}
+
+#[cfg(target_os = "macos")]
+fn simulate_cmd_c() -> Result<(), String> {
+    simulate_macos_command_shortcut(0x08)
 }
 
 #[cfg(target_os = "linux")]
@@ -444,6 +458,51 @@ fn simulate_cmd_v() -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
+fn simulate_cmd_c() -> Result<(), String> {
+    use x11rb::connection::Connection;
+    use x11rb::protocol::xproto::{KEY_PRESS_EVENT, KEY_RELEASE_EVENT};
+    use x11rb::protocol::xtest::ConnectionExt as XtestConnectionExt;
+
+    const CONTROL_LEFT_KEYCODE: u8 = 37;
+    const SHIFT_LEFT_KEYCODE: u8 = 50;
+    const C_KEYCODE: u8 = 54;
+    let terminal_copy = should_use_terminal_paste_shortcut();
+
+    let (conn, screen_num) =
+        x11rb::connect(None).map_err(|err| format!("Failed to connect to X11: {}", err))?;
+    let root = conn.setup().roots[screen_num].root;
+    let events: &[(u8, u8)] = if terminal_copy {
+        &[
+            (KEY_PRESS_EVENT, CONTROL_LEFT_KEYCODE),
+            (KEY_PRESS_EVENT, SHIFT_LEFT_KEYCODE),
+            (KEY_PRESS_EVENT, C_KEYCODE),
+            (KEY_RELEASE_EVENT, C_KEYCODE),
+            (KEY_RELEASE_EVENT, SHIFT_LEFT_KEYCODE),
+            (KEY_RELEASE_EVENT, CONTROL_LEFT_KEYCODE),
+        ]
+    } else {
+        &[
+            (KEY_PRESS_EVENT, CONTROL_LEFT_KEYCODE),
+            (KEY_PRESS_EVENT, C_KEYCODE),
+            (KEY_RELEASE_EVENT, C_KEYCODE),
+            (KEY_RELEASE_EVENT, CONTROL_LEFT_KEYCODE),
+        ]
+    };
+
+    for &(event_type, keycode) in events {
+        conn.xtest_fake_input(event_type, keycode, 0, root, 0, 0, 0)
+            .map_err(|err| format!("XTest copy key event failed: {}", err))?;
+        conn.flush()
+            .map_err(|err| format!("Failed to flush XTest copy event: {}", err))?;
+        std::thread::sleep(Duration::from_millis(45));
+    }
+
+    conn.flush()
+        .map_err(|err| format!("Failed to flush XTest copy events: {}", err))?;
+    Ok(())
+}
+
 #[cfg(all(not(target_os = "macos"), not(target_os = "linux")))]
 fn simulate_cmd_v() -> Result<(), String> {
     use enigo::{Enigo, Key, Keyboard, Settings};
@@ -462,9 +521,46 @@ fn simulate_cmd_v() -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(all(not(target_os = "macos"), not(target_os = "linux")))]
+fn simulate_cmd_c() -> Result<(), String> {
+    use enigo::{Enigo, Key, Keyboard, Settings};
+
+    let mut enigo =
+        Enigo::new(&Settings::default()).map_err(|e| format!("Input init failed: {}", e))?;
+    enigo
+        .key(Key::Control, enigo::Direction::Press)
+        .map_err(|e| format!("Ctrl press failed: {}", e))?;
+    enigo
+        .key(Key::Unicode('c'), enigo::Direction::Click)
+        .map_err(|e| format!("C click failed: {}", e))?;
+    enigo
+        .key(Key::Control, enigo::Direction::Release)
+        .map_err(|e| format!("Ctrl release failed: {}", e))?;
+    Ok(())
+}
+
 #[cfg(target_os = "macos")]
 fn paste_shortcut_label() -> &'static str {
     "Cmd+V via CGEvent"
+}
+
+#[cfg(target_os = "macos")]
+fn copy_shortcut_label() -> &'static str {
+    "Cmd+C via CGEvent"
+}
+
+#[cfg(target_os = "windows")]
+fn copy_shortcut_label() -> &'static str {
+    "Ctrl+C via input simulation"
+}
+
+#[cfg(target_os = "linux")]
+fn copy_shortcut_label() -> &'static str {
+    if should_use_terminal_paste_shortcut() {
+        "Ctrl+Shift+C via XTest"
+    } else {
+        "Ctrl+C via XTest"
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -491,6 +587,112 @@ fn should_restore_clipboard_after_paste() -> bool {
 #[cfg(not(target_os = "linux"))]
 fn should_restore_clipboard_after_paste() -> bool {
     true
+}
+
+fn clipboard_sentinel() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    format!("__TALKIS_SELECTION_SENTINEL_{}__", nanos)
+}
+
+fn selected_text_from_clipboard(copied_text: &str, sentinel: &str) -> Option<String> {
+    if copied_text == sentinel || copied_text.trim().is_empty() {
+        return None;
+    }
+
+    Some(copied_text.to_string())
+}
+
+/// Copy selected text by temporarily using the clipboard and simulating Cmd/Ctrl+C.
+#[tauri::command]
+pub async fn copy_selected_text(app: tauri::AppHandle) -> Result<String, String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+
+    ensure_input_event_permission()?;
+
+    let previous_clipboard_text = app.clipboard().read_text().ok();
+    let sentinel = clipboard_sentinel();
+    let handle = app.clone();
+    let (tx, rx) = mpsc::channel::<Result<String, String>>();
+
+    app.run_on_main_thread(move || {
+        let result = (|| -> Result<String, String> {
+            logger::log_info(
+                "PASTE",
+                "Preparing clipboard sentinel for selected text copy",
+            );
+            handle
+                .clipboard()
+                .write_text(sentinel.clone())
+                .map_err(|e| format!("Clipboard sentinel write failed: {}", e))?;
+
+            #[cfg(target_os = "linux")]
+            write_linux_xclip_text(&sentinel);
+
+            let copy_result = (|| -> Result<String, String> {
+                std::thread::sleep(Duration::from_millis(90));
+
+                #[cfg(target_os = "linux")]
+                focus_remembered_linux_paste_target();
+
+                logger::log_info("PASTE", &format!("Simulating {}", copy_shortcut_label()));
+                simulate_cmd_c()?;
+
+                std::thread::sleep(Duration::from_millis(260));
+
+                handle
+                    .clipboard()
+                    .read_text()
+                    .map_err(|e| format!("Clipboard read after copy failed: {}", e))
+            })();
+
+            let restore_result: Result<(), String> = match &previous_clipboard_text {
+                Some(previous_text) => {
+                    handle
+                        .clipboard()
+                        .write_text(previous_text.clone())
+                        .map_err(|e| format!("Clipboard restore failed: {}", e))?;
+                    #[cfg(target_os = "linux")]
+                    write_linux_xclip_text(previous_text);
+                    Ok(())
+                }
+                None => {
+                    handle
+                        .clipboard()
+                        .clear()
+                        .map_err(|e| format!("Clipboard clear failed: {}", e))?;
+                    #[cfg(target_os = "linux")]
+                    write_linux_xclip_text("");
+                    Ok(())
+                }
+            };
+
+            restore_result?;
+            let copied_text = copy_result?;
+
+            selected_text_from_clipboard(&copied_text, &sentinel)
+                .ok_or_else(|| "No selected text copied".to_string())
+        })();
+
+        if let Err(err) = &result {
+            logger::log_error("PASTE", err);
+        }
+
+        let _ = tx.send(result);
+    })
+    .map_err(|e| {
+        format!(
+            "Failed to schedule selected text copy on main thread: {}",
+            e
+        )
+    })?;
+
+    tokio::task::spawn_blocking(move || rx.recv())
+        .await
+        .map_err(|e| format!("Failed waiting for selected text copy: {}", e))?
+        .map_err(|e| format!("Failed receiving selected text copy result: {}", e))?
 }
 
 /// Paste text by writing to clipboard and simulating Cmd+V
@@ -582,4 +784,30 @@ pub async fn paste_text(app: tauri::AppHandle, text: String) -> Result<(), Strin
         .map_err(|e| format!("Failed receiving paste result: {}", e))??;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::selected_text_from_clipboard;
+
+    #[test]
+    fn sentinel_means_no_selected_text() {
+        assert_eq!(
+            selected_text_from_clipboard("__sentinel__", "__sentinel__"),
+            None
+        );
+    }
+
+    #[test]
+    fn blank_clipboard_means_no_selected_text() {
+        assert_eq!(selected_text_from_clipboard(" \n\t", "__sentinel__"), None);
+    }
+
+    #[test]
+    fn non_empty_clipboard_is_selected_text() {
+        assert_eq!(
+            selected_text_from_clipboard("hello", "__sentinel__"),
+            Some("hello".to_string())
+        );
+    }
 }

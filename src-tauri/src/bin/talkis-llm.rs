@@ -14,7 +14,7 @@ use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
-use llama_cpp_2::model::{AddBos, LlamaModel};
+use llama_cpp_2::model::{AddBos, LlamaChatMessage, LlamaChatTemplate, LlamaModel};
 use llama_cpp_2::sampling::LlamaSampler;
 use llama_cpp_2::TokenToStringError;
 
@@ -255,9 +255,8 @@ fn chat_completion(
         .map(|value| value as i32)
         .unwrap_or(DEFAULT_MAX_TOKENS);
 
-    let prompt = build_chatml(messages);
-
     let model = model.lock().unwrap_or_else(|err| err.into_inner());
+    let prompt = build_prompt(&model, messages);
     let content = generate(
         backend,
         &model,
@@ -279,19 +278,84 @@ fn chat_completion(
     }))
 }
 
-/// Build a Qwen2.5 ChatML prompt from OpenAI-style messages.
+/// Build a model-native prompt from OpenAI-style messages. GGUF chat templates
+/// are preferred; ChatML stays as a fallback for older Qwen2.5 files.
+fn build_prompt(model: &LlamaModel, messages: &[Value]) -> String {
+    let chat = build_chat_messages(messages);
+    let template = model
+        .chat_template(None)
+        .map_err(|err| err.to_string())
+        .or_else(|_| LlamaChatTemplate::new("chatml").map_err(|err| err.to_string()));
+
+    match template {
+        Ok(tmpl) => match model.apply_chat_template(&tmpl, &chat, true) {
+            Ok(prompt) => prompt,
+            Err(err) => {
+                eprintln!(
+                    "failed to apply chat template, falling back to ChatML: {}",
+                    err
+                );
+                build_chatml(messages)
+            }
+        },
+        Err(err) => {
+            eprintln!(
+                "failed to load chat template, falling back to ChatML: {}",
+                err
+            );
+            build_chatml(messages)
+        }
+    }
+}
+
+fn build_chat_messages(messages: &[Value]) -> Vec<LlamaChatMessage> {
+    messages
+        .iter()
+        .filter_map(|message| {
+            let role = message
+                .get("role")
+                .and_then(|value| value.as_str())
+                .unwrap_or("user")
+                .replace('\0', " ");
+            let content = message_content(message).replace('\0', " ");
+            LlamaChatMessage::new(role, content).ok()
+        })
+        .collect()
+}
+
+fn message_content(message: &Value) -> String {
+    let Some(content) = message.get("content") else {
+        return String::new();
+    };
+
+    if let Some(text) = content.as_str() {
+        return text.to_string();
+    }
+
+    if let Some(parts) = content.as_array() {
+        return parts
+            .iter()
+            .filter_map(|part| {
+                part.as_str()
+                    .or_else(|| part.get("text").and_then(|value| value.as_str()))
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+    }
+
+    String::new()
+}
+
+/// Build a ChatML prompt from OpenAI-style messages.
 fn build_chatml(messages: &[Value]) -> String {
     let mut prompt = String::new();
     for message in messages {
-        let role = message.get("role").and_then(|v| v.as_str()).unwrap_or("user");
-        let content = message
-            .get("content")
+        let role = message
+            .get("role")
             .and_then(|v| v.as_str())
-            .unwrap_or_default();
-        prompt.push_str(&format!(
-            "<|im_start|>{}\n{}<|im_end|>\n",
-            role, content
-        ));
+            .unwrap_or("user");
+        let content = message_content(message);
+        prompt.push_str(&format!("<|im_start|>{}\n{}<|im_end|>\n", role, content));
     }
     prompt.push_str("<|im_start|>assistant\n");
     prompt
@@ -313,17 +377,31 @@ fn generate(
     let tokens = model
         .str_to_token(prompt, AddBos::Always)
         .map_err(|err| format!("tokenize error: {}", err))?;
-
-    let batch_capacity = tokens.len().max(512);
-    let mut batch = LlamaBatch::new(batch_capacity, 1);
-    let last_index = tokens.len() as i32 - 1;
-    for (i, token) in tokens.iter().enumerate() {
-        batch
-            .add(*token, i as i32, &[0], i as i32 == last_index)
-            .map_err(|err| format!("batch error: {}", err))?;
+    let available_output_tokens = ctx_size as i32 - tokens.len() as i32 - 1;
+    if available_output_tokens < 64 {
+        return Err(format!(
+            "Запрос слишком длинный для локальной модели: {} токенов, лимит контекста {}. Уменьшите текст или выберите модель с большим контекстом.",
+            tokens.len(),
+            ctx_size
+        ));
     }
-    ctx.decode(&mut batch)
-        .map_err(|err| format!("decode error: {}", err))?;
+    let max_tokens = max_tokens.max(1).min(available_output_tokens);
+
+    let prompt_batch_size = 512usize;
+    let mut batch = LlamaBatch::new(prompt_batch_size, 1);
+    let last_index = tokens.len() as i32 - 1;
+    for (chunk_index, chunk) in tokens.chunks(prompt_batch_size).enumerate() {
+        batch.clear();
+        let offset = chunk_index * prompt_batch_size;
+        for (index, token) in chunk.iter().enumerate() {
+            let position = offset + index;
+            batch
+                .add(*token, position as i32, &[0], position as i32 == last_index)
+                .map_err(|err| format!("batch error: {}", err))?;
+        }
+        ctx.decode(&mut batch)
+            .map_err(|err| format!("decode error: {}", err))?;
+    }
 
     let mut sampler = if temperature <= 0.0 {
         LlamaSampler::greedy()
@@ -335,7 +413,7 @@ fn generate(
         ])
     };
 
-    let mut n_cur = batch.n_tokens();
+    let mut n_cur = tokens.len() as i32;
     let limit = n_cur + max_tokens;
     let mut output = String::new();
     let mut pending: Vec<u8> = Vec::new();
@@ -427,7 +505,7 @@ fn write_json(stream: &mut TcpStream, status: u16, body: &Value) -> std::io::Res
         "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         status,
         reason,
-        body.as_bytes().len(),
+        body.len(),
         body
     );
     stream.write_all(response.as_bytes())?;

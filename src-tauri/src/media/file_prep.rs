@@ -15,6 +15,80 @@ use super::{
     MAX_FILE_TRANSCRIPTION_INPUT_BYTES, MAX_TRANSCRIPTION_BYTES,
 };
 
+#[derive(Clone, Copy)]
+struct TranscriptionChunkSpec {
+    extension: &'static str,
+    mime_type: &'static str,
+    fallback_file_name: &'static str,
+    segment_seconds: u32,
+}
+
+impl TranscriptionChunkSpec {
+    fn for_target(local_stt_target: bool) -> Self {
+        if local_stt_target {
+            Self {
+                extension: "wav",
+                mime_type: "audio/wav",
+                fallback_file_name: "talkis-transcription-chunk.wav",
+                segment_seconds: LOCAL_STT_FILE_TRANSCRIPTION_SEGMENT_SECONDS,
+            }
+        } else {
+            Self {
+                extension: "mp3",
+                mime_type: "audio/mpeg",
+                fallback_file_name: "talkis-transcription-chunk.mp3",
+                segment_seconds: FILE_TRANSCRIPTION_SEGMENT_SECONDS,
+            }
+        }
+    }
+
+    fn output_format_label(self) -> &'static str {
+        if self.extension == "wav" {
+            "wav_pcm_s16le_16khz_mono"
+        } else {
+            "mp3_32k_16khz_mono"
+        }
+    }
+
+    fn output_pattern(self, chunks_dir: &Path) -> std::path::PathBuf {
+        chunks_dir.join(format!("chunk-%05d.{}", self.extension))
+    }
+
+    fn ffmpeg_args(self, input_path: &Path, output_pattern: &Path) -> Vec<String> {
+        let mut args = vec![
+            "-hide_banner".to_string(),
+            "-loglevel".to_string(),
+            "error".to_string(),
+            "-y".to_string(),
+            "-i".to_string(),
+            input_path.to_string_lossy().to_string(),
+            "-vn".to_string(),
+            "-ac".to_string(),
+            "1".to_string(),
+            "-ar".to_string(),
+            "16000".to_string(),
+        ];
+
+        if self.extension == "wav" {
+            args.extend(["-acodec".to_string(), "pcm_s16le".to_string()]);
+        } else {
+            args.extend(["-b:a".to_string(), "32k".to_string()]);
+        }
+
+        args.extend([
+            "-f".to_string(),
+            "segment".to_string(),
+            "-segment_time".to_string(),
+            self.segment_seconds.to_string(),
+            "-reset_timestamps".to_string(),
+            "1".to_string(),
+            output_pattern.to_string_lossy().to_string(),
+        ]);
+
+        args
+    }
+}
+
 pub async fn prepare_media_file_chunks_for_transcription(
     app: &tauri::AppHandle,
     input_path: &Path,
@@ -69,42 +143,19 @@ pub async fn prepare_media_file_chunks_for_transcription(
     fs::create_dir_all(&chunks_dir)
         .map_err(|err| format!("Не удалось подготовить временную папку: {}", err))?;
 
-    let segment_seconds = if local_stt_target {
-        LOCAL_STT_FILE_TRANSCRIPTION_SEGMENT_SECONDS
-    } else {
-        FILE_TRANSCRIPTION_SEGMENT_SECONDS
-    };
+    let chunk_spec = TranscriptionChunkSpec::for_target(local_stt_target);
     logger::log_info(
         "MEDIA",
         &format!(
-            "Preparing file transcription chunks: local_stt_target={}, segment_seconds={}",
-            local_stt_target, segment_seconds
+            "Preparing file transcription chunks: local_stt_target={}, output_format={}, segment_seconds={}",
+            local_stt_target,
+            chunk_spec.output_format_label(),
+            chunk_spec.segment_seconds
         ),
     );
 
-    let output_pattern = chunks_dir.join("chunk-%05d.mp3");
-    let ffmpeg_args = vec![
-        "-hide_banner".to_string(),
-        "-loglevel".to_string(),
-        "error".to_string(),
-        "-y".to_string(),
-        "-i".to_string(),
-        input_path.to_string_lossy().to_string(),
-        "-vn".to_string(),
-        "-ac".to_string(),
-        "1".to_string(),
-        "-ar".to_string(),
-        "16000".to_string(),
-        "-b:a".to_string(),
-        "32k".to_string(),
-        "-f".to_string(),
-        "segment".to_string(),
-        "-segment_time".to_string(),
-        segment_seconds.to_string(),
-        "-reset_timestamps".to_string(),
-        "1".to_string(),
-        output_pattern.to_string_lossy().to_string(),
-    ];
+    let output_pattern = chunk_spec.output_pattern(&chunks_dir);
+    let ffmpeg_args = chunk_spec.ffmpeg_args(input_path, &output_pattern);
 
     if let Err(message) = run_ffmpeg(app, ffmpeg_args).await {
         let _ = fs::remove_dir_all(&chunks_dir);
@@ -121,7 +172,9 @@ pub async fn prepare_media_file_chunks_for_transcription(
             format!("Не удалось прочитать подготовленные фрагменты: {}", err)
         })?
         .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-        .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("mp3"))
+        .filter(|path| {
+            path.extension().and_then(|value| value.to_str()) == Some(chunk_spec.extension)
+        })
         .collect::<Vec<_>>();
     chunk_paths.sort();
 
@@ -147,17 +200,28 @@ pub async fn prepare_media_file_chunks_for_transcription(
         let file_name = path
             .file_name()
             .and_then(|value| value.to_str())
-            .unwrap_or("talkis-transcription-chunk.mp3")
+            .unwrap_or(chunk_spec.fallback_file_name)
             .to_string();
 
         chunks.push(PreparedMediaChunk {
             path,
             file_name,
-            mime_type: "audio/mpeg".to_string(),
+            mime_type: chunk_spec.mime_type.to_string(),
             size_bytes: metadata.len(),
-            start_offset_seconds: chunks.len() as f64 * segment_seconds as f64,
+            start_offset_seconds: chunks.len() as f64 * chunk_spec.segment_seconds as f64,
         });
     }
+
+    let total_size_bytes: u64 = chunks.iter().map(|chunk| chunk.size_bytes).sum();
+    logger::log_info(
+        "MEDIA",
+        &format!(
+            "Prepared file transcription chunks: count={}, total_size={} bytes, output_format={}",
+            chunks.len(),
+            total_size_bytes,
+            chunk_spec.output_format_label()
+        ),
+    );
 
     Ok(PreparedMediaChunks {
         temp_dir: chunks_dir,
@@ -362,4 +426,49 @@ fn validate_input_file(metadata: &fs::Metadata) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn has_arg_pair(args: &[String], first: &str, second: &str) -> bool {
+        args.windows(2)
+            .any(|pair| pair[0] == first && pair[1] == second)
+    }
+
+    #[test]
+    fn local_transcription_chunk_spec_targets_wav_for_local_stt() {
+        let spec = TranscriptionChunkSpec::for_target(true);
+        let output_pattern = spec.output_pattern(Path::new("/tmp/talkis-chunks"));
+        let args = spec.ffmpeg_args(Path::new("/tmp/input.mp4"), &output_pattern);
+
+        assert_eq!(spec.extension, "wav");
+        assert_eq!(spec.mime_type, "audio/wav");
+        assert_eq!(
+            output_pattern,
+            PathBuf::from("/tmp/talkis-chunks/chunk-%05d.wav")
+        );
+        assert!(has_arg_pair(&args, "-acodec", "pcm_s16le"));
+        assert!(!has_arg_pair(&args, "-b:a", "32k"));
+        assert!(has_arg_pair(&args, "-segment_time", "240"));
+    }
+
+    #[test]
+    fn remote_transcription_chunk_spec_keeps_mp3_upload_chunks() {
+        let spec = TranscriptionChunkSpec::for_target(false);
+        let output_pattern = spec.output_pattern(Path::new("/tmp/talkis-chunks"));
+        let args = spec.ffmpeg_args(Path::new("/tmp/input.mp4"), &output_pattern);
+
+        assert_eq!(spec.extension, "mp3");
+        assert_eq!(spec.mime_type, "audio/mpeg");
+        assert_eq!(
+            output_pattern,
+            PathBuf::from("/tmp/talkis-chunks/chunk-%05d.mp3")
+        );
+        assert!(has_arg_pair(&args, "-b:a", "32k"));
+        assert!(!has_arg_pair(&args, "-acodec", "pcm_s16le"));
+        assert!(has_arg_pair(&args, "-segment_time", "600"));
+    }
 }

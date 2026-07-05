@@ -533,7 +533,7 @@ fn run_sherpa_binary_diarization(
     input_path: &Path,
     binary: &Path,
 ) -> Result<Vec<SpeakerTurn>, (u16, String)> {
-    let output = Command::new(&binary)
+    let output = Command::new(binary)
         .arg(format!(
             "--segmentation.pyannote-model={}",
             segmentation_path(config).to_string_lossy()

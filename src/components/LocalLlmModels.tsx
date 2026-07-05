@@ -1,7 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { IconAlertCircle, IconCheck, IconDownload, IconDeviceDesktopCog, IconLoader2, IconCpu, IconTrash, IconX } from "../lib/icons";
+import {
+  IconAlertCircle,
+  IconCheck,
+  IconDownload,
+  IconGauge,
+  IconGlobe,
+  IconLoader2,
+  IconTargetArrow,
+  IconTrash,
+  IconX,
+  type Icon,
+} from "../lib/icons";
 
 import { AppSettings } from "../lib/store";
 import { useI18n } from "../lib/i18n";
@@ -10,6 +21,10 @@ import {
   localLlmDeleteSettingsPatch,
   selectedLocalLlmModelId,
 } from "../lib/localLlmSelection";
+import gemmaAvatar from "../assets/adapters/gemma.png";
+import huggingFaceAvatar from "../assets/adapters/huggingface.svg";
+import ibmAvatar from "../assets/adapters/ibm.svg";
+import microsoftAvatar from "../assets/adapters/microsoft.svg";
 import qwenAvatar from "../assets/adapters/qwen.png";
 
 interface LocalLlmModel {
@@ -19,6 +34,11 @@ interface LocalLlmModel {
   file_name: string;
   size_label: string;
   min_ram_gb: number;
+  speed: string;
+  accuracy: string;
+  language_label: string;
+  avatar_family: string;
+  recommended: boolean;
   downloaded: boolean;
 }
 
@@ -40,6 +60,64 @@ const ACTION_BUTTON_BASE = {
   alignItems: "center",
   gap: 8,
 } as const;
+
+function localLlmBrand(model: LocalLlmModel): {
+  initials: string;
+  accent: string;
+  avatar?: string;
+} {
+  const family = model.avatar_family || model.id;
+  if (family === "qwen" || model.id.startsWith("qwen")) {
+    return { initials: "Q3", accent: "#2563eb", avatar: qwenAvatar };
+  }
+  if (family === "gemma" || model.id.startsWith("gemma")) {
+    return { initials: "G3", accent: "#4285f4", avatar: gemmaAvatar };
+  }
+  if (family === "microsoft" || family === "phi" || model.id.startsWith("phi")) {
+    return { initials: "MS", accent: "#7f52ff", avatar: microsoftAvatar };
+  }
+  if (family === "granite" || family === "ibm" || model.id.startsWith("granite")) {
+    return { initials: "IBM", accent: "#0f62fe", avatar: ibmAvatar };
+  }
+  if (family === "smollm" || family === "huggingface" || model.id.startsWith("smollm")) {
+    return { initials: "HF", accent: "#ffcc33", avatar: huggingFaceAvatar };
+  }
+  return { initials: "LLM", accent: "#334155" };
+}
+
+function getLocalLlmLevel(kind: "speed" | "accuracy", value: string): number {
+  if (kind === "speed") {
+    if (value === "очень быстро") return 5;
+    if (value === "быстро") return 4;
+    if (value === "средне") return 3;
+    return 2;
+  }
+
+  if (value === "максимальная") return 5;
+  if (value === "высокая") return 4;
+  if (value === "средняя+" || value === "средняя") return 3;
+  if (value === "служебная") return 2;
+  return 1;
+}
+
+function renderDotRating(level: number): ReactElement {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+      {Array.from({ length: 5 }).map((_, index) => (
+        <span
+          key={index}
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: 999,
+            background: index < level ? "var(--accent)" : "var(--border-strong)",
+            display: "block",
+          }}
+        />
+      ))}
+    </div>
+  );
+}
 
 /**
  * Local text (LLM) model slot for "Локально" mode — same card style as the local
@@ -183,6 +261,82 @@ export function LocalLlmModels({
   const usingLocalEndpoint = isLocalLlmEndpoint(settings.llmEndpoint);
   const selectedModelId = selectedLocalLlmModelId(settings);
 
+  const translateSpeedValue = (value: string): string => {
+    switch (value) {
+      case "очень быстро": return t("models.speedValue.veryFast");
+      case "быстро": return t("models.speedValue.fast");
+      case "средне": return t("models.speedValue.medium");
+      default: return value;
+    }
+  };
+
+  const translateAccuracyValue = (value: string): string => {
+    switch (value) {
+      case "максимальная": return t("models.accuracyValue.maximum");
+      case "высокая": return t("models.accuracyValue.high");
+      case "средняя": return t("models.accuracyValue.medium");
+      case "средняя+": return t("models.accuracyValue.mediumPlus");
+      case "базовая": return t("models.accuracyValue.basic");
+      case "низкая+": return t("models.accuracyValue.lowPlus");
+      case "служебная": return t("models.accuracyValue.utility");
+      default: return value;
+    }
+  };
+
+  const translateLanguageValue = (value: string): string => {
+    if (value === "English") return t("models.languageValue.english");
+    if (/^\d+\+?$/.test(value)) return t("models.languageValue.count", { value });
+    return value;
+  };
+
+  const renderLocalLlmStats = (model: LocalLlmModel): ReactElement => {
+    const speedValueLabel = translateSpeedValue(model.speed);
+    const accuracyValueLabel = translateAccuracyValue(model.accuracy);
+    const languageValueLabel = translateLanguageValue(model.language_label);
+    const stats: { key: string; title: string; Icon: Icon; level: number }[] = [
+      { key: "speed", title: t("models.stat.speedTitle", { value: speedValueLabel }), Icon: IconGauge, level: getLocalLlmLevel("speed", model.speed) },
+      { key: "accuracy", title: t("models.stat.accuracyTitle", { value: accuracyValueLabel }), Icon: IconTargetArrow, level: getLocalLlmLevel("accuracy", model.accuracy) },
+    ];
+
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 9, flexWrap: "nowrap", minWidth: 0, overflow: "hidden" }}>
+        <div
+          title={t("models.stat.downloadSizeTitle", { value: model.size_label })}
+          aria-label={t("models.stat.downloadSizeTitle", { value: model.size_label })}
+          style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}
+        >
+          <IconDownload size={14} stroke={1.9} color="var(--text-hi)" />
+          <span style={{ fontSize: 12, fontWeight: 650, color: "var(--text-hi)", lineHeight: 1, whiteSpace: "nowrap" }}>
+            {model.size_label}
+          </span>
+        </div>
+
+        <div
+          title={t("models.stat.languagesTitle", { value: languageValueLabel })}
+          aria-label={t("models.stat.languagesTitle", { value: languageValueLabel })}
+          style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}
+        >
+          <IconGlobe size={14} stroke={1.9} color="var(--text-hi)" />
+          <span style={{ fontSize: 12, fontWeight: 650, color: "var(--text-hi)", lineHeight: 1, whiteSpace: "nowrap" }}>
+            {languageValueLabel}
+          </span>
+        </div>
+
+        {stats.map(({ key, title, Icon, level }) => (
+          <div
+            key={key}
+            title={title}
+            aria-label={title}
+            style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}
+          >
+            <Icon size={14} stroke={1.9} color="var(--text-hi)" />
+            {renderDotRating(level)}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div>
@@ -232,6 +386,7 @@ export function LocalLlmModels({
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {models.map((model) => {
+          const brand = localLlmBrand(model);
           const prog = progress[model.id];
           const isDownloading =
             prog?.status === "downloading" || prog?.status === "starting";
@@ -275,20 +430,27 @@ export function LocalLlmModels({
                     width: 36,
                     height: 36,
                     borderRadius: 999,
-                    background: "var(--icon-soft-bg)",
+                    background: brand.avatar ? "var(--icon-soft-bg)" : brand.accent,
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
                     flexShrink: 0,
                     overflow: "hidden",
+                    color: brand.initials === "HF" ? "#111827" : "#fff",
+                    fontSize: brand.initials.length > 2 ? 10 : 12,
+                    fontWeight: 800,
                   }}
                 >
-                  <img
-                    src={qwenAvatar}
-                    alt=""
-                    aria-hidden="true"
-                    style={{ width: "100%", height: "100%", display: "block", objectFit: "cover" }}
-                  />
+                  {brand.avatar ? (
+                    <img
+                      src={brand.avatar}
+                      alt=""
+                      aria-hidden="true"
+                      style={{ width: "100%", height: "100%", display: "block", objectFit: "contain" }}
+                    />
+                  ) : (
+                    brand.initials
+                  )}
                 </div>
 
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -301,17 +463,24 @@ export function LocalLlmModels({
                       marginBottom: 3,
                     }}
                   >
-                    <div
-                      style={{
-                        fontSize: 15,
-                        fontWeight: 700,
-                        color: "var(--text-hi)",
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                      }}
-                    >
-                      {model.label}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontSize: 15,
+                          fontWeight: 700,
+                          color: "var(--text-hi)",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {model.label}
+                      </div>
+                      {model.recommended && (
+                        <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text-hi)", padding: "3px 7px", borderRadius: 999, background: "var(--control-muted)", flexShrink: 0 }}>
+                          {t("models.local.recommendedBadge")}
+                        </div>
+                      )}
                     </div>
                     <div
                       style={{
@@ -328,38 +497,9 @@ export function LocalLlmModels({
                     </div>
                   </div>
                   <div style={{ fontSize: 12, lineHeight: 1.45, color: "var(--text-mid)" }}>
-                    {model.description} Runtime: Talkis Local / llama.cpp.
+                    {model.description}
                   </div>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 14,
-                      marginTop: 7,
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <div
-                      title={t("localLlm.diskSize", { size: model.size_label })}
-                      aria-label={t("localLlm.diskSize", { size: model.size_label })}
-                      style={{ display: "flex", alignItems: "center", gap: 6 }}
-                    >
-                      <IconDeviceDesktopCog size={14} stroke={1.9} color="var(--text-hi)" />
-                      <span style={{ fontSize: 12, fontWeight: 650, color: "var(--text-hi)", lineHeight: 1 }}>
-                        {model.size_label}
-                      </span>
-                    </div>
-                    <div
-                      title={t("localLlm.ramRequired", { ram: model.min_ram_gb })}
-                      aria-label={t("localLlm.ramRequired", { ram: model.min_ram_gb })}
-                      style={{ display: "flex", alignItems: "center", gap: 6 }}
-                    >
-                      <IconCpu size={14} stroke={1.9} color="var(--text-hi)" />
-                      <span style={{ fontSize: 12, fontWeight: 650, color: "var(--text-hi)", lineHeight: 1 }}>
-                        {t("localLlm.ramShort", { ram: model.min_ram_gb })}
-                      </span>
-                    </div>
-                  </div>
+                  {renderLocalLlmStats(model)}
                 </div>
               </button>
 
