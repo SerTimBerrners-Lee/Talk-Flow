@@ -198,6 +198,7 @@ export const settingsModels = {
   // ── Local models section ──
   "models.local.tabTranscription": { ru: "Транскрибация", en: "Transcription" },
   "models.local.tabText": { ru: "Текстовая", en: "Text" },
+  "models.local.tabOther": { ru: "Другие", en: "Other" },
   "models.local.sectionTitle": { ru: "Локальные модели", en: "Local models" },
   "models.local.sectionDesc": {
     ru: "Выберите модель, скачайте ее через локальный STT runtime и используйте без облака.",
@@ -262,6 +263,18 @@ export const settingsModels = {
   "models.local.qwen3-asr-06b.description": {
     ru: "Компактная ASR-модель Qwen для локального распознавания через transcribe.cpp GGUF runtime.",
     en: "A compact Qwen ASR model for local recognition via the transcribe.cpp GGUF runtime.",
+  },
+
+  // ── Local auxiliary components ──
+  "models.localOther.sectionTitle": { ru: "Другие", en: "Other" },
+  "models.localOther.sectionDesc": {
+    ru: "Локальные библиотеки и компоненты, которые используются не для распознавания или текстовой модели.",
+    en: "Local libraries and components used outside recognition or text models.",
+  },
+  "models.localOther.status.planned": { ru: "Готовится", en: "Planned" },
+  "models.localOther.trad.description": {
+    ru: "Локальная библиотека перевода. Будет использоваться для перевода выделенного текста без подмены текста в активном приложении.",
+    en: "A local translation library. It will be used for selected-text translation without replacing text in the active app.",
   },
 
   // ── Speed / accuracy value labels ──

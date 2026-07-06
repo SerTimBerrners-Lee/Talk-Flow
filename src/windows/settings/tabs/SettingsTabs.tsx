@@ -16,6 +16,7 @@ import {
   IconGlobe,
   IconLogout,
   Icon,
+  IconLanguage,
   IconMessage,
   IconMicrophone,
   IconPencil,
@@ -78,6 +79,7 @@ import xAiAvatar from "../../../assets/adapters/xai.png";
 
 const IS_DEV = import.meta.env.DEV;
 type LocalRuntimeKind = "whisper" | "diarization";
+type LocalModelKind = "transcription" | "text" | "other";
 type DesktopPlatform = "macos" | "windows" | "linux" | "unknown";
 
 function detectDesktopPlatform(): DesktopPlatform {
@@ -294,6 +296,15 @@ interface LocalModelOption {
   purpose?: "stt" | "diarization";
   supportsStreaming?: boolean;
   streamingDefaultEnabled?: boolean;
+}
+
+interface LocalOtherComponent {
+  id: string;
+  name: string;
+  descriptionKey: MsgKey;
+  initials: string;
+  accent: string;
+  statusKey: MsgKey;
 }
 
 const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
@@ -533,6 +544,17 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
     avatar: qwenAvatar,
     runtimeReady: true,
     downloadBytes: 811_000_000,
+  },
+];
+
+const LOCAL_OTHER_COMPONENTS: LocalOtherComponent[] = [
+  {
+    id: "trad",
+    name: "trad",
+    descriptionKey: "models.localOther.trad.description",
+    initials: "TR",
+    accent: "#0f766e",
+    statusKey: "models.localOther.status.planned",
   },
 ];
 
@@ -1291,7 +1313,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
   const [waitingForSubscriptionRefresh, setWaitingForSubscriptionRefresh] = useState(false);
   const [modelModeView, setModelModeView] = useState<ModelMode | null>(null);
   const [styleTabView, setStyleTabView] = useState<"style" | "prompts">("style");
-  const [localModelKind, setLocalModelKind] = useState<"transcription" | "text">(
+  const [localModelKind, setLocalModelKind] = useState<LocalModelKind>(
     "transcription",
   );
   const [apiModelKind, setApiModelKind] = useState<"transcription" | "text">(
@@ -2943,6 +2965,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                 {([
                   { id: "transcription", label: t("models.local.tabTranscription"), Icon: IconMicrophone },
                   { id: "text", label: t("models.local.tabText"), Icon: IconMessage },
+                  { id: "other", label: t("models.local.tabOther"), Icon: IconLanguage },
                 ] as const).map(({ id, label, Icon }) => {
                   const active = localModelKind === id;
 
@@ -3346,6 +3369,73 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
 
               {localModelKind === "text" && (
                 <LocalLlmModels settings={settings} update={update} />
+              )}
+
+              {localModelKind === "other" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <div>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)", marginBottom: 4 }}>
+                      {t("models.localOther.sectionTitle")}
+                    </div>
+                    <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>
+                      {t("models.localOther.sectionDesc")}
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {LOCAL_OTHER_COMPONENTS.map((component) => (
+                      <div
+                        key={component.id}
+                        className="card"
+                        style={{ padding: 0, overflow: "hidden", background: "var(--surface)" }}
+                      >
+                        <div
+                          style={{
+                            width: "100%",
+                            padding: "12px 14px",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 12,
+                            textAlign: "left",
+                            fontFamily: "var(--font-main)",
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: 36,
+                              height: 36,
+                              borderRadius: 999,
+                              background: component.accent,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              flexShrink: 0,
+                              color: "#fff",
+                              fontSize: 12,
+                              fontWeight: 800,
+                            }}
+                          >
+                            {component.initials}
+                          </div>
+
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 3 }}>
+                              <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                {component.name}
+                              </div>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-low)", padding: "5px 9px", borderRadius: 999, background: "var(--control-muted)", whiteSpace: "nowrap" }}>
+                                {t(component.statusKey)}
+                              </div>
+                            </div>
+                            <div style={{ fontSize: 12, lineHeight: 1.45, color: "var(--text-mid)" }}>
+                              {t(component.descriptionKey)}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
               </div>
             )}
