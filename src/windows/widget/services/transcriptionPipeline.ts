@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { emit } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 
 import {
   AppSettings,
@@ -12,15 +12,28 @@ import {
 import { logError, logInfo } from "../../../lib/logger";
 import { tn } from "../../../lib/i18n";
 import { formatErrorMessage } from "../../../lib/utils";
-import { HISTORY_UPDATED_EVENT } from "../../../lib/hotkeyEvents";
+import {
+  DICTATION_STREAM_UPDATE_EVENT,
+  HISTORY_DELETED_EVENT,
+  type DictationStreamUpdatePayload,
+} from "../../../lib/hotkeyEvents";
 import { beginProcessing, finishProcessing, isAbortError } from "../../../lib/processingControl";
 import { resolveSummaryBackend } from "../../../lib/summarize";
 import { LANGUAGES } from "../../../config/languages";
+import {
+  createDictationOverlayState,
+  dictationOverlayStateFromStreamUpdate,
+  isLocalSttStreamingEnabled,
+  shouldApplyDictationStreamUpdate,
+} from "./dictationStreamOverlay";
+import type { LiveTranscriptionResult } from "./dictationStreamOverlay";
 
 export interface ProcessRecordingBlobParams {
   blob: Blob;
   settings: AppSettings;
   recordingStartTimestamp: number;
+  liveTranscription?: LiveTranscriptionResult | null;
+  dictationStream?: DictationStreamOverlaySession | null;
 }
 
 export interface ProcessRecordingBlobResult {
@@ -40,6 +53,15 @@ interface RecordingAudioSource {
 }
 
 type TranscriptionResult = Pick<HistoryEntry, "raw" | "cleaned" | "dictationTranslation">;
+
+export interface DictationStreamOverlaySession {
+  requestId: string;
+  latestText: () => string;
+  showInserting: (text: string) => Promise<void>;
+  showError: (text: string, message: string) => Promise<void>;
+  hide: () => Promise<void>;
+  dispose: () => void;
+}
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
@@ -127,19 +149,102 @@ function isLocalSttSettings(settings: AppSettings): boolean {
   );
 }
 
-const STREAMING_LOCAL_STT_MODEL_IDS: Record<string, string> = {
-  "nvidia/nemotron-3.5-asr-streaming-0.6b": "nemotron-35-asr-streaming-06b",
-  "nvidia/nemotron-speech-streaming-en-0.6b": "nemotron-speech-streaming-en-06b",
-  "moonshine-streaming-tiny": "moonshine-streaming-tiny",
-  "moonshine-streaming-small": "moonshine-streaming-small",
-};
+function createRequestId(): string {
+  return typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random()}`;
+}
 
-function isLocalSttStreamingEnabled(settings: AppSettings): boolean {
-  if (!isLocalSttSettings(settings)) return false;
-  const modelId = STREAMING_LOCAL_STT_MODEL_IDS[settings.whisperModel || ""];
-  if (!modelId) return false;
-  const cachedValue = settings.localModels?.[modelId]?.streamingEnabled;
-  return typeof cachedValue === "boolean" ? cachedValue : true;
+async function showWidgetTextOverlay(
+  payload: Parameters<typeof createDictationOverlayState>[0],
+): Promise<void> {
+  await invoke("show_widget_text_overlay", {
+    payload: createDictationOverlayState(payload),
+  });
+}
+
+export async function startDictationStreamOverlaySession(
+  settings: AppSettings,
+): Promise<DictationStreamOverlaySession | null> {
+  if (!isLocalSttStreamingEnabled(settings)) {
+    return null;
+  }
+
+  const requestId = createRequestId();
+  let latestText = "";
+  let disposed = false;
+
+  await showWidgetTextOverlay({
+    requestId,
+    status: "dictating",
+    text: "",
+  }).catch((error) => {
+    logError(
+      "DICTATION_STREAM",
+      `Failed to show text overlay: ${formatErrorMessage(error)}`,
+    );
+  });
+
+  let unlisten: () => void;
+  try {
+    unlisten = await listen<DictationStreamUpdatePayload>(
+      DICTATION_STREAM_UPDATE_EVENT,
+      ({ payload }) => {
+        if (disposed || !shouldApplyDictationStreamUpdate(requestId, payload)) {
+          return;
+        }
+
+        const nextText = payload.text.trim() || latestText;
+        if (nextText) {
+          latestText = nextText;
+        }
+
+        void invoke("show_widget_text_overlay", {
+          payload: dictationOverlayStateFromStreamUpdate({
+            ...payload,
+            text: nextText,
+          }),
+        }).catch((error) => {
+          logError(
+            "DICTATION_STREAM",
+            `Failed to update text overlay: ${formatErrorMessage(error)}`,
+          );
+        });
+      },
+    );
+  } catch (error) {
+    await invoke("hide_widget_text_overlay").catch(() => {});
+    throw error;
+  }
+
+  return {
+    requestId,
+    latestText: () => latestText,
+    showInserting: async (text: string) => {
+      latestText = text.trim() || latestText;
+      await showWidgetTextOverlay({
+        requestId,
+        status: "inserting",
+        text,
+      });
+    },
+    showError: async (text: string, message: string) => {
+      latestText = text.trim() || latestText;
+      await showWidgetTextOverlay({
+        requestId,
+        status: "error",
+        text: text.trim() || latestText,
+        message,
+      });
+    },
+    hide: async () => {
+      await invoke("hide_widget_text_overlay");
+    },
+    dispose: () => {
+      disposed = true;
+      unlisten();
+    },
+  };
 }
 
 function languageLabel(code: string): string {
@@ -340,11 +445,13 @@ async function transcribeViaBackend({
   audioMimeType,
   audioFileName,
   settings,
+  streamingRequestId,
 }: {
   audioBase64: string;
   audioMimeType: string;
   audioFileName: string;
   settings: AppSettings;
+  streamingRequestId?: string | null;
 }): Promise<TranscriptionResult> {
   logInfo("API", `Sending to backend, audio_size: ${audioBase64.length} chars`);
 
@@ -364,6 +471,7 @@ async function transcribeViaBackend({
       file_name: audioFileName,
       mime_type: audioMimeType,
       streaming_enabled: isLocalSttStreamingEnabled(settings),
+      streaming_request_id: streamingRequestId ?? null,
     },
   });
 
@@ -376,12 +484,14 @@ async function transcribeAudio({
   audioFileName,
   settings,
   signal,
+  streamingRequestId,
 }: {
   audioBase64: string;
   audioMimeType: string;
   audioFileName: string;
   settings: AppSettings;
   signal?: AbortSignal;
+  streamingRequestId?: string | null;
 }): Promise<TranscriptionResult> {
   // Subscription mode: send to proxy
   if (!settings.useOwnKey && settings.deviceToken?.trim()) {
@@ -393,7 +503,13 @@ async function transcribeAudio({
   }
 
   // Own key mode: send to Rust backend
-  return transcribeViaBackend({ audioBase64, audioMimeType, audioFileName, settings });
+  return transcribeViaBackend({
+    audioBase64,
+    audioMimeType,
+    audioFileName,
+    settings,
+    streamingRequestId,
+  });
 }
 
 async function applyDictationTranslation(
@@ -460,6 +576,8 @@ export async function processRecordingBlob({
   blob,
   settings,
   recordingStartTimestamp,
+  liveTranscription = null,
+  dictationStream = null,
 }: ProcessRecordingBlobParams): Promise<ProcessRecordingBlobResult> {
   const buffer = await blob.arrayBuffer();
   const base64Audio = arrayBufferToBase64(buffer);
@@ -467,8 +585,8 @@ export async function processRecordingBlob({
   const audioMimeType = blob.type || "audio/webm";
   const audioFileName = audioMimeType.includes("wav") ? "recording.wav" : "recording.webm";
 
-  // Persist a "processing" entry up front so the recording shows as a live row
-  // in the history table (with a stop button) and keeps its audio for re-runs.
+  // Persist a lightweight "processing" entry up front so the recording shows as
+  // a live row without keeping the audio payload in history/UI memory.
   const baseEntry: HistoryEntry = {
     id: crypto.randomUUID(),
     timestamp: new Date().toISOString(),
@@ -477,7 +595,6 @@ export async function processRecordingBlob({
     cleaned: "",
     source: "voice",
     status: "processing",
-    audioBase64: base64Audio,
     audioMimeType,
     audioFileName,
     language: settings.language,
@@ -485,19 +602,39 @@ export async function processRecordingBlob({
   };
 
   const handle = await beginProcessing(baseEntry, "add");
+  const savedAudio = await saveCompletedRecordingAudio({
+    entryId: baseEntry.id,
+    audioBase64: base64Audio,
+    audioMimeType,
+    audioFileName,
+    settings,
+  });
+  const entryWithSavedAudio: HistoryEntry = {
+    ...baseEntry,
+    audioPath: savedAudio.audioPath,
+    audioBase64: undefined,
+    audioMimeType: savedAudio.audioMimeType,
+    audioFileName: savedAudio.audioFileName,
+  };
 
   try {
     const apiStart = Date.now();
-    const transcription = await transcribeAudio({
-      audioBase64: base64Audio,
-      audioMimeType,
-      audioFileName,
-      settings,
-      signal: handle.signal,
-    });
+    const transcription = liveTranscription
+      ? {
+          raw: liveTranscription.text,
+          cleaned: liveTranscription.text,
+        }
+      : await transcribeAudio({
+          audioBase64: base64Audio,
+          audioMimeType,
+          audioFileName,
+          settings,
+          signal: handle.signal,
+        });
 
     if (handle.isCancelled()) {
-      await finishProcessing(buildInterruptedEntry(baseEntry));
+      await dictationStream?.hide().catch(() => {});
+      await finishProcessing(buildInterruptedEntry(entryWithSavedAudio));
       return { durationSeconds, hasTranscription: false };
     }
 
@@ -506,7 +643,13 @@ export async function processRecordingBlob({
     if (!hasRecognizedSpeech(transcription)) {
       logInfo("API", "Nothing recognized, removing placeholder entry, skipping paste");
       await deleteHistoryEntry(baseEntry.id);
-      await emit(HISTORY_UPDATED_EVENT, baseEntry);
+      if (savedAudio.audioPath) {
+        await deleteHistoryAudio(savedAudio.audioPath).catch((error) => {
+          logError("HISTORY", `Failed to delete unused recording audio: ${formatErrorMessage(error)}`);
+        });
+      }
+      await emit(HISTORY_DELETED_EVENT, { id: baseEntry.id });
+      await dictationStream?.hide().catch(() => {});
       return { durationSeconds, hasTranscription: false };
     }
 
@@ -514,38 +657,51 @@ export async function processRecordingBlob({
     const processingTime = Date.now() - apiStart;
 
     if (handle.isCancelled()) {
-      await finishProcessing(buildInterruptedEntry(baseEntry));
+      await dictationStream?.hide().catch(() => {});
+      await finishProcessing(buildInterruptedEntry(entryWithSavedAudio));
       return { durationSeconds, hasTranscription: false };
     }
 
     logInfo("API", `Transcription complete in ${processingTime}ms: "${result.cleaned}"`);
-    const savedAudio = await saveCompletedRecordingAudio({
-      entryId: baseEntry.id,
-      audioBase64: base64Audio,
-      audioMimeType,
-      audioFileName,
-      settings,
-    });
     await finishProcessing({
-      ...baseEntry,
+      ...entryWithSavedAudio,
       raw: result.raw,
       cleaned: result.cleaned,
       dictationTranslation: result.dictationTranslation,
       status: "completed",
       errorMessage: undefined,
       processingTime,
-      audioPath: savedAudio.audioPath,
-      audioBase64: undefined,
-      audioMimeType: savedAudio.audioMimeType,
-      audioFileName: savedAudio.audioFileName,
     });
 
     let pasteFailed = false;
     try {
+      await dictationStream?.showInserting(result.cleaned).catch((error) => {
+        logError(
+          "DICTATION_STREAM",
+          `Failed to show inserting overlay: ${formatErrorMessage(error)}`,
+        );
+      });
       await pasteCleanedText(result.cleaned);
+      await dictationStream?.hide().catch((error) => {
+        logError(
+          "DICTATION_STREAM",
+          `Failed to hide overlay after paste: ${formatErrorMessage(error)}`,
+        );
+      });
     } catch (pasteError) {
       pasteFailed = true;
       logError("PASTE", `Paste failed after successful transcription: ${formatErrorMessage(pasteError)}`);
+      await dictationStream
+        ?.showError(
+          result.cleaned,
+          `Не удалось вставить текст автоматически: ${formatErrorMessage(pasteError)}`,
+        )
+        .catch((error) => {
+          logError(
+            "DICTATION_STREAM",
+            `Failed to keep paste error overlay: ${formatErrorMessage(error)}`,
+          );
+        });
     }
 
     logInfo("PASTE", pasteFailed
@@ -555,7 +711,8 @@ export async function processRecordingBlob({
   } catch (error) {
     if (handle.isCancelled() || isAbortError(error)) {
       logInfo("API", "Processing cancelled by user; marking entry interrupted");
-      await finishProcessing(buildInterruptedEntry(baseEntry));
+      await dictationStream?.hide().catch(() => {});
+      await finishProcessing(buildInterruptedEntry(entryWithSavedAudio));
       return { durationSeconds, hasTranscription: false };
     }
 
@@ -565,13 +722,22 @@ export async function processRecordingBlob({
     logError("API", `Pipeline raw error: ${rawErrorMessage}`);
 
     const userFacingErrorMessage = toUserFacingErrorMessage(error, settings);
+    await dictationStream
+      ?.showError(dictationStream.latestText(), userFacingErrorMessage)
+      .catch((overlayError) => {
+        logError(
+          "DICTATION_STREAM",
+          `Failed to show stream error overlay: ${formatErrorMessage(overlayError)}`,
+        );
+      });
     await finishProcessing({
-      ...baseEntry,
+      ...entryWithSavedAudio,
       status: "failed",
       errorMessage: userFacingErrorMessage,
     });
     throw new Error(userFacingErrorMessage);
   } finally {
+    dictationStream?.dispose();
     handle.finish();
   }
 }

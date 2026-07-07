@@ -11,7 +11,7 @@ const TEXT_EVENT: &str = "widget-text:update";
 pub const NOTICE_WIDTH: f64 = 212.0;
 pub const NOTICE_HEIGHT: f64 = 52.0;
 pub const TEXT_OVERLAY_WIDTH: f64 = 324.0;
-pub const TEXT_OVERLAY_HEIGHT: f64 = 182.0;
+pub const TEXT_OVERLAY_HEIGHT: f64 = 131.2;
 /// Must match NOTICE_WIDGET_GAP in src/windows/widget/widgetConstants.ts (logical pixels).
 pub const NOTICE_GAP: f64 = 2.0;
 const TEXT_OVERLAY_GAP: f64 = 8.0;
@@ -43,12 +43,49 @@ pub struct WidgetTextOverlayPayload {
     source_text: String,
     translated_text: String,
     target_language: String,
+    request_id: Option<String>,
     message: Option<String>,
 }
 
 fn text_overlay_payload_store() -> &'static Mutex<Option<WidgetTextOverlayPayload>> {
     static STORE: OnceLock<Mutex<Option<WidgetTextOverlayPayload>>> = OnceLock::new();
     STORE.get_or_init(|| Mutex::new(None))
+}
+
+fn cached_text_overlay_payload() -> Result<Option<WidgetTextOverlayPayload>, String> {
+    text_overlay_payload_store()
+        .lock()
+        .map_err(|e| format!("Text overlay state lock failed: {e}"))
+        .map(|cached| cached.clone())
+}
+
+fn emit_cached_text_overlay_payload(app: &AppHandle) -> Result<(), String> {
+    if let Some(payload) = cached_text_overlay_payload()? {
+        app.emit_to(TEXT_WINDOW_LABEL, TEXT_EVENT, payload)
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+fn should_ignore_text_overlay_payload(
+    current: Option<&WidgetTextOverlayPayload>,
+    next: &WidgetTextOverlayPayload,
+) -> bool {
+    let Some(current) = current else {
+        return false;
+    };
+
+    let current_request_id = current.request_id.as_deref().unwrap_or_default();
+    if current_request_id.is_empty() {
+        return false;
+    }
+
+    if next.status == "dictating" {
+        return false;
+    }
+
+    next.request_id.as_deref() != Some(current_request_id)
 }
 
 pub fn ensure_widget_notice_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
@@ -162,20 +199,21 @@ fn position_widget_notice_window(
 fn position_widget_text_window(
     widget_window: &tauri::WebviewWindow,
     text_window: &tauri::WebviewWindow,
+    height: f64,
 ) -> Result<(), String> {
     let widget_position = widget_window.outer_position().map_err(|e| e.to_string())?;
     let widget_size = widget_window.outer_size().map_err(|e| e.to_string())?;
     let scale_factor = widget_window.scale_factor().map_err(|e| e.to_string())?;
     let text_width = TEXT_OVERLAY_WIDTH * scale_factor;
-    let text_height = TEXT_OVERLAY_HEIGHT * scale_factor;
+    let text_height = height * scale_factor;
     let gap = TEXT_OVERLAY_GAP * scale_factor;
-    let x = widget_position.x as f64 + widget_size.width as f64 - text_width;
+    let x = widget_position.x as f64 + (widget_size.width as f64 - text_width) / 2.0;
     let y = widget_position.y as f64 - gap - text_height;
 
     text_window
         .set_size(tauri::Size::Logical(tauri::LogicalSize {
             width: TEXT_OVERLAY_WIDTH,
-            height: TEXT_OVERLAY_HEIGHT,
+            height,
         }))
         .map_err(|e| e.to_string())?;
 
@@ -187,6 +225,10 @@ fn position_widget_text_window(
         .map_err(|e| e.to_string())?;
 
     Ok(())
+}
+
+fn text_overlay_height(_payload: &WidgetTextOverlayPayload) -> f64 {
+    TEXT_OVERLAY_HEIGHT
 }
 
 #[cfg(target_os = "macos")]
@@ -397,6 +439,9 @@ pub async fn show_widget_text_overlay(
         let mut cached = text_overlay_payload_store()
             .lock()
             .map_err(|e| format!("Text overlay state lock failed: {e}"))?;
+        if should_ignore_text_overlay_payload(cached.as_ref(), &payload) {
+            return Ok(());
+        }
         *cached = Some(payload.clone());
     }
 
@@ -405,21 +450,24 @@ pub async fn show_widget_text_overlay(
         .ok_or_else(|| "Widget window not found".to_string())?;
     let text_window = ensure_widget_text_window(&app)?;
 
-    position_widget_text_window(&widget_window, &text_window)?;
+    position_widget_text_window(&widget_window, &text_window, text_overlay_height(&payload))?;
     let _ = text_window.set_ignore_cursor_events(false);
-    text_window.show().map_err(|e| e.to_string())?;
 
     app.emit_to(TEXT_WINDOW_LABEL, TEXT_EVENT, payload)
         .map_err(|e| e.to_string())?;
+    text_window.show().map_err(|e| e.to_string())?;
+    let _ = emit_cached_text_overlay_payload(&app);
     Ok(())
 }
 
 #[tauri::command]
+pub async fn widget_text_overlay_ready(app: AppHandle) -> Result<(), String> {
+    emit_cached_text_overlay_payload(&app)
+}
+
+#[tauri::command]
 pub async fn get_widget_text_overlay_payload() -> Result<Option<WidgetTextOverlayPayload>, String> {
-    let cached = text_overlay_payload_store()
-        .lock()
-        .map_err(|e| format!("Text overlay state lock failed: {e}"))?;
-    Ok(cached.clone())
+    cached_text_overlay_payload()
 }
 
 #[tauri::command]
@@ -432,6 +480,11 @@ pub async fn hide_widget_text_overlay(app: AppHandle) -> Result<(), String> {
     }
 
     if let Some(win) = app.get_webview_window(TEXT_WINDOW_LABEL) {
+        let _ = app.emit_to(
+            TEXT_WINDOW_LABEL,
+            TEXT_EVENT,
+            Option::<WidgetTextOverlayPayload>::None,
+        );
         win.hide().map_err(|e| e.to_string())?;
     }
 

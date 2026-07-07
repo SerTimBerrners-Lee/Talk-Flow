@@ -1,9 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type {
+  Dispatch,
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
   ReactElement,
+  RefObject,
+  SetStateAction,
 } from "react";
+import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 
@@ -27,7 +37,7 @@ import {
   type TranslationSettings,
 } from "../../../lib/store";
 import { useI18n } from "../../../lib/i18n";
-import { logError } from "../../../lib/logger";
+import { logError, logInfo } from "../../../lib/logger";
 
 const SETTING_ROW_COLUMNS = "minmax(0, 1fr) 280px";
 const SETTING_ROW_GAP = 16;
@@ -61,6 +71,220 @@ const TRANSLATION_GROUP_LAST_SECTION_STYLE = {
   ...TRANSLATION_GROUP_SECTION_STYLE,
   paddingBottom: 0,
 } as const;
+
+interface LanguageOption {
+  code: string;
+  name: string;
+  native: string;
+}
+
+interface DropdownPosition {
+  top: number;
+  left: number;
+  width: number;
+  maxHeight: number;
+}
+
+interface LanguageDropdownPortalProps {
+  anchorRef: RefObject<HTMLDivElement | null>;
+  options: LanguageOption[];
+  selectedCode: string;
+  search: string;
+  setSearch: Dispatch<SetStateAction<string>>;
+  placeholder: string;
+  notFoundLabel: string;
+  onSelect: (code: string) => void;
+}
+
+function LanguageDropdownPortal({
+  anchorRef,
+  options,
+  selectedCode,
+  search,
+  setSearch,
+  placeholder,
+  notFoundLabel,
+  onSelect,
+}: LanguageDropdownPortalProps): ReactElement | null {
+  const [position, setPosition] = useState<DropdownPosition | null>(null);
+
+  useLayoutEffect(() => {
+    const updatePosition = (): void => {
+      const anchor = anchorRef.current;
+      if (!anchor) return;
+
+      const rect = anchor.getBoundingClientRect();
+      const viewportPadding = 12;
+      const gap = 8;
+      const width = Math.min(320, window.innerWidth - viewportPadding * 2);
+      const left = Math.min(
+        Math.max(viewportPadding, rect.right - width),
+        window.innerWidth - width - viewportPadding,
+      );
+      const availableBelow =
+        window.innerHeight - rect.bottom - viewportPadding - gap;
+      const availableAbove = rect.top - viewportPadding - gap;
+      const shouldFlip = availableBelow < 220 && availableAbove > availableBelow;
+
+      let maxHeight = Math.min(
+        320,
+        Math.max(120, shouldFlip ? availableAbove : availableBelow),
+      );
+      let top = shouldFlip
+        ? rect.top - gap - maxHeight
+        : rect.bottom + gap;
+
+      if (top < viewportPadding) {
+        top = viewportPadding;
+      }
+      if (top + maxHeight > window.innerHeight - viewportPadding) {
+        maxHeight = Math.max(
+          120,
+          window.innerHeight - viewportPadding - top,
+        );
+      }
+
+      setPosition({ top, left, width, maxHeight });
+    };
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [anchorRef]);
+
+  if (!position || typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
+    <div
+      onMouseDown={(event) => event.stopPropagation()}
+      style={{
+        position: "fixed",
+        top: position.top,
+        left: position.left,
+        width: position.width,
+        maxHeight: position.maxHeight,
+        background: "var(--dropdown-bg)",
+        border: "1px solid var(--border)",
+        borderRadius: 24,
+        boxShadow: "var(--shadow-panel)",
+        zIndex: 10000,
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+      }}
+    >
+      <div
+        style={{
+          padding: 12,
+          borderBottom: "1px solid var(--border-subtle)",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+        }}
+      >
+        <IconSearch
+          size={13}
+          style={{ color: "var(--text-low)", flexShrink: 0 }}
+        />
+        <input
+          autoFocus
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder={placeholder}
+          style={{
+            border: "none",
+            outline: "none",
+            background: "transparent",
+            fontSize: 12,
+            color: "var(--text-hi)",
+            flex: 1,
+            minWidth: 0,
+          }}
+        />
+      </div>
+      <div style={{ overflow: "auto", flex: 1 }}>
+        {options.length === 0 ? (
+          <div
+            style={{
+              padding: "14px 16px",
+              fontSize: 12,
+              color: "var(--text-low)",
+            }}
+          >
+            {notFoundLabel}
+          </div>
+        ) : (
+          options.map((language) => (
+            <button
+              key={language.code}
+              type="button"
+              onClick={() => onSelect(language.code)}
+              style={{
+                width: "100%",
+                textAlign: "left",
+                border: "none",
+                cursor: "pointer",
+                padding: "10px 16px",
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                background:
+                  selectedCode === language.code
+                    ? "var(--dropdown-active)"
+                    : "transparent",
+                color:
+                  selectedCode === language.code
+                    ? "var(--text-hi)"
+                    : "var(--text-mid)",
+                fontSize: 12,
+                transition: "background 0.1s",
+              }}
+              onMouseEnter={(event) => {
+                event.currentTarget.style.background = "var(--dropdown-hover)";
+              }}
+              onMouseLeave={(event) => {
+                event.currentTarget.style.background =
+                  selectedCode === language.code
+                    ? "var(--dropdown-active)"
+                    : "transparent";
+              }}
+            >
+              <span
+                style={{
+                  minWidth: 28,
+                  fontSize: 10,
+                  color: "var(--text-low)",
+                  fontFamily: "monospace",
+                }}
+              >
+                {language.code}
+              </span>
+              <span style={{ flex: 1 }}>{language.native}</span>
+              <span style={{ fontSize: 10, color: "var(--text-low)" }}>
+                {language.name}
+              </span>
+              {selectedCode === language.code && (
+                <IconCheck
+                  size={12}
+                  stroke={2.5}
+                  style={{ color: "var(--text-hi)", flexShrink: 0 }}
+                />
+              )}
+            </button>
+          ))
+        )}
+      </div>
+    </div>,
+    document.body,
+  );
+}
 
 function stopSelectionHotkeyCaptureProcess(): void {
   void emit(HOTKEY_CAPTURE_STATE_EVENT, { active: false }).catch(() => null);
@@ -125,10 +349,18 @@ export function TranslationTab(): ReactElement {
   const [selectionHotkeyTone, setSelectionHotkeyTone] = useState<
     "idle" | "success" | "error"
   >("idle");
+  const [selectionHotkeySubmitting, setSelectionHotkeySubmitting] =
+    useState(false);
   const targetRef = useRef<HTMLDivElement>(null);
   const selectionTargetRef = useRef<HTMLDivElement>(null);
   const selectionHotkeyRef = useRef<HTMLDivElement>(null);
+  const selectionHotkeyCaptureActiveRef = useRef(false);
   const usesNativeHotkeyCapture = isMacPlatform();
+
+  const setSelectionHotkeyCaptureActiveValue = (active: boolean): void => {
+    selectionHotkeyCaptureActiveRef.current = active;
+    setSelectionHotkeyCaptureActive(active);
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -161,12 +393,12 @@ export function TranslationTab(): ReactElement {
     const unlistenNativeHotkeyCapture = listen<NativeHotkeyCapturePayload>(
       NATIVE_HOTKEY_CAPTURE_EVENT,
       async ({ payload }) => {
-        if (!selectionHotkeyCaptureActive) {
+        if (!selectionHotkeyCaptureActiveRef.current) {
           return;
         }
 
         if (payload.status === "stopped") {
-          setSelectionHotkeyCaptureActive(false);
+          setSelectionHotkeyCaptureActiveValue(false);
           setSelectionHotkeyDraft(null);
           return;
         }
@@ -208,7 +440,7 @@ export function TranslationTab(): ReactElement {
     return () => {
       void unlistenNativeHotkeyCapture.then((unlisten) => unlisten());
     };
-  }, [selectionHotkeyCaptureActive]);
+  }, []);
 
   useEffect(() => {
     if (!selectionHotkeyCaptureActive || usesNativeHotkeyCapture) {
@@ -283,7 +515,7 @@ export function TranslationTab(): ReactElement {
 
   useEffect(() => {
     return () => {
-      setSelectionHotkeyCaptureActive(false);
+      setSelectionHotkeyCaptureActiveValue(false);
       setSelectionHotkeyDraft(null);
       stopSelectionHotkeyCaptureProcess();
     };
@@ -385,10 +617,41 @@ export function TranslationTab(): ReactElement {
     (language) => language.code === selectionTargetLanguage,
   );
 
+  const verifySelectionHotkeyAvailable = async (
+    hotkey: string,
+  ): Promise<{ success: boolean; message?: string }> => {
+    const currentSelectionHotkey = settings?.translation.selectionHotkey
+      ? normalizeHotkey(settings.translation.selectionHotkey).normalized
+      : null;
+    const isAlreadyActive =
+      settings?.translation.selectionEnabled &&
+      currentSelectionHotkey === hotkey;
+
+    if (isAlreadyActive) {
+      return { success: true };
+    }
+
+    try {
+      await invoke("register_handy_hotkey", { hotkey });
+      await invoke("unregister_handy_hotkey", { hotkey }).catch((error) => {
+        void logError(
+          "TRANSLATION",
+          `Failed to unregister probed selection hotkey ${hotkey}: ${error}`,
+        );
+      });
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        message: t("widget.hotkey.registerFailed", { hotkey }),
+      };
+    }
+  };
+
   const updateTranslation = async (
     patch: Partial<TranslationSettings>,
-  ): Promise<void> => {
-    if (!settings) return;
+  ): Promise<AppSettings | null> => {
+    if (!settings) return null;
 
     const nextTranslation: TranslationSettings = {
       ...settings.translation,
@@ -414,7 +677,10 @@ export function TranslationTab(): ReactElement {
 
     try {
       await saveSettings({ translation: nextTranslation });
+      const latest = await getSettings({ reload: true });
+      setSettings(latest);
       await emit(SETTINGS_UPDATED_EVENT);
+      return latest;
     } catch (error) {
       void logError(
         "TRANSLATION",
@@ -422,6 +688,71 @@ export function TranslationTab(): ReactElement {
       );
       const restored = await getSettings({ reload: true });
       setSettings(restored);
+      await emit(SETTINGS_UPDATED_EVENT).catch(() => null);
+      return restored;
+    }
+  };
+
+  const toggleSelectionTranslation = async (): Promise<void> => {
+    if (!settings || selectionHotkeySubmitting) return;
+
+    if (settings.translation.selectionEnabled) {
+      setSelectionHotkeyTone("idle");
+      setSelectionHotkeyFeedback("");
+      await updateTranslation({ selectionEnabled: false });
+      return;
+    }
+
+    const normalized = normalizeHotkey(
+      settings.translation.selectionHotkey || DEFAULT_SELECTION_TRANSLATION_HOTKEY,
+    );
+    if (!normalized.valid || !normalized.normalized) {
+      setSelectionHotkeyTone("error");
+      setSelectionHotkeyFeedback(
+        normalized.error || t("translation.selection.hotkeyInvalid"),
+      );
+      return;
+    }
+
+    if (
+      normalizeHotkey(settings.hotkey).normalized === normalized.normalized
+    ) {
+      setSelectionHotkeyTone("error");
+      setSelectionHotkeyFeedback(t("widget.hotkey.conflict"));
+      return;
+    }
+
+    setSelectionHotkeySubmitting(true);
+    setSelectionHotkeyTone("idle");
+    setSelectionHotkeyFeedback(t("settingsGeneralExtra.hotkey.checkingFree"));
+
+    try {
+      const availability = await verifySelectionHotkeyAvailable(
+        normalized.normalized,
+      );
+      if (!availability.success) {
+        setSelectionHotkeyTone("error");
+        setSelectionHotkeyFeedback(
+          availability.message ||
+            t("widget.hotkey.registerFailed", {
+              hotkey: normalized.normalized,
+            }),
+        );
+        return;
+      }
+
+      await updateTranslation({
+        selectionEnabled: true,
+        selectionHotkey: normalized.normalized,
+      });
+      setSelectionHotkeyTone("success");
+      setSelectionHotkeyFeedback(t("translation.selection.hotkeySaved"));
+      void logInfo(
+        "TRANSLATION",
+        `Selected-text translation enabled with hotkey: ${normalized.normalized}`,
+      );
+    } finally {
+      setSelectionHotkeySubmitting(false);
     }
   };
 
@@ -429,7 +760,8 @@ export function TranslationTab(): ReactElement {
     candidate: string | null,
   ): Promise<void> => {
     await emit(HOTKEY_CAPTURE_STATE_EVENT, { active: false }).catch(() => null);
-    setSelectionHotkeyCaptureActive(false);
+    setSelectionHotkeyCaptureActiveValue(false);
+    setSelectionHotkeySubmitting(false);
 
     if (!candidate) {
       setSelectionHotkeyDraft(null);
@@ -458,10 +790,51 @@ export function TranslationTab(): ReactElement {
       return;
     }
 
-    setSelectionHotkeyDraft(null);
-    setSelectionHotkeyTone("success");
-    setSelectionHotkeyFeedback(t("translation.selection.hotkeySaved"));
-    await updateTranslation({ selectionHotkey: normalized.normalized });
+    setSelectionHotkeySubmitting(true);
+    setSelectionHotkeyTone("idle");
+    setSelectionHotkeyFeedback(t("settingsGeneralExtra.hotkey.checkingFree"));
+
+    try {
+      const availability = await verifySelectionHotkeyAvailable(
+        normalized.normalized,
+      );
+      if (!availability.success) {
+        setSelectionHotkeyDraft(null);
+        setSelectionHotkeyTone("error");
+        setSelectionHotkeyFeedback(
+          availability.message ||
+            t("widget.hotkey.registerFailed", {
+              hotkey: normalized.normalized,
+            }),
+        );
+        return;
+      }
+
+      const latest = await updateTranslation({
+        selectionEnabled: true,
+        selectionHotkey: normalized.normalized,
+      });
+      setSelectionHotkeyDraft(null);
+      setSelectionHotkeyTone("success");
+      setSelectionHotkeyFeedback(t("translation.selection.hotkeySaved"));
+      void logInfo(
+        "TRANSLATION",
+        `Selected-text translation hotkey saved and enabled: ${normalized.normalized}`,
+      );
+      if (latest) {
+        setSettings(latest);
+      }
+    } catch (error) {
+      setSelectionHotkeyDraft(null);
+      setSelectionHotkeyTone("error");
+      setSelectionHotkeyFeedback(
+        error instanceof Error
+          ? error.message
+          : t("widget.hotkey.registerFailedGeneric"),
+      );
+    } finally {
+      setSelectionHotkeySubmitting(false);
+    }
   };
 
   const stopNativeSelectionHotkeyCapture = async (): Promise<void> => {
@@ -474,7 +847,7 @@ export function TranslationTab(): ReactElement {
   const stopSelectionHotkeyCapture = async (
     message?: string,
   ): Promise<void> => {
-    setSelectionHotkeyCaptureActive(false);
+    setSelectionHotkeyCaptureActiveValue(false);
     setSelectionHotkeyDraft(null);
     await stopNativeSelectionHotkeyCapture();
 
@@ -485,11 +858,11 @@ export function TranslationTab(): ReactElement {
   };
 
   const startSelectionHotkeyCapture = async (): Promise<void> => {
-    if (selectionHotkeyCaptureActive) {
+    if (selectionHotkeyCaptureActive || selectionHotkeySubmitting) {
       return;
     }
 
-    setSelectionHotkeyCaptureActive(true);
+    setSelectionHotkeyCaptureActiveValue(true);
     setSelectionHotkeyDraft(null);
     setSelectionHotkeyTone("idle");
     setSelectionHotkeyFeedback(
@@ -506,7 +879,7 @@ export function TranslationTab(): ReactElement {
         window.setTimeout(() => selectionHotkeyRef.current?.focus(), 0);
       }
     } catch (error) {
-      setSelectionHotkeyCaptureActive(false);
+      setSelectionHotkeyCaptureActiveValue(false);
       setSelectionHotkeyDraft(null);
       setSelectionHotkeyTone("error");
       setSelectionHotkeyFeedback(
@@ -523,7 +896,7 @@ export function TranslationTab(): ReactElement {
   const handleSelectionHotkeyCaptureSurfaceKeyDown = (
     event: ReactKeyboardEvent<HTMLDivElement>,
   ): void => {
-    if (selectionHotkeyCaptureActive) {
+    if (selectionHotkeyCaptureActive || selectionHotkeySubmitting) {
       return;
     }
 
@@ -539,6 +912,9 @@ export function TranslationTab(): ReactElement {
     event: ReactMouseEvent<HTMLDivElement>,
   ): void => {
     event.preventDefault();
+    if (selectionHotkeySubmitting) {
+      return;
+    }
     void startSelectionHotkeyCapture();
   };
 
@@ -642,135 +1018,20 @@ export function TranslationTab(): ReactElement {
               />
             </button>
             {targetOpen && (
-              <div
-                style={{
-                  position: "absolute",
-                  top: "calc(100% + 8px)",
-                  right: 0,
-                  width: 320,
-                  maxHeight: 320,
-                  background: "var(--dropdown-bg)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 24,
-                  boxShadow: "var(--shadow-panel)",
-                  zIndex: 1001,
-                  display: "flex",
-                  flexDirection: "column",
-                  overflow: "hidden",
+              <LanguageDropdownPortal
+                anchorRef={targetRef}
+                options={filteredTargetOptions}
+                selectedCode={targetLanguage}
+                search={targetSearch}
+                setSearch={setTargetSearch}
+                placeholder={t("settings.recognitionLang.searchPlaceholder")}
+                notFoundLabel={t("common.notFound")}
+                onSelect={(code) => {
+                  void updateTranslation({ targetLanguage: code });
+                  setTargetOpen(false);
+                  setTargetSearch("");
                 }}
-              >
-                <div
-                  style={{
-                    padding: 12,
-                    borderBottom: "1px solid var(--border-subtle)",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                  }}
-                >
-                  <IconSearch
-                    size={13}
-                    style={{ color: "var(--text-low)", flexShrink: 0 }}
-                  />
-                  <input
-                    autoFocus
-                    value={targetSearch}
-                    onChange={(event) => setTargetSearch(event.target.value)}
-                    placeholder={t(
-                      "settings.recognitionLang.searchPlaceholder",
-                    )}
-                    style={{
-                      border: "none",
-                      outline: "none",
-                      background: "transparent",
-                      fontSize: 12,
-                      color: "var(--text-hi)",
-                      flex: 1,
-                    }}
-                  />
-                </div>
-                <div style={{ overflow: "auto", flex: 1 }}>
-                  {filteredTargetOptions.length === 0 ? (
-                    <div
-                      style={{
-                        padding: "14px 16px",
-                        fontSize: 12,
-                        color: "var(--text-low)",
-                      }}
-                    >
-                      {t("common.notFound")}
-                    </div>
-                  ) : (
-                    filteredTargetOptions.map((language) => (
-                      <button
-                        key={language.code}
-                        type="button"
-                        onClick={() => {
-                          void updateTranslation({
-                            targetLanguage: language.code,
-                          });
-                          setTargetOpen(false);
-                          setTargetSearch("");
-                        }}
-                        style={{
-                          width: "100%",
-                          textAlign: "left",
-                          border: "none",
-                          cursor: "pointer",
-                          padding: "10px 16px",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 10,
-                          background:
-                            targetLanguage === language.code
-                              ? "var(--dropdown-active)"
-                              : "transparent",
-                          color:
-                            targetLanguage === language.code
-                              ? "var(--text-hi)"
-                              : "var(--text-mid)",
-                          fontSize: 12,
-                          transition: "background 0.1s",
-                        }}
-                        onMouseEnter={(event) => {
-                          event.currentTarget.style.background =
-                            "var(--dropdown-hover)";
-                        }}
-                        onMouseLeave={(event) => {
-                          event.currentTarget.style.background =
-                            targetLanguage === language.code
-                              ? "var(--dropdown-active)"
-                              : "transparent";
-                        }}
-                      >
-                        <span
-                          style={{
-                            minWidth: 28,
-                            fontSize: 10,
-                            color: "var(--text-low)",
-                            fontFamily: "monospace",
-                          }}
-                        >
-                          {language.code}
-                        </span>
-                        <span style={{ flex: 1 }}>{language.native}</span>
-                        <span
-                          style={{ fontSize: 10, color: "var(--text-low)" }}
-                        >
-                          {language.name}
-                        </span>
-                        {targetLanguage === language.code && (
-                          <IconCheck
-                            size={12}
-                            stroke={2.5}
-                            style={{ color: "var(--text-hi)", flexShrink: 0 }}
-                          />
-                        )}
-                      </button>
-                    ))
-                  )}
-                </div>
-              </div>
+              />
             )}
           </div>
         </div>
@@ -895,9 +1156,7 @@ export function TranslationTab(): ReactElement {
             role="switch"
             aria-checked={settings.translation.selectionEnabled}
             onClick={() => {
-              void updateTranslation({
-                selectionEnabled: !settings.translation.selectionEnabled,
-              });
+              void toggleSelectionTranslation();
             }}
             className="btn"
             style={{
@@ -911,6 +1170,7 @@ export function TranslationTab(): ReactElement {
               gap: 10,
               transform: "none",
               justifySelf: "end",
+              opacity: selectionHotkeySubmitting ? 0.72 : 1,
             }}
           >
             <span
@@ -1017,137 +1277,20 @@ export function TranslationTab(): ReactElement {
               />
             </button>
             {selectionTargetOpen && (
-              <div
-                style={{
-                  position: "absolute",
-                  top: "calc(100% + 8px)",
-                  right: 0,
-                  width: 320,
-                  maxHeight: 320,
-                  background: "var(--dropdown-bg)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 24,
-                  boxShadow: "var(--shadow-panel)",
-                  zIndex: 1001,
-                  display: "flex",
-                  flexDirection: "column",
-                  overflow: "hidden",
+              <LanguageDropdownPortal
+                anchorRef={selectionTargetRef}
+                options={filteredSelectionTargetOptions}
+                selectedCode={selectionTargetLanguage}
+                search={selectionTargetSearch}
+                setSearch={setSelectionTargetSearch}
+                placeholder={t("settings.recognitionLang.searchPlaceholder")}
+                notFoundLabel={t("common.notFound")}
+                onSelect={(code) => {
+                  void updateTranslation({ selectionTargetLanguage: code });
+                  setSelectionTargetOpen(false);
+                  setSelectionTargetSearch("");
                 }}
-              >
-                <div
-                  style={{
-                    padding: 12,
-                    borderBottom: "1px solid var(--border-subtle)",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                  }}
-                >
-                  <IconSearch
-                    size={13}
-                    style={{ color: "var(--text-low)", flexShrink: 0 }}
-                  />
-                  <input
-                    autoFocus
-                    value={selectionTargetSearch}
-                    onChange={(event) =>
-                      setSelectionTargetSearch(event.target.value)
-                    }
-                    placeholder={t(
-                      "settings.recognitionLang.searchPlaceholder",
-                    )}
-                    style={{
-                      border: "none",
-                      outline: "none",
-                      background: "transparent",
-                      fontSize: 12,
-                      color: "var(--text-hi)",
-                      flex: 1,
-                    }}
-                  />
-                </div>
-                <div style={{ overflow: "auto", flex: 1 }}>
-                  {filteredSelectionTargetOptions.length === 0 ? (
-                    <div
-                      style={{
-                        padding: "14px 16px",
-                        fontSize: 12,
-                        color: "var(--text-low)",
-                      }}
-                    >
-                      {t("common.notFound")}
-                    </div>
-                  ) : (
-                    filteredSelectionTargetOptions.map((language) => (
-                      <button
-                        key={language.code}
-                        type="button"
-                        onClick={() => {
-                          void updateTranslation({
-                            selectionTargetLanguage: language.code,
-                          });
-                          setSelectionTargetOpen(false);
-                          setSelectionTargetSearch("");
-                        }}
-                        style={{
-                          width: "100%",
-                          textAlign: "left",
-                          border: "none",
-                          cursor: "pointer",
-                          padding: "10px 16px",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 10,
-                          background:
-                            selectionTargetLanguage === language.code
-                              ? "var(--dropdown-active)"
-                              : "transparent",
-                          color:
-                            selectionTargetLanguage === language.code
-                              ? "var(--text-hi)"
-                              : "var(--text-mid)",
-                          fontSize: 12,
-                          transition: "background 0.1s",
-                        }}
-                        onMouseEnter={(event) => {
-                          event.currentTarget.style.background =
-                            "var(--dropdown-hover)";
-                        }}
-                        onMouseLeave={(event) => {
-                          event.currentTarget.style.background =
-                            selectionTargetLanguage === language.code
-                              ? "var(--dropdown-active)"
-                              : "transparent";
-                        }}
-                      >
-                        <span
-                          style={{
-                            minWidth: 28,
-                            fontSize: 10,
-                            color: "var(--text-low)",
-                            fontFamily: "monospace",
-                          }}
-                        >
-                          {language.code}
-                        </span>
-                        <span style={{ flex: 1 }}>{language.native}</span>
-                        <span
-                          style={{ fontSize: 10, color: "var(--text-low)" }}
-                        >
-                          {language.name}
-                        </span>
-                        {selectionTargetLanguage === language.code && (
-                          <IconCheck
-                            size={12}
-                            stroke={2.5}
-                            style={{ color: "var(--text-hi)", flexShrink: 0 }}
-                          />
-                        )}
-                      </button>
-                    ))
-                  )}
-                </div>
-              </div>
+              />
             )}
           </div>
         </div>
@@ -1174,7 +1317,8 @@ export function TranslationTab(): ReactElement {
             onMouseDown={handleSelectionHotkeyCaptureSurfaceMouseDown}
             onKeyDown={handleSelectionHotkeyCaptureSurfaceKeyDown}
             onFocus={() => {
-              if (selectionHotkeyCaptureActive) return;
+              if (selectionHotkeyCaptureActive || selectionHotkeySubmitting)
+                return;
               setSelectionHotkeyTone("idle");
               setSelectionHotkeyFeedback(t("translation.selection.hotkeyIdle"));
             }}
@@ -1196,7 +1340,8 @@ export function TranslationTab(): ReactElement {
               boxShadow: selectionHotkeyCaptureActive
                 ? "0 0 0 4px rgba(15,118,110,0.08)"
                 : undefined,
-              cursor: "pointer",
+              cursor: selectionHotkeySubmitting ? "default" : "pointer",
+              opacity: selectionHotkeySubmitting ? 0.72 : 1,
             }}
           >
             <span
@@ -1213,6 +1358,8 @@ export function TranslationTab(): ReactElement {
                 ? formatHotkeyLabel(selectionHotkeyDraft)
                 : selectionHotkeyCaptureActive
                   ? t("settings.hotkey.press")
+                  : selectionHotkeySubmitting
+                    ? t("settingsGeneralExtra.hotkey.checkingFree")
                   : formatHotkeyLabel(
                       settings.translation.selectionHotkey ||
                         DEFAULT_SELECTION_TRANSLATION_HOTKEY,

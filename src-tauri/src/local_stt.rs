@@ -803,6 +803,24 @@ fn is_stale_managed_runtime_health(health: &HealthResponse, kind: LocalRuntimeKi
         && !is_expected_runtime_health(health, kind)
 }
 
+async fn whisper_runtime_supports_streaming_endpoint(
+    client: &reqwest::Client,
+    base_url: &str,
+) -> bool {
+    let stream_url = format!(
+        "{}/v1/audio/transcriptions/stream",
+        base_url.trim_end_matches('/')
+    );
+
+    client
+        .post(&stream_url)
+        .timeout(Duration::from_secs(3))
+        .send()
+        .await
+        .map(|response| response.status().as_u16() != 404)
+        .unwrap_or(false)
+}
+
 async fn probe_local_stt(
     client: &reqwest::Client,
     kind: LocalRuntimeKind,
@@ -820,6 +838,16 @@ async fn probe_local_stt(
             if let Ok(text) = response.text().await {
                 if let Ok(health) = serde_json::from_str::<HealthResponse>(&text) {
                     if is_expected_runtime_health(&health, kind) {
+                        if kind == LocalRuntimeKind::Whisper
+                            && !whisper_runtime_supports_streaming_endpoint(client, base_url).await
+                        {
+                            logger::log_info(
+                                "LOCAL_STT",
+                                "Detected stale managed Whisper runtime: missing streaming endpoint",
+                            );
+                            return LocalSttProbe::StaleManagedRuntime;
+                        }
+
                         return LocalSttProbe::Ready;
                     }
 

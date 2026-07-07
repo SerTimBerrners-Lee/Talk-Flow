@@ -23,6 +23,7 @@ use tauri::{AppHandle, Emitter};
 
 static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 static LONG_HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+const DICTATION_STREAM_UPDATE_EVENT: &str = "dictation-stream:update";
 
 fn http_client() -> &'static reqwest::Client {
     HTTP_CLIENT.get_or_init(|| {
@@ -65,6 +66,49 @@ pub struct TranscribeRequest {
     pub mime_type: Option<String>,
     pub mode: Option<String>,
     pub streaming_enabled: Option<bool>,
+    pub streaming_request_id: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DictationStreamUpdatePayload {
+    request_id: String,
+    status: String,
+    text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+struct LocalStreamingTranscriptionEvent {
+    status: String,
+    #[serde(default)]
+    text: String,
+    #[serde(default)]
+    message: Option<String>,
+}
+
+#[derive(Debug)]
+enum LocalStreamingTranscriptionError {
+    Http { status: u16, body: String },
+    Request(String),
+    Parse(String),
+}
+
+impl LocalStreamingTranscriptionError {
+    fn into_message(self) -> String {
+        match self {
+            LocalStreamingTranscriptionError::Http { status, body } => {
+                if matches!(status, 401 | 403) {
+                    errors::local_stt_runtime_rejected_message(status, &body)
+                } else {
+                    format!("Whisper streaming API error ({}): {}", status, body)
+                }
+            }
+            LocalStreamingTranscriptionError::Request(message)
+            | LocalStreamingTranscriptionError::Parse(message) => message,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -207,6 +251,239 @@ fn plain_transcribe_response(raw: String, cleaned: String) -> TranscribeResponse
         speakers: None,
         segments: None,
     }
+}
+
+fn emit_dictation_stream_update(
+    app: &AppHandle,
+    request_id: &str,
+    status: &str,
+    text: &str,
+    message: Option<&str>,
+) {
+    let payload = DictationStreamUpdatePayload {
+        request_id: request_id.to_string(),
+        status: status.to_string(),
+        text: text.to_string(),
+        message: message.map(ToString::to_string),
+    };
+
+    if let Err(err) = app.emit(DICTATION_STREAM_UPDATE_EVENT, payload) {
+        logger::log_error(
+            "WHISPER",
+            &format!("Failed to emit dictation stream update: {}", err),
+        );
+    }
+}
+
+fn resolve_streaming_transcription_url(whisper_url: &str) -> String {
+    let base = whisper_url.trim_end_matches('/');
+    if base.ends_with("/stream") {
+        base.to_string()
+    } else {
+        format!("{}/stream", base)
+    }
+}
+
+fn build_whisper_multipart_form(
+    audio_bytes: Vec<u8>,
+    file_name: &str,
+    mime_type: &str,
+    whisper_model: &str,
+    is_transcribe_model: bool,
+    is_local_endpoint: bool,
+    require_segments: bool,
+    use_streaming: bool,
+    language: &str,
+    lang_param: &str,
+) -> Result<multipart::Form, String> {
+    let file_part = multipart::Part::bytes(audio_bytes)
+        .file_name(file_name.to_string())
+        .mime_str(mime_type)
+        .map_err(|e| format!("MIME error: {}", e))?;
+
+    let mut form = multipart::Form::new()
+        .part("file", file_part)
+        .text("model", whisper_model.to_string());
+
+    if is_transcribe_model {
+        // gpt-4o-transcribe / gpt-4o-mini-transcribe:
+        // - Only support "json" or "text" response_format (not verbose_json)
+        // - Don't support "language" or "prompt" params
+        // - Use "instructions" instead of "prompt" for hints
+        form = form.text("response_format", "json");
+
+        if let Some(hint) = build_whisper_prompt(language, "classic") {
+            form = form.text("instructions", hint);
+        }
+    } else if is_local_endpoint {
+        // Local faster-whisper: use the most compatible response format.
+        form = form.text(
+            "response_format",
+            if require_segments {
+                "verbose_json"
+            } else {
+                "json"
+            },
+        );
+
+        if !lang_param.is_empty() || (use_streaming && language == "auto") {
+            form = form.text(
+                "language",
+                if use_streaming && language == "auto" {
+                    "auto".to_string()
+                } else {
+                    lang_param.to_string()
+                },
+            );
+        }
+
+        if use_streaming {
+            form = form.text("streaming", "true");
+        }
+
+        if let Some(prompt) = build_whisper_prompt(language, "classic") {
+            form = form.text("prompt", prompt.to_string());
+        }
+    } else {
+        // Classic Whisper API (OpenAI / compatible): support verbose_json, language, prompt
+        form = form.text("response_format", "verbose_json");
+
+        if let Some(prompt) = build_whisper_prompt(language, "classic") {
+            form = form.text("prompt", prompt.to_string());
+        }
+
+        if !lang_param.is_empty() {
+            form = form.text("language", lang_param.to_string());
+        }
+    }
+
+    Ok(form)
+}
+
+async fn send_local_streaming_transcription_request(
+    app: &AppHandle,
+    client: &reqwest::Client,
+    whisper_url: &str,
+    form: multipart::Form,
+    request_id: &str,
+) -> Result<String, LocalStreamingTranscriptionError> {
+    let streaming_url = resolve_streaming_transcription_url(whisper_url);
+    logger::log_info(
+        "WHISPER",
+        &format!("Sending streaming request to {}", streaming_url),
+    );
+
+    let mut response = client
+        .post(&streaming_url)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| {
+            LocalStreamingTranscriptionError::Request(format!(
+                "Whisper streaming request failed: {}",
+                e
+            ))
+        })?;
+
+    let status = response.status();
+    logger::log_info("WHISPER", &format!("Streaming response status: {}", status));
+
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        return Err(LocalStreamingTranscriptionError::Http {
+            status: status.as_u16(),
+            body,
+        });
+    }
+
+    let mut pending = String::new();
+    let mut final_text = String::new();
+
+    while let Some(chunk) = response.chunk().await.map_err(|e| {
+        LocalStreamingTranscriptionError::Request(format!(
+            "Whisper streaming response read failed: {}",
+            e
+        ))
+    })? {
+        pending.push_str(&String::from_utf8_lossy(&chunk));
+        drain_local_streaming_lines(app, request_id, &mut pending, &mut final_text)?;
+    }
+
+    let trailing = pending.trim();
+    if !trailing.is_empty() {
+        let event = parse_local_streaming_event(trailing)?;
+        apply_local_streaming_event(app, request_id, event, &mut final_text)?;
+    }
+
+    Ok(final_text.trim().to_string())
+}
+
+fn drain_local_streaming_lines(
+    app: &AppHandle,
+    request_id: &str,
+    pending: &mut String,
+    final_text: &mut String,
+) -> Result<(), LocalStreamingTranscriptionError> {
+    while let Some(index) = pending.find('\n') {
+        let line = pending[..index].trim_end_matches('\r').trim().to_string();
+        pending.drain(..index + 1);
+
+        if line.is_empty() {
+            continue;
+        }
+
+        let event = parse_local_streaming_event(&line)?;
+        apply_local_streaming_event(app, request_id, event, final_text)?;
+    }
+
+    Ok(())
+}
+
+fn parse_local_streaming_event(
+    line: &str,
+) -> Result<LocalStreamingTranscriptionEvent, LocalStreamingTranscriptionError> {
+    serde_json::from_str::<LocalStreamingTranscriptionEvent>(line).map_err(|e| {
+        LocalStreamingTranscriptionError::Parse(format!(
+            "Whisper streaming response parse error: {}; line={}",
+            e, line
+        ))
+    })
+}
+
+fn apply_local_streaming_event(
+    app: &AppHandle,
+    request_id: &str,
+    event: LocalStreamingTranscriptionEvent,
+    final_text: &mut String,
+) -> Result<(), LocalStreamingTranscriptionError> {
+    match event.status.as_str() {
+        "started" => {
+            emit_dictation_stream_update(app, request_id, "started", &event.text, None);
+        }
+        "partial" => {
+            *final_text = event.text.clone();
+            emit_dictation_stream_update(app, request_id, "partial", &event.text, None);
+        }
+        "final" => {
+            *final_text = event.text.clone();
+            emit_dictation_stream_update(app, request_id, "final", &event.text, None);
+        }
+        "error" => {
+            let message = event
+                .message
+                .unwrap_or_else(|| "Whisper streaming runtime returned an error".to_string());
+            emit_dictation_stream_update(app, request_id, "error", &event.text, Some(&message));
+            return Err(LocalStreamingTranscriptionError::Request(message));
+        }
+        other => {
+            logger::log_info(
+                "WHISPER",
+                &format!("Ignoring unknown streaming event status: {}", other),
+            );
+        }
+    }
+
+    Ok(())
 }
 
 fn is_likely_short_uncertain_transcription(
@@ -500,11 +777,6 @@ async fn transcribe_audio_bytes_internal(
         audio_bytes
     };
 
-    let file_part = multipart::Part::bytes(audio_bytes)
-        .file_name(file_name)
-        .mime_str(&mime_type)
-        .map_err(|e| format!("MIME error: {}", e))?;
-
     let lang_param = if req.language == "auto" {
         String::new()
     } else {
@@ -541,63 +813,16 @@ async fn transcribe_audio_bytes_internal(
     // Fall back to plain "json" for local endpoints so segments/duration won't
     // be available, but transcription will succeed.
     let is_local_endpoint = whisper_url.contains("127.0.0.1") || whisper_url.contains("localhost");
-
-    let mut form = multipart::Form::new()
-        .part("file", file_part)
-        .text("model", whisper_model.clone());
-
-    if is_transcribe_model {
-        // gpt-4o-transcribe / gpt-4o-mini-transcribe:
-        // - Only support "json" or "text" response_format (not verbose_json)
-        // - Don't support "language" or "prompt" params
-        // - Use "instructions" instead of "prompt" for hints
-        form = form.text("response_format", "json");
-
-        if let Some(hint) = build_whisper_prompt(&req.language, "classic") {
-            form = form.text("instructions", hint);
-        }
-    } else if is_local_endpoint {
-        // Local faster-whisper: use the most compatible response format.
-        form = form.text(
-            "response_format",
-            if require_segments {
-                "verbose_json"
-            } else {
-                "json"
-            },
-        );
-
-        let use_streaming = req.streaming_enabled.unwrap_or(false) && !require_segments;
-        if !lang_param.is_empty() || (use_streaming && req.language == "auto") {
-            form = form.text(
-                "language",
-                if use_streaming && req.language == "auto" {
-                    "auto".to_string()
-                } else {
-                    lang_param
-                },
-            );
-        }
-
-        if use_streaming {
-            form = form.text("streaming", "true");
-        }
-
-        if let Some(prompt) = build_whisper_prompt(&req.language, "classic") {
-            form = form.text("prompt", prompt.to_string());
-        }
-    } else {
-        // Classic Whisper API (OpenAI / compatible): support verbose_json, language, prompt
-        form = form.text("response_format", "verbose_json");
-
-        if let Some(prompt) = build_whisper_prompt(&req.language, "classic") {
-            form = form.text("prompt", prompt.to_string());
-        }
-
-        if !lang_param.is_empty() {
-            form = form.text("language", lang_param);
-        }
-    }
+    let use_streaming =
+        is_local_endpoint && req.streaming_enabled.unwrap_or(false) && !require_segments;
+    let live_streaming_request_id = use_streaming
+        .then(|| {
+            req.streaming_request_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+        })
+        .flatten();
 
     let whisper_key = if is_local_endpoint {
         None
@@ -620,38 +845,104 @@ async fn transcribe_audio_bytes_internal(
         (*client).clone()
     };
 
-    let mut whisper_request = stt_client.post(&whisper_url).multipart(form);
-    if let Some(whisper_key) = whisper_key {
-        whisper_request = whisper_request.bearer_auth(whisper_key);
+    let mut streaming_body: Option<WhisperResp> = None;
+    if let Some(request_id) = live_streaming_request_id {
+        let form = build_whisper_multipart_form(
+            audio_bytes.clone(),
+            &file_name,
+            &mime_type,
+            &whisper_model,
+            is_transcribe_model,
+            is_local_endpoint,
+            require_segments,
+            use_streaming,
+            &req.language,
+            &lang_param,
+        )?;
+
+        match send_local_streaming_transcription_request(
+            &app,
+            &stt_client,
+            &whisper_url,
+            form,
+            request_id,
+        )
+        .await
+        {
+            Ok(text) => {
+                streaming_body = Some(WhisperResp {
+                    text,
+                    duration: None,
+                    segments: Vec::new(),
+                });
+            }
+            Err(LocalStreamingTranscriptionError::Http { status: 404, body }) => {
+                logger::log_info(
+                    "WHISPER",
+                    &format!(
+                        "Streaming endpoint unavailable, falling back to JSON transcription: {}",
+                        body
+                    ),
+                );
+            }
+            Err(err) => {
+                let message = err.into_message();
+                emit_dictation_stream_update(&app, request_id, "error", "", Some(&message));
+                logger::log_error("WHISPER", &message);
+                return Err(message);
+            }
+        }
     }
 
-    let whisper_res = whisper_request.send().await.map_err(|e| {
-        let err = format!("Whisper request failed: {}", e);
-        logger::log_error("WHISPER", &err);
-        err
-    })?;
+    let whisper_body: WhisperResp = if let Some(body) = streaming_body {
+        body
+    } else {
+        let form = build_whisper_multipart_form(
+            audio_bytes,
+            &file_name,
+            &mime_type,
+            &whisper_model,
+            is_transcribe_model,
+            is_local_endpoint,
+            require_segments,
+            use_streaming,
+            &req.language,
+            &lang_param,
+        )?;
 
-    let status = whisper_res.status();
-    logger::log_info("WHISPER", &format!("Response status: {}", status));
+        let mut whisper_request = stt_client.post(&whisper_url).multipart(form);
+        if let Some(whisper_key) = whisper_key {
+            whisper_request = whisper_request.bearer_auth(whisper_key);
+        }
 
-    if !status.is_success() {
-        let body = whisper_res.text().await.unwrap_or_default();
-        if is_local_endpoint && matches!(status.as_u16(), 401 | 403) {
-            let err = errors::local_stt_runtime_rejected_message(status.as_u16(), &body);
+        let whisper_res = whisper_request.send().await.map_err(|e| {
+            let err = format!("Whisper request failed: {}", e);
+            logger::log_error("WHISPER", &err);
+            err
+        })?;
+
+        let status = whisper_res.status();
+        logger::log_info("WHISPER", &format!("Response status: {}", status));
+
+        if !status.is_success() {
+            let body = whisper_res.text().await.unwrap_or_default();
+            if is_local_endpoint && matches!(status.as_u16(), 401 | 403) {
+                let err = errors::local_stt_runtime_rejected_message(status.as_u16(), &body);
+                logger::log_error("WHISPER", &err);
+                return Err(err);
+            }
+
+            let err = format!("Whisper API error ({}): {}", status, body);
             logger::log_error("WHISPER", &err);
             return Err(err);
         }
 
-        let err = format!("Whisper API error ({}): {}", status, body);
-        logger::log_error("WHISPER", &err);
-        return Err(err);
-    }
-
-    let whisper_body: WhisperResp = whisper_res.json().await.map_err(|e| {
-        let err = format!("Whisper response parse error: {}", e);
-        logger::log_error("WHISPER", &err);
-        err
-    })?;
+        whisper_res.json().await.map_err(|e| {
+            let err = format!("Whisper response parse error: {}", e);
+            logger::log_error("WHISPER", &err);
+            err
+        })?
+    };
     let raw = whisper_body.text.trim().to_string();
     logger::log_info("WHISPER", &format!("Transcribed: \"{}\"", raw));
 
@@ -945,6 +1236,14 @@ fn is_repairable_diarization_runtime_error(message: &str) -> bool {
 fn file_transcription_uses_own_key(req: &FilePathTranscriptionRequest) -> bool {
     let whisper_url = resolve_whisper_url(req.whisper_endpoint.as_deref());
     req.use_own_key || is_likely_local_url(&whisper_url)
+}
+
+fn local_model_prefers_streaming_transcription(model: Option<&str>) -> bool {
+    model
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_lowercase().contains("streaming"))
+        .unwrap_or(false)
 }
 
 fn ensure_diarized_file_preconditions(req: &FilePathTranscriptionRequest) -> Result<(), String> {
@@ -1341,7 +1640,12 @@ pub async fn transcribe_file_path(
         file_name: None,
         mime_type: None,
         mode: Some("transcribe_only".to_string()),
-        streaming_enabled: Some(false),
+        streaming_enabled: Some(
+            is_local_stt_endpoint
+                && !req.speaker_diarization
+                && local_model_prefers_streaming_transcription(req.whisper_model.as_deref()),
+        ),
+        streaming_request_id: None,
     };
 
     let mut parts = Vec::with_capacity(total_chunks);
@@ -2553,6 +2857,20 @@ mod tests {
 
         assert!(file_transcription_uses_own_key(&local_request));
         assert!(!file_transcription_uses_own_key(&remote_request));
+    }
+
+    #[test]
+    fn local_streaming_models_use_streaming_transcription_for_files() {
+        assert!(local_model_prefers_streaming_transcription(Some(
+            "nvidia/nemotron-3.5-asr-streaming-0.6b"
+        )));
+        assert!(local_model_prefers_streaming_transcription(Some(
+            "moonshine-streaming-small"
+        )));
+        assert!(!local_model_prefers_streaming_transcription(Some(
+            "whisper-large-v3-turbo"
+        )));
+        assert!(!local_model_prefers_streaming_transcription(None));
     }
 
     #[test]

@@ -40,6 +40,15 @@ It is designed for practical daily work: IDEs, chats, notes, CRM fields, email, 
 
 ## Latest Changes
 
+### v0.3.8
+
+- Added live local dictation for streaming STT models: the text overlay opens when recording starts, shows partial results while speaking, and still pastes only after stop.
+- Improved the text overlay lifecycle so live dictation, translation, and paste errors do not overwrite each other; first-show startup races are handled through an explicit ready handshake.
+- Added local selected-text translation with managed local translator options and selection hotkey settings.
+- Improved local file transcription for WebM/video inputs and local streaming models by routing files through native preparation and streaming-compatible chunks.
+- Reduced voice-history memory pressure by storing completed recording audio through the history audio store instead of keeping large base64 payloads in live history entries.
+- Refreshed settings/model UI for local STT, local LLM, local translation, and development chat workflows.
+
 ### v0.3.7
 
 - Migrated managed local file transcription to a unified native `transcribe.cpp` runtime for Whisper, Qwen ASR, and NVIDIA Parakeet.

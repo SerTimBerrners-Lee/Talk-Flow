@@ -296,6 +296,164 @@ fn history_entry_id(entry: &Value) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+fn string_field(entry: &Value, key: &str) -> Option<String> {
+    entry
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn number_field(entry: &Value, key: &str) -> Option<Value> {
+    entry.get(key).filter(|value| value.is_number()).cloned()
+}
+
+fn history_entry_source(entry: &Value) -> String {
+    match string_field(entry, "source").as_deref() {
+        Some("file") => "file".to_string(),
+        Some("call") => "call".to_string(),
+        _ => "voice".to_string(),
+    }
+}
+
+fn history_entry_text(entry: &Value) -> String {
+    string_field(entry, "cleaned")
+        .or_else(|| string_field(entry, "raw"))
+        .unwrap_or_default()
+}
+
+fn text_preview(text: &str, max_chars: usize) -> String {
+    let mut chars = text.chars();
+    let preview = chars.by_ref().take(max_chars).collect::<String>();
+    if chars.next().is_some() {
+        format!("{}...", preview.trim_end())
+    } else {
+        preview
+    }
+}
+
+fn has_non_empty_string(entry: &Value, key: &str) -> bool {
+    string_field(entry, key).is_some()
+}
+
+fn history_list_entry(entry: &Value) -> Value {
+    let text = history_entry_text(entry);
+    let text_length = text.chars().count();
+    let mut item = serde_json::Map::new();
+
+    item.insert(
+        "id".to_string(),
+        Value::String(history_entry_id(entry).unwrap_or_default()),
+    );
+    item.insert(
+        "timestamp".to_string(),
+        Value::String(string_field(entry, "timestamp").unwrap_or_default()),
+    );
+    item.insert(
+        "duration".to_string(),
+        number_field(entry, "duration").unwrap_or_else(|| Value::Number(0.into())),
+    );
+    item.insert(
+        "source".to_string(),
+        Value::String(history_entry_source(entry)),
+    );
+    item.insert(
+        "textPreview".to_string(),
+        Value::String(text_preview(&text, 250)),
+    );
+    item.insert(
+        "textLength".to_string(),
+        Value::Number((text_length as u64).into()),
+    );
+    item.insert(
+        "hasAudio".to_string(),
+        Value::Bool(
+            has_non_empty_string(entry, "audioPath") || has_non_empty_string(entry, "audioBase64"),
+        ),
+    );
+    item.insert(
+        "hasCallTracks".to_string(),
+        Value::Bool(
+            entry
+                .get("callTracks")
+                .and_then(Value::as_array)
+                .is_some_and(|tracks| !tracks.is_empty()),
+        ),
+    );
+    item.insert(
+        "hasFilePath".to_string(),
+        Value::Bool(has_non_empty_string(entry, "filePath")),
+    );
+    item.insert(
+        "summaryCount".to_string(),
+        Value::Number(
+            entry
+                .get("summaries")
+                .and_then(Value::as_array)
+                .map(|items| items.len().min(3) as u64)
+                .unwrap_or(0)
+                .into(),
+        ),
+    );
+
+    for key in ["status", "errorMessage", "fileName", "mode"] {
+        if let Some(value) = string_field(entry, key) {
+            item.insert(key.to_string(), Value::String(value));
+        }
+    }
+
+    if let Some(value) = number_field(entry, "processingTime") {
+        item.insert("processingTime".to_string(), value);
+    }
+
+    Value::Object(item)
+}
+
+fn history_index_from_entries(history: &[Value]) -> Vec<Value> {
+    history.iter().map(history_list_entry).collect()
+}
+
+fn read_history_index_json(path: &Path) -> Result<Vec<Value>, String> {
+    let history = read_history_json(path)?;
+    let index = history_index_from_entries(&history);
+    let full_bytes = fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
+    let index_bytes = serde_json::to_vec(&index)
+        .map(|bytes| bytes.len())
+        .unwrap_or(0);
+    crate::logger::log_info(
+        "HISTORY",
+        &format!(
+            "Read history index entries={} fullBytes={} indexBytes={}",
+            index.len(),
+            full_bytes,
+            index_bytes
+        ),
+    );
+    Ok(index)
+}
+
+fn read_history_entry_json(path: &Path, id: &str) -> Result<Option<Value>, String> {
+    let target_id = id.trim();
+    if target_id.is_empty() {
+        return Ok(None);
+    }
+
+    let history = read_history_json(path)?;
+    let entry = history
+        .into_iter()
+        .find(|entry| history_entry_id(entry).as_deref() == Some(target_id));
+    crate::logger::log_info(
+        "HISTORY",
+        &format!(
+            "Read history entry id={} found={}",
+            target_id,
+            entry.is_some()
+        ),
+    );
+    Ok(entry)
+}
+
 fn merge_history(target: &mut Vec<Value>, source: Vec<Value>) {
     let mut seen = target
         .iter()
@@ -569,6 +727,25 @@ pub async fn read_history_file(app: AppHandle, storage_dir: String) -> Result<Ve
 }
 
 #[tauri::command]
+pub async fn read_history_index_file(
+    app: AppHandle,
+    storage_dir: String,
+) -> Result<Vec<Value>, String> {
+    let path = history_file_path(Some(&app), &storage_dir)?;
+    read_history_index_json(&path)
+}
+
+#[tauri::command]
+pub async fn read_history_entry_file(
+    app: AppHandle,
+    storage_dir: String,
+    id: String,
+) -> Result<Option<Value>, String> {
+    let path = history_file_path(Some(&app), &storage_dir)?;
+    read_history_entry_json(&path, &id)
+}
+
+#[tauri::command]
 pub async fn write_history_file(
     app: AppHandle,
     storage_dir: String,
@@ -663,5 +840,66 @@ mod tests {
 
         let err = read_history_audio_file(&outside, &[allowed_root]).unwrap_err();
         assert!(err.contains("вне папки хранения"));
+    }
+
+    #[test]
+    fn reads_lightweight_history_index_without_heavy_fields() {
+        let root = temp_test_dir("index");
+        let path = root.join(HISTORY_FILE_NAME);
+        write_history_json(
+            &path,
+            &[serde_json::json!({
+                "id": "entry-1",
+                "timestamp": "2026-07-07T10:00:00.000Z",
+                "duration": 12,
+                "raw": "full raw",
+                "cleaned": "cleaned transcript",
+                "source": "file",
+                "fileName": "meeting.mp3",
+                "segments": [{ "text": "segment" }],
+                "summaries": [{ "id": "s1" }, { "id": "s2" }, { "id": "s3" }, { "id": "s4" }],
+                "audioBase64": "aGVsbG8=",
+                "filePath": "/tmp/meeting.mp3"
+            })],
+        )
+        .expect("history should write");
+
+        let index = read_history_index_json(&path).expect("index should read");
+        assert_eq!(index.len(), 1);
+        assert_eq!(index[0]["id"], "entry-1");
+        assert_eq!(index[0]["source"], "file");
+        assert_eq!(index[0]["textPreview"], "cleaned transcript");
+        assert_eq!(index[0]["textLength"], 18);
+        assert_eq!(index[0]["hasAudio"], true);
+        assert_eq!(index[0]["hasFilePath"], true);
+        assert_eq!(index[0]["summaryCount"], 3);
+        assert!(index[0].get("raw").is_none());
+        assert!(index[0].get("cleaned").is_none());
+        assert!(index[0].get("segments").is_none());
+        assert!(index[0].get("summaries").is_none());
+        assert!(index[0].get("audioBase64").is_none());
+    }
+
+    #[test]
+    fn reads_one_history_entry_and_returns_none_for_missing_id() {
+        let root = temp_test_dir("entry");
+        let path = root.join(HISTORY_FILE_NAME);
+        write_history_json(
+            &path,
+            &[
+                serde_json::json!({ "id": "one", "cleaned": "first" }),
+                serde_json::json!({ "id": "two", "cleaned": "second" }),
+            ],
+        )
+        .expect("history should write");
+
+        let entry = read_history_entry_json(&path, "two")
+            .expect("entry should read")
+            .expect("entry should exist");
+        assert_eq!(entry["cleaned"], "second");
+
+        let missing =
+            read_history_entry_json(&path, "missing").expect("entry read should not fail");
+        assert!(missing.is_none());
     }
 }

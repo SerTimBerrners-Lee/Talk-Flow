@@ -118,6 +118,7 @@ export function SettingsTab() {
   > | null>(null);
 
   const [isHotkeyCaptureActive, setIsHotkeyCaptureActive] = useState(false);
+  const isHotkeyCaptureActiveRef = useRef(false);
   const [isHotkeySubmitting, setIsHotkeySubmitting] = useState(false);
   const [hotkeyDraft, setHotkeyDraft] = useState<string | null>(null);
   const [hotkeyFeedback, setHotkeyFeedback] = useState(
@@ -141,6 +142,11 @@ export function SettingsTab() {
 
     clearTimeout(hotkeyFeedbackResetTimerRef.current);
     hotkeyFeedbackResetTimerRef.current = null;
+  };
+
+  const setHotkeyCaptureActiveValue = (active: boolean): void => {
+    isHotkeyCaptureActiveRef.current = active;
+    setIsHotkeyCaptureActive(active);
   };
 
   useEffect(() => {
@@ -227,8 +233,12 @@ export function SettingsTab() {
     const unlistenNativeHotkeyCapture = listen<NativeHotkeyCapturePayload>(
       NATIVE_HOTKEY_CAPTURE_EVENT,
       async ({ payload }) => {
+        if (!isHotkeyCaptureActiveRef.current) {
+          return;
+        }
+
         if (payload.status === "listening") {
-          setIsHotkeyCaptureActive(true);
+          setHotkeyCaptureActiveValue(true);
           setIsHotkeySubmitting(false);
           setHotkeyDraft(null);
           setHotkeyFeedbackTone("idle");
@@ -252,7 +262,7 @@ export function SettingsTab() {
           await emit(HOTKEY_CAPTURE_STATE_EVENT, { active: false }).catch(
             () => null,
           );
-          setIsHotkeyCaptureActive(false);
+          setHotkeyCaptureActiveValue(false);
           setHotkeyDraft(null);
           setHotkeyFeedbackTone("idle");
           setHotkeyFeedback(
@@ -469,7 +479,7 @@ export function SettingsTab() {
     await emit(HOTKEY_CAPTURE_STATE_EVENT, { active: false }).catch(() => null);
 
     if (!candidate) {
-      setIsHotkeyCaptureActive(false);
+      setHotkeyCaptureActiveValue(false);
       setHotkeyDraft(null);
       setHotkeyFeedbackTone("error");
       setHotkeyFeedback(t("settingsGeneralExtra.hotkey.recognizeFailed"));
@@ -478,7 +488,7 @@ export function SettingsTab() {
 
     const normalized = normalizeHotkey(candidate);
     if (!normalized.valid || !normalized.normalized) {
-      setIsHotkeyCaptureActive(false);
+      setHotkeyCaptureActiveValue(false);
       setHotkeyDraft(null);
       setHotkeyFeedbackTone("error");
       setHotkeyFeedback(
@@ -488,7 +498,7 @@ export function SettingsTab() {
     }
 
     pendingHotkeyRef.current = normalized.normalized;
-    setIsHotkeyCaptureActive(false);
+    setHotkeyCaptureActiveValue(false);
     setIsHotkeySubmitting(true);
     setHotkeyDraft(normalized.normalized);
     setHotkeyFeedbackTone("idle");
@@ -516,7 +526,7 @@ export function SettingsTab() {
 
     clearHotkeyFeedbackResetTimer();
     pendingHotkeyRef.current = null;
-    setIsHotkeyCaptureActive(true);
+    setHotkeyCaptureActiveValue(true);
     setHotkeyDraft(null);
     setHotkeyFeedbackTone("idle");
     setHotkeyFeedback(
@@ -536,7 +546,7 @@ export function SettingsTab() {
       await emit(HOTKEY_CAPTURE_STATE_EVENT, { active: false }).catch(
         () => null,
       );
-      setIsHotkeyCaptureActive(false);
+      setHotkeyCaptureActiveValue(false);
       setHotkeyDraft(null);
       setHotkeyFeedbackTone("error");
       setHotkeyFeedback(t("settingsGeneralExtra.hotkey.captureStartFailed"));
@@ -549,7 +559,7 @@ export function SettingsTab() {
 
   const stopHotkeyCapture = async (message?: string): Promise<void> => {
     pendingHotkeyRef.current = null;
-    setIsHotkeyCaptureActive(false);
+    setHotkeyCaptureActiveValue(false);
     setHotkeyDraft(null);
 
     if (usesNativeHotkeyCapture) {

@@ -1,3 +1,6 @@
+use crate::live_dictation::{
+    self, LiveDictationFeeder, LiveDictationFinal, LiveDictationSession, LiveDictationStartRequest,
+};
 use crate::logger;
 use base64::Engine;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -7,6 +10,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tauri::AppHandle;
 
 const TARGET_SAMPLE_RATE: u32 = 16_000;
 const TARGET_CHANNELS: u16 = 1;
@@ -14,6 +18,7 @@ const PCM_TARGET_PEAK: f32 = 0.82;
 const PCM_NORMALIZE_BELOW_PEAK: f32 = 0.35;
 const PCM_MIN_SIGNAL_PEAK: f32 = 0.001;
 const PCM_MAX_GAIN: f32 = 8.0;
+const MAX_NATIVE_RECORDING_SECONDS: usize = 5 * 60;
 
 static RECORDER: OnceLock<Mutex<Option<NativeVoiceRecorder>>> = OnceLock::new();
 
@@ -21,6 +26,7 @@ static RECORDER: OnceLock<Mutex<Option<NativeVoiceRecorder>>> = OnceLock::new();
 #[serde(rename_all = "camelCase")]
 pub struct StartNativeVoiceRecordingRequest {
     pub device_label: Option<String>,
+    pub live_dictation: Option<LiveDictationStartRequest>,
 }
 
 #[derive(Debug, Serialize)]
@@ -34,6 +40,7 @@ pub struct NativeVoiceRecordingResult {
     pub channels: u16,
     pub peak: f32,
     pub rms: f32,
+    pub live_transcription: Option<LiveDictationFinal>,
 }
 
 struct NativeVoiceRecorder {
@@ -43,18 +50,22 @@ struct NativeVoiceRecorder {
     source_sample_rate: u32,
     source_channels: u16,
     device_name: String,
+    live_session: Option<LiveDictationSession>,
 }
 
 struct NativeRecorderThreadInfo {
     source_sample_rate: u32,
     source_channels: u16,
     device_name: String,
+    live_session: Option<LiveDictationSession>,
 }
 
 #[derive(Default)]
 struct NativeRecorderState {
     samples: Vec<f32>,
     paused: bool,
+    max_samples: Option<usize>,
+    limit_reached: bool,
 }
 
 struct PcmStats {
@@ -127,76 +138,186 @@ fn select_input_device(
         .ok_or_else(|| "Системный микрофон не найден.".to_string())
 }
 
-fn append_samples(state: &Arc<Mutex<NativeRecorderState>>, channels: usize, samples: &[f32]) {
+fn append_samples(
+    state: &Arc<Mutex<NativeRecorderState>>,
+    channels: usize,
+    samples: &[f32],
+    live_feeder: Option<&LiveDictationFeeder>,
+) {
     if channels == 0 {
         return;
     }
 
-    let mut guard = match state.lock() {
-        Ok(guard) => guard,
-        Err(err) => err.into_inner(),
-    };
-    if guard.paused {
-        return;
-    }
-
-    guard.samples.reserve(samples.len() / channels);
-    for frame in samples.chunks(channels) {
-        let mut sum = 0.0;
-        for sample in frame {
-            sum += *sample;
+    let mut live_samples = Vec::new();
+    {
+        let mut guard = match state.lock() {
+            Ok(guard) => guard,
+            Err(err) => err.into_inner(),
+        };
+        if guard.paused {
+            return;
         }
-        guard.samples.push(sum / frame.len().max(1) as f32);
+
+        if let Some(max_samples) = guard.max_samples {
+            if guard.samples.len() >= max_samples {
+                guard.limit_reached = true;
+                return;
+            }
+        }
+
+        let remaining_samples = guard
+            .max_samples
+            .map(|max_samples| max_samples.saturating_sub(guard.samples.len()))
+            .unwrap_or(samples.len() / channels);
+        guard
+            .samples
+            .reserve((samples.len() / channels).min(remaining_samples));
+        live_samples.reserve((samples.len() / channels).min(remaining_samples));
+        for frame in samples.chunks(channels) {
+            if let Some(max_samples) = guard.max_samples {
+                if guard.samples.len() >= max_samples {
+                    guard.limit_reached = true;
+                    break;
+                }
+            }
+
+            let mut sum = 0.0;
+            for sample in frame {
+                sum += *sample;
+            }
+            let mono = sum / frame.len().max(1) as f32;
+            guard.samples.push(mono);
+            live_samples.push(mono);
+        }
+    }
+
+    if let Some(feeder) = live_feeder {
+        live_dictation::feed_source_samples(feeder, &live_samples);
     }
 }
 
-fn append_f32_samples(state: &Arc<Mutex<NativeRecorderState>>, channels: usize, data: &[f32]) {
-    append_samples(state, channels, data);
+fn append_f32_samples(
+    state: &Arc<Mutex<NativeRecorderState>>,
+    channels: usize,
+    data: &[f32],
+    live_feeder: Option<&LiveDictationFeeder>,
+) {
+    append_samples(state, channels, data, live_feeder);
 }
 
-fn append_i16_samples(state: &Arc<Mutex<NativeRecorderState>>, channels: usize, data: &[i16]) {
+fn append_i16_samples(
+    state: &Arc<Mutex<NativeRecorderState>>,
+    channels: usize,
+    data: &[i16],
+    live_feeder: Option<&LiveDictationFeeder>,
+) {
     if channels == 0 {
         return;
     }
 
-    let mut guard = match state.lock() {
-        Ok(guard) => guard,
-        Err(err) => err.into_inner(),
-    };
-    if guard.paused {
-        return;
+    let mut live_samples = Vec::new();
+    {
+        let mut guard = match state.lock() {
+            Ok(guard) => guard,
+            Err(err) => err.into_inner(),
+        };
+        if guard.paused {
+            return;
+        }
+
+        if let Some(max_samples) = guard.max_samples {
+            if guard.samples.len() >= max_samples {
+                guard.limit_reached = true;
+                return;
+            }
+        }
+
+        let remaining_samples = guard
+            .max_samples
+            .map(|max_samples| max_samples.saturating_sub(guard.samples.len()))
+            .unwrap_or(data.len() / channels);
+        guard
+            .samples
+            .reserve((data.len() / channels).min(remaining_samples));
+        live_samples.reserve((data.len() / channels).min(remaining_samples));
+        for frame in data.chunks(channels) {
+            if let Some(max_samples) = guard.max_samples {
+                if guard.samples.len() >= max_samples {
+                    guard.limit_reached = true;
+                    break;
+                }
+            }
+
+            let mut sum = 0.0;
+            for sample in frame {
+                sum += *sample as f32 / i16::MAX as f32;
+            }
+            let mono = sum / frame.len().max(1) as f32;
+            guard.samples.push(mono);
+            live_samples.push(mono);
+        }
     }
 
-    guard.samples.reserve(data.len() / channels);
-    for frame in data.chunks(channels) {
-        let mut sum = 0.0;
-        for sample in frame {
-            sum += *sample as f32 / i16::MAX as f32;
-        }
-        guard.samples.push(sum / frame.len().max(1) as f32);
+    if let Some(feeder) = live_feeder {
+        live_dictation::feed_source_samples(feeder, &live_samples);
     }
 }
 
-fn append_u16_samples(state: &Arc<Mutex<NativeRecorderState>>, channels: usize, data: &[u16]) {
+fn append_u16_samples(
+    state: &Arc<Mutex<NativeRecorderState>>,
+    channels: usize,
+    data: &[u16],
+    live_feeder: Option<&LiveDictationFeeder>,
+) {
     if channels == 0 {
         return;
     }
 
-    let mut guard = match state.lock() {
-        Ok(guard) => guard,
-        Err(err) => err.into_inner(),
-    };
-    if guard.paused {
-        return;
+    let mut live_samples = Vec::new();
+    {
+        let mut guard = match state.lock() {
+            Ok(guard) => guard,
+            Err(err) => err.into_inner(),
+        };
+        if guard.paused {
+            return;
+        }
+
+        if let Some(max_samples) = guard.max_samples {
+            if guard.samples.len() >= max_samples {
+                guard.limit_reached = true;
+                return;
+            }
+        }
+
+        let remaining_samples = guard
+            .max_samples
+            .map(|max_samples| max_samples.saturating_sub(guard.samples.len()))
+            .unwrap_or(data.len() / channels);
+        guard
+            .samples
+            .reserve((data.len() / channels).min(remaining_samples));
+        live_samples.reserve((data.len() / channels).min(remaining_samples));
+        for frame in data.chunks(channels) {
+            if let Some(max_samples) = guard.max_samples {
+                if guard.samples.len() >= max_samples {
+                    guard.limit_reached = true;
+                    break;
+                }
+            }
+
+            let mut sum = 0.0;
+            for sample in frame {
+                sum += (*sample as f32 - 32_768.0) / 32_768.0;
+            }
+            let mono = sum / frame.len().max(1) as f32;
+            guard.samples.push(mono);
+            live_samples.push(mono);
+        }
     }
 
-    guard.samples.reserve(data.len() / channels);
-    for frame in data.chunks(channels) {
-        let mut sum = 0.0;
-        for sample in frame {
-            sum += (*sample as f32 - 32_768.0) / 32_768.0;
-        }
-        guard.samples.push(sum / frame.len().max(1) as f32);
+    if let Some(feeder) = live_feeder {
+        live_dictation::feed_source_samples(feeder, &live_samples);
     }
 }
 
@@ -205,6 +326,7 @@ fn build_input_stream(
     config: &cpal::StreamConfig,
     sample_format: cpal::SampleFormat,
     state: Arc<Mutex<NativeRecorderState>>,
+    live_feeder: Option<LiveDictationFeeder>,
 ) -> Result<cpal::Stream, String> {
     let channels = config.channels as usize;
     if channels == 0 {
@@ -219,30 +341,45 @@ fn build_input_stream(
     };
 
     match sample_format {
-        cpal::SampleFormat::F32 => device
-            .build_input_stream(
-                config,
-                move |data: &[f32], _| append_f32_samples(&state, channels, data),
-                err_fn,
-                None,
-            )
-            .map_err(|err| format!("Не удалось открыть микрофон: {}", err)),
-        cpal::SampleFormat::I16 => device
-            .build_input_stream(
-                config,
-                move |data: &[i16], _| append_i16_samples(&state, channels, data),
-                err_fn,
-                None,
-            )
-            .map_err(|err| format!("Не удалось открыть микрофон: {}", err)),
-        cpal::SampleFormat::U16 => device
-            .build_input_stream(
-                config,
-                move |data: &[u16], _| append_u16_samples(&state, channels, data),
-                err_fn,
-                None,
-            )
-            .map_err(|err| format!("Не удалось открыть микрофон: {}", err)),
+        cpal::SampleFormat::F32 => {
+            let live_feeder = live_feeder.clone();
+            device
+                .build_input_stream(
+                    config,
+                    move |data: &[f32], _| {
+                        append_f32_samples(&state, channels, data, live_feeder.as_ref())
+                    },
+                    err_fn,
+                    None,
+                )
+                .map_err(|err| format!("Не удалось открыть микрофон: {}", err))
+        }
+        cpal::SampleFormat::I16 => {
+            let live_feeder = live_feeder.clone();
+            device
+                .build_input_stream(
+                    config,
+                    move |data: &[i16], _| {
+                        append_i16_samples(&state, channels, data, live_feeder.as_ref())
+                    },
+                    err_fn,
+                    None,
+                )
+                .map_err(|err| format!("Не удалось открыть микрофон: {}", err))
+        }
+        cpal::SampleFormat::U16 => {
+            let live_feeder = live_feeder.clone();
+            device
+                .build_input_stream(
+                    config,
+                    move |data: &[u16], _| {
+                        append_u16_samples(&state, channels, data, live_feeder.as_ref())
+                    },
+                    err_fn,
+                    None,
+                )
+                .map_err(|err| format!("Не удалось открыть микрофон: {}", err))
+        }
         other => Err(format!(
             "Нативная запись пока не поддерживает формат микрофона {:?}.",
             other
@@ -361,6 +498,7 @@ fn write_wav_bytes(samples: &[i16]) -> Result<Vec<u8>, String> {
 }
 
 fn run_recorder_thread(
+    app: AppHandle,
     req: StartNativeVoiceRecordingRequest,
     state: Arc<Mutex<NativeRecorderState>>,
     started_tx: mpsc::Sender<Result<NativeRecorderThreadInfo, String>>,
@@ -380,7 +518,34 @@ fn run_recorder_thread(
         let config: cpal::StreamConfig = supported_config.into();
         let source_sample_rate = config.sample_rate.0;
         let source_channels = config.channels;
-        let stream = build_input_stream(&device, &config, sample_format, Arc::clone(&state))?;
+        {
+            let mut guard = state
+                .lock()
+                .map_err(|_| "Не удалось настроить лимит нативной записи.".to_string())?;
+            guard.max_samples = Some(source_sample_rate as usize * MAX_NATIVE_RECORDING_SECONDS);
+            guard.limit_reached = false;
+        }
+        let live_session = live_dictation::start_live_dictation_session(
+            app,
+            req.live_dictation.clone(),
+            source_sample_rate,
+        );
+        let live_feeder = live_session.as_ref().map(LiveDictationSession::feeder);
+        let stream = match build_input_stream(
+            &device,
+            &config,
+            sample_format,
+            Arc::clone(&state),
+            live_feeder,
+        ) {
+            Ok(stream) => stream,
+            Err(err) => {
+                if let Some(session) = live_session {
+                    live_dictation::cancel_live_dictation_session(session);
+                }
+                return Err(err);
+            }
+        };
 
         stream
             .play()
@@ -400,6 +565,7 @@ fn run_recorder_thread(
                 source_sample_rate,
                 source_channels,
                 device_name,
+                live_session,
             },
         ))
     })();
@@ -423,7 +589,10 @@ fn run_recorder_thread(
 }
 
 #[tauri::command]
-pub fn start_native_voice_recording(req: StartNativeVoiceRecordingRequest) -> Result<(), String> {
+pub fn start_native_voice_recording(
+    app: AppHandle,
+    req: StartNativeVoiceRecordingRequest,
+) -> Result<(), String> {
     let mut guard = recorder_slot()
         .lock()
         .map_err(|_| "Не удалось заблокировать нативную запись.".to_string())?;
@@ -438,7 +607,7 @@ pub fn start_native_voice_recording(req: StartNativeVoiceRecordingRequest) -> Re
     let thread_state = Arc::clone(&state);
     std::thread::Builder::new()
         .name("talkis-native-voice-recorder".to_string())
-        .spawn(move || run_recorder_thread(req, thread_state, started_tx, stop_rx, stopped_tx))
+        .spawn(move || run_recorder_thread(app, req, thread_state, started_tx, stop_rx, stopped_tx))
         .map_err(|err| format!("Не удалось создать поток нативной записи: {}", err))?;
 
     let info = started_rx
@@ -452,6 +621,7 @@ pub fn start_native_voice_recording(req: StartNativeVoiceRecordingRequest) -> Re
         source_sample_rate: info.source_sample_rate,
         source_channels: info.source_channels,
         device_name: info.device_name,
+        live_session: info.live_session,
     });
 
     Ok(())
@@ -502,6 +672,7 @@ pub fn stop_native_voice_recording() -> Result<NativeVoiceRecordingResult, Strin
     let source_sample_rate = recorder.source_sample_rate;
     let source_channels = recorder.source_channels;
     let device_name = recorder.device_name.clone();
+    let live_session = recorder.live_session;
     let state = Arc::clone(&recorder.state);
     recorder
         .stop_tx
@@ -521,12 +692,37 @@ pub fn stop_native_voice_recording() -> Result<NativeVoiceRecordingResult, Strin
         }
     }
 
-    let source_samples = {
+    let (source_samples, limit_reached) = {
         let mut guard = state
             .lock()
             .map_err(|_| "Не удалось прочитать нативную запись.".to_string())?;
-        std::mem::take(&mut guard.samples)
+        (std::mem::take(&mut guard.samples), guard.limit_reached)
     };
+    let live_transcription = live_session.and_then(|session| {
+        match live_dictation::finish_live_dictation_session(session) {
+            Ok(result) => {
+                logger::log_info(
+                    "LIVE_DICTATION",
+                    &format!(
+                        "Live dictation finalized: request_id={}, chars={}",
+                        result.request_id,
+                        result.text.chars().count()
+                    ),
+                );
+                Some(result)
+            }
+            Err(err) => {
+                logger::log_error(
+                    "LIVE_DICTATION",
+                    &format!(
+                        "Live dictation failed, full-audio transcription fallback will be used: {}",
+                        err
+                    ),
+                );
+                None
+            }
+        }
+    });
     let resampled = resample_linear(&source_samples, source_sample_rate);
     let (pcm_samples, stats) = normalize_to_i16(&resampled);
     let wav_bytes = write_wav_bytes(&pcm_samples)?;
@@ -536,7 +732,7 @@ pub fn stop_native_voice_recording() -> Result<NativeVoiceRecordingResult, Strin
     logger::log_info(
         "NATIVE_RECORDER",
         &format!(
-            "Native voice recorder stopped: device={}, source_sample_rate={}, source_channels={}, source_samples={}, duration_ms={}, sample_rate={}, channels={}, peak={:.4}, rms={:.4}",
+            "Native voice recorder stopped: device={}, source_sample_rate={}, source_channels={}, source_samples={}, duration_ms={}, sample_rate={}, channels={}, peak={:.4}, rms={:.4}, limit_reached={}",
             device_name,
             source_sample_rate,
             source_channels,
@@ -545,7 +741,8 @@ pub fn stop_native_voice_recording() -> Result<NativeVoiceRecordingResult, Strin
             TARGET_SAMPLE_RATE,
             TARGET_CHANNELS,
             stats.peak,
-            stats.rms
+            stats.rms,
+            limit_reached
         ),
     );
 
@@ -558,5 +755,6 @@ pub fn stop_native_voice_recording() -> Result<NativeVoiceRecordingResult, Strin
         channels: TARGET_CHANNELS,
         peak: stats.peak,
         rms: stats.rms,
+        live_transcription,
     })
 }

@@ -3,6 +3,7 @@ import { load } from "@tauri-apps/plugin-store";
 
 import { DEFAULT_WIDGET_SCALE, normalizeWidgetScale } from "./widgetScale";
 import { recordTranscriptionStats } from "./stats";
+import { logInfo } from "./logger";
 
 export interface SummaryEntry {
   id: string;
@@ -50,6 +51,24 @@ export interface HistoryEntry {
   dictationTranslation?: DictationTranslationMetadata;
   /** Generated summaries for this record (newest first); persists across restarts. */
   summaries?: SummaryEntry[];
+}
+
+export interface HistoryListEntry {
+  id: string;
+  timestamp: string;
+  duration: number;
+  source: "voice" | "file" | "call";
+  status?: HistoryEntry["status"];
+  errorMessage?: string;
+  processingTime?: number;
+  fileName?: string;
+  mode?: HistoryEntry["mode"];
+  textPreview: string;
+  textLength: number;
+  hasAudio: boolean;
+  hasCallTracks: boolean;
+  hasFilePath: boolean;
+  summaryCount: number;
 }
 
 export interface Speaker {
@@ -125,10 +144,16 @@ export interface TranslationSettings {
   targetLanguage: string;
   /** Target language code for selected-text translation. */
   selectionTargetLanguage: string;
+  /** One-time migration marker for the selected-text translation target. */
+  selectionTargetMigrationVersion: number;
   /** Enable translating selected text from any app via a separate hotkey. */
   selectionEnabled: boolean;
   /** Global hotkey for translating the currently selected text. */
   selectionHotkey: string;
+  /** Local translator provider selected for selected-text translation. Empty means LLM fallback only. */
+  selectionLocalTranslatorProvider: string;
+  /** One-time migration marker for the selected-text translation default. */
+  selectionEnableMigrationVersion: number;
 }
 
 export interface AppSettings {
@@ -200,6 +225,7 @@ const HISTORY_MAX_VOICE_ENTRIES = 1000;
 const HISTORY_MAX_FILE_ENTRIES = 200;
 const HISTORY_MAX_CALL_ENTRIES = 200;
 const HISTORY_MAX_TOTAL_BYTES = 50 * 1024 * 1024;
+export const HISTORY_MAX_SUMMARIES_PER_ENTRY = 3;
 export const HISTORY_MAX_VOICE_AUDIO_ENTRIES = 100;
 
 const MODIFIER_ORDER = ["Control", "Alt", "Shift", "Command"] as const;
@@ -241,8 +267,18 @@ const MAIN_KEY_ALIASES: Record<string, string> = {
 const FUNCTION_KEY_PATTERN = /^F(?:[1-9]|1[0-2])$/;
 const DEFAULT_MAC_HOTKEY = "Command+Shift+Space";
 const DEFAULT_DESKTOP_HOTKEY = "Control+Alt+Space";
-const DEFAULT_MAC_SELECTION_TRANSLATION_HOTKEY = "Command+Alt+Y";
+const DEFAULT_LANGUAGE = "ru";
+const LEGACY_MAC_SELECTION_TRANSLATION_HOTKEYS = [
+  "Command+Alt+Y",
+  "Control+Command+T",
+];
+const SELECTION_ENABLE_MIGRATION_VERSION = 1;
+const SELECTION_TARGET_MIGRATION_VERSION = 1;
+const LEGACY_SELECTION_LOCAL_TRANSLATOR_PROVIDER = "trad";
+const DEFAULT_SELECTION_LOCAL_TRANSLATOR_PROVIDER = "nllb-200";
+const DEFAULT_MAC_SELECTION_TRANSLATION_HOTKEY = "Alt+T";
 const DEFAULT_DESKTOP_SELECTION_TRANSLATION_HOTKEY = "Control+Alt+Y";
+const RESERVED_MAC_SYSTEM_HOTKEYS = new Set(["Command+Z", "Shift+Command+Z"]);
 const BUNDLED_LOCAL_LLM_PORTS = new Set([8011]);
 const BUNDLED_LOCAL_LLM_MODEL_IDS = new Set([
   "qwen3-1.7b-instruct-q4",
@@ -338,6 +374,58 @@ function isFunctionKey(part: string): boolean {
   return FUNCTION_KEY_PATTERN.test(part);
 }
 
+function normalizedHotkeyFromParts(parts: string[]): string | null {
+  const modifiers = MODIFIER_ORDER.filter((modifier) =>
+    parts.includes(modifier),
+  );
+  const mainKey = parts.find((part) => !isModifier(part));
+  return mainKey ? [...modifiers, mainKey].join("+") : null;
+}
+
+function isSingleLetterMainKey(mainKey: string | undefined): boolean {
+  return /^[A-Z]$/.test(mainKey || "");
+}
+
+function isCommandShiftLetterHotkey(parts: string[]): boolean {
+  const modifiers = parts.filter(isModifier);
+  const mainKey = parts.find((part) => !isModifier(part));
+  return (
+    modifiers.includes("Command") &&
+    modifiers.includes("Shift") &&
+    isSingleLetterMainKey(mainKey)
+  );
+}
+
+export function isReservedMacSystemHotkey(
+  hotkey: string | null | undefined,
+  macPlatform: boolean = isMacPlatform(),
+): boolean {
+  if (!hotkey || !macPlatform) return false;
+
+  const parts = hotkey
+    .split("+")
+    .map((part) => normalizeHotkeyPart(part))
+    .filter((part): part is string => part !== null);
+  const normalized = normalizedHotkeyFromParts(parts);
+  return normalized ? RESERVED_MAC_SYSTEM_HOTKEYS.has(normalized) : false;
+}
+
+export function isUnsafeMacGlobalHotkey(
+  hotkey: string | null | undefined,
+  macPlatform: boolean = isMacPlatform(),
+): boolean {
+  if (!hotkey || !macPlatform) return false;
+
+  const parts = hotkey
+    .split("+")
+    .map((part) => normalizeHotkeyPart(part))
+    .filter((part): part is string => part !== null);
+  return (
+    isReservedMacSystemHotkey(hotkey, macPlatform) ||
+    isCommandShiftLetterHotkey(parts)
+  );
+}
+
 export function validateHotkey(hotkey: string): {
   valid: boolean;
   error?: string;
@@ -380,6 +468,27 @@ export function validateHotkey(hotkey: string): {
     return {
       valid: false,
       error: "Один и тот же модификатор нельзя использовать дважды",
+    };
+  }
+
+  const normalizedHotkey = normalizedHotkeyFromParts(normalizedParts);
+  if (
+    normalizedHotkey &&
+    isMacPlatform() &&
+    RESERVED_MAC_SYSTEM_HOTKEYS.has(normalizedHotkey)
+  ) {
+    return {
+      valid: false,
+      error:
+        "Command + Z и Command + Shift + Z заняты системным Undo/Redo. Выберите другое сочетание.",
+    };
+  }
+
+  if (isMacPlatform() && isCommandShiftLetterHotkey(normalizedParts)) {
+    return {
+      valid: false,
+      error:
+        "На macOS сочетания Command + Shift + буква пересекаются с системными командами в разных раскладках. Используйте Space, F-клавишу или Option вместо Shift.",
     };
   }
 
@@ -551,6 +660,67 @@ function needsLocalSttSettingsMigration(saved: unknown): boolean {
   );
 }
 
+export function needsHotkeySettingsMigration(
+  saved: unknown,
+  settings: Partial<AppSettings>,
+): boolean {
+  if (!saved || typeof saved !== "object") {
+    return false;
+  }
+
+  const raw = saved as Record<string, unknown>;
+  const currentVoiceHotkey =
+    typeof settings.hotkey === "string"
+      ? normalizeHotkey(settings.hotkey).normalized
+      : undefined;
+  if (typeof raw.hotkey === "string") {
+    const savedVoiceHotkey = normalizeHotkey(raw.hotkey).normalized;
+    if (!savedVoiceHotkey || savedVoiceHotkey !== currentVoiceHotkey) {
+      return true;
+    }
+  }
+
+  const rawTranslation =
+    raw.translation && typeof raw.translation === "object"
+      ? (raw.translation as Record<string, unknown>)
+      : null;
+  if (rawTranslation) {
+    const selectionEnableMigrationVersion =
+      typeof rawTranslation.selectionEnableMigrationVersion === "number"
+        ? rawTranslation.selectionEnableMigrationVersion
+        : 0;
+    if (
+      selectionEnableMigrationVersion < SELECTION_ENABLE_MIGRATION_VERSION
+    ) {
+      return true;
+    }
+    const selectionTargetMigrationVersion =
+      typeof rawTranslation.selectionTargetMigrationVersion === "number"
+        ? rawTranslation.selectionTargetMigrationVersion
+        : 0;
+    if (
+      selectionTargetMigrationVersion < SELECTION_TARGET_MIGRATION_VERSION
+    ) {
+      return true;
+    }
+  }
+  if (!rawTranslation || typeof rawTranslation.selectionHotkey !== "string") {
+    return false;
+  }
+
+  const savedSelectionHotkey = normalizeHotkey(
+    rawTranslation.selectionHotkey,
+  ).normalized;
+  const currentSelectionHotkey =
+    typeof settings.translation?.selectionHotkey === "string"
+      ? normalizeHotkey(settings.translation.selectionHotkey).normalized
+      : undefined;
+
+  return (
+    !savedSelectionHotkey || savedSelectionHotkey !== currentSelectionHotkey
+  );
+}
+
 const DEFAULT_SETTINGS: AppSettings = {
   apiKey: "",
   apiAdapters: {},
@@ -567,7 +737,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   hotkey: DEFAULT_HOTKEY,
   widgetScale: DEFAULT_WIDGET_SCALE,
   theme: "system",
-  language: "ru",
+  language: DEFAULT_LANGUAGE,
   doubleTapTimeout: 400,
   style: "classic",
   prompts: [],
@@ -584,9 +754,12 @@ const DEFAULT_SETTINGS: AppSettings = {
     widgetEnabled: false,
     active: false,
     targetLanguage: "en",
-    selectionTargetLanguage: "en",
-    selectionEnabled: false,
+    selectionTargetLanguage: defaultSelectionTranslationTarget(DEFAULT_LANGUAGE),
+    selectionTargetMigrationVersion: SELECTION_TARGET_MIGRATION_VERSION,
+    selectionEnabled: true,
     selectionHotkey: DEFAULT_SELECTION_TRANSLATION_HOTKEY,
+    selectionLocalTranslatorProvider: "",
+    selectionEnableMigrationVersion: SELECTION_ENABLE_MIGRATION_VERSION,
   },
 };
 
@@ -687,6 +860,17 @@ function defaultSelectionTranslationTarget(
   return sourceLanguage && sourceLanguage !== "auto" ? sourceLanguage : "en";
 }
 
+function normalizeSelectionLocalTranslatorProvider(provider: unknown): string {
+  if (typeof provider !== "string") {
+    return "";
+  }
+
+  const normalized = provider.trim();
+  return normalized === LEGACY_SELECTION_LOCAL_TRANSLATOR_PROVIDER
+    ? DEFAULT_SELECTION_LOCAL_TRANSLATOR_PROVIDER
+    : normalized;
+}
+
 function normalizeTranslationSettings(
   translation: TranslationSettings,
   sourceLanguage: string,
@@ -710,21 +894,47 @@ function normalizeTranslationSettings(
     typeof translation.selectionHotkey === "string"
       ? normalizeHotkey(translation.selectionHotkey).normalized
       : undefined;
+  const isLegacyMacSelectionHotkey = LEGACY_MAC_SELECTION_TRANSLATION_HOTKEYS
+    .map((hotkey) => normalizeHotkey(hotkey).normalized)
+    .includes(normalizedSelectionHotkey);
   const selectionHotkey =
-    !isMacPlatform() &&
-    normalizedSelectionHotkey ===
-      normalizeHotkey(DEFAULT_MAC_SELECTION_TRANSLATION_HOTKEY).normalized
-      ? DEFAULT_DESKTOP_SELECTION_TRANSLATION_HOTKEY
-      : normalizedSelectionHotkey || DEFAULT_SELECTION_TRANSLATION_HOTKEY;
+    isMacPlatform() && isLegacyMacSelectionHotkey
+      ? DEFAULT_SELECTION_TRANSLATION_HOTKEY
+      : !isMacPlatform() &&
+          normalizedSelectionHotkey ===
+            normalizeHotkey(DEFAULT_MAC_SELECTION_TRANSLATION_HOTKEY).normalized
+        ? DEFAULT_DESKTOP_SELECTION_TRANSLATION_HOTKEY
+        : normalizedSelectionHotkey || DEFAULT_SELECTION_TRANSLATION_HOTKEY;
 
   return {
     widgetEnabled: translation.widgetEnabled,
     active: translation.widgetEnabled ? translation.active : false,
     targetLanguage: normalizedTarget,
     selectionTargetLanguage: normalizedSelectionTarget,
+    selectionTargetMigrationVersion: SELECTION_TARGET_MIGRATION_VERSION,
     selectionEnabled: translation.selectionEnabled,
     selectionHotkey,
+    selectionLocalTranslatorProvider:
+      normalizeSelectionLocalTranslatorProvider(
+        translation.selectionLocalTranslatorProvider,
+      ),
+    selectionEnableMigrationVersion: SELECTION_ENABLE_MIGRATION_VERSION,
   };
+}
+
+function nonConflictingSelectionHotkey(voiceHotkey?: string): string {
+  const voice = voiceHotkey
+    ? normalizeHotkey(voiceHotkey).normalized
+    : undefined;
+  const candidates = isMacPlatform()
+    ? [DEFAULT_MAC_SELECTION_TRANSLATION_HOTKEY, "Alt+Space"]
+    : [DEFAULT_DESKTOP_SELECTION_TRANSLATION_HOTKEY, "Control+Alt+T"];
+  return (
+    candidates
+      .map((candidate) => normalizeHotkey(candidate).normalized || candidate)
+      .find((candidate) => candidate !== voice) ||
+    DEFAULT_SELECTION_TRANSLATION_HOTKEY
+  );
 }
 
 function parseTranslationSettings(
@@ -736,6 +946,31 @@ function parseTranslationSettings(
   }
 
   const raw = value as Record<string, unknown>;
+  const selectionEnableMigrationVersion =
+    typeof raw.selectionEnableMigrationVersion === "number"
+      ? raw.selectionEnableMigrationVersion
+      : 0;
+  const selectionTargetMigrationVersion =
+    typeof raw.selectionTargetMigrationVersion === "number"
+      ? raw.selectionTargetMigrationVersion
+      : 0;
+  const shouldAutoEnableSelection =
+    selectionEnableMigrationVersion < SELECTION_ENABLE_MIGRATION_VERSION &&
+    raw.selectionEnabled === false;
+  const rawSelectionTargetLanguage =
+    typeof raw.selectionTargetLanguage === "string" &&
+    raw.selectionTargetLanguage.trim()
+      ? raw.selectionTargetLanguage.trim()
+      : defaultSelectionTranslationTarget(sourceLanguage);
+  const fallbackSelectionTarget =
+    defaultSelectionTranslationTarget(sourceLanguage);
+  const shouldMigrateSelectionTarget =
+    selectionTargetMigrationVersion < SELECTION_TARGET_MIGRATION_VERSION &&
+    sourceLanguage &&
+    sourceLanguage !== "auto" &&
+    rawSelectionTargetLanguage === "en" &&
+    rawSelectionTargetLanguage !== fallbackSelectionTarget;
+
   return normalizeTranslationSettings(
     {
       widgetEnabled:
@@ -746,18 +981,25 @@ function parseTranslationSettings(
           ? raw.targetLanguage.trim()
           : defaultTranslationTarget(sourceLanguage),
       selectionTargetLanguage:
-        typeof raw.selectionTargetLanguage === "string" &&
-        raw.selectionTargetLanguage.trim()
-          ? raw.selectionTargetLanguage.trim()
-          : defaultSelectionTranslationTarget(sourceLanguage),
+        shouldMigrateSelectionTarget
+          ? fallbackSelectionTarget
+          : rawSelectionTargetLanguage,
+      selectionTargetMigrationVersion,
       selectionEnabled:
-        typeof raw.selectionEnabled === "boolean"
+        shouldAutoEnableSelection
+          ? true
+          : typeof raw.selectionEnabled === "boolean"
           ? raw.selectionEnabled
-          : false,
+          : DEFAULT_SETTINGS.translation.selectionEnabled,
       selectionHotkey:
         typeof raw.selectionHotkey === "string" && raw.selectionHotkey.trim()
           ? raw.selectionHotkey.trim()
           : DEFAULT_SELECTION_TRANSLATION_HOTKEY,
+      selectionLocalTranslatorProvider:
+        normalizeSelectionLocalTranslatorProvider(
+          raw.selectionLocalTranslatorProvider,
+        ),
+      selectionEnableMigrationVersion,
     },
     sourceLanguage || DEFAULT_SETTINGS.language,
   );
@@ -931,6 +1173,24 @@ export function normalizeSavedSettings(saved: unknown): Partial<AppSettings> {
     ),
   };
 
+  const normalizedTranslationHotkey = normalizeHotkey(
+    normalized.translation?.selectionHotkey || "",
+  ).normalized;
+  const normalizedVoiceHotkey = normalizeHotkey(
+    normalized.hotkey || "",
+  ).normalized;
+  if (
+    normalized.translation &&
+    normalizedTranslationHotkey &&
+    normalizedVoiceHotkey &&
+    normalizedTranslationHotkey === normalizedVoiceHotkey
+  ) {
+    normalized.translation = {
+      ...normalized.translation,
+      selectionHotkey: nonConflictingSelectionHotkey(normalized.hotkey),
+    };
+  }
+
   if (isLocalSttEndpoint(normalized.whisperEndpoint)) {
     normalized.whisperEndpoint = normalizeLocalSttEndpoint(
       normalized.whisperEndpoint,
@@ -1000,6 +1260,66 @@ function estimateJsonBytes(value: unknown): number {
   return new TextEncoder().encode(JSON.stringify(value)).length;
 }
 
+function historyEntryText(entry: Pick<HistoryEntry, "cleaned" | "raw">): string {
+  const cleaned = entry.cleaned ?? "";
+  return cleaned.length > 0 ? cleaned : entry.raw ?? "";
+}
+
+export function toHistoryListEntry(entry: HistoryEntry): HistoryListEntry {
+  const text = historyEntryText(entry);
+
+  return {
+    id: entry.id,
+    timestamp: entry.timestamp,
+    duration: entry.duration,
+    source: getHistoryEntrySource(entry),
+    status: entry.status,
+    errorMessage: entry.errorMessage,
+    processingTime: entry.processingTime,
+    fileName: entry.fileName,
+    mode: entry.mode,
+    textPreview:
+      text.length > 250 ? `${text.slice(0, 250).trimEnd()}...` : text,
+    textLength: text.length,
+    hasAudio: Boolean(entry.audioPath || entry.audioBase64),
+    hasCallTracks: Boolean(entry.callTracks?.length),
+    hasFilePath: Boolean(entry.filePath),
+    summaryCount: Math.min(
+      entry.summaries?.length ?? 0,
+      HISTORY_MAX_SUMMARIES_PER_ENTRY,
+    ),
+  };
+}
+
+export function compactHistoryEntryForStorage(entry: HistoryEntry): HistoryEntry {
+  const summaries = entry.summaries?.slice(0, HISTORY_MAX_SUMMARIES_PER_ENTRY);
+  const raw = entry.raw ?? "";
+  const cleaned = entry.cleaned ?? "";
+  const shouldCompactRaw = raw === cleaned;
+  const next: HistoryEntry = {
+    ...entry,
+    raw: shouldCompactRaw ? "" : raw,
+  };
+
+  if (summaries) {
+    next.summaries = summaries;
+  }
+
+  return next;
+}
+
+export function normalizeHistoryEntryFromStorage(entry: HistoryEntry): HistoryEntry {
+  if (!entry.raw && entry.cleaned) {
+    return { ...entry, raw: entry.cleaned };
+  }
+
+  return entry;
+}
+
+function normalizeHistoryFromStorage(history: HistoryEntry[]): HistoryEntry[] {
+  return history.map(normalizeHistoryEntryFromStorage);
+}
+
 function pruneHistory(history: HistoryEntry[]): HistoryEntry[] {
   // History is ordered newest first. Keep the newest entries per source and
   // trim from the bottom so old voice recordings cannot evict recent file
@@ -1059,7 +1379,9 @@ export function pruneHistoryAudioRetention(history: HistoryEntry[]): {
   let voiceAudioCount = 0;
   const pathsToDelete: string[] = [];
   const updated = history.map((entry) => {
-    if (!isVoiceHistoryEntry(entry) || !entry.audioPath) {
+    const hasVoiceAudio =
+      isVoiceHistoryEntry(entry) && Boolean(entry.audioPath || entry.audioBase64);
+    if (!hasVoiceAudio) {
       return entry;
     }
 
@@ -1068,10 +1390,13 @@ export function pruneHistoryAudioRetention(history: HistoryEntry[]): {
       return entry;
     }
 
-    pathsToDelete.push(entry.audioPath);
+    if (entry.audioPath) {
+      pathsToDelete.push(entry.audioPath);
+    }
     return {
       ...entry,
       audioPath: undefined,
+      audioBase64: undefined,
       audioMimeType: undefined,
       audioFileName: undefined,
     };
@@ -1120,6 +1445,7 @@ export async function getSettings(
   );
   if (
     needsLocalSttSettingsMigration(saved) ||
+    needsHotkeySettingsMigration(saved, result) ||
     (saved &&
       typeof saved === "object" &&
       (saved as Record<string, unknown>).whisperModel === "whisper-large-v2") ||
@@ -1130,7 +1456,7 @@ export async function getSettings(
       await store.set("settings", result);
       await store.save();
     } catch (error) {
-      console.warn("Failed to persist local STT settings migration", error);
+      console.warn("Failed to persist settings migration", error);
     }
   }
   return result;
@@ -1288,6 +1614,42 @@ export async function deletePrompt(id: string): Promise<void> {
 
 export async function getHistory(): Promise<HistoryEntry[]> {
   const storageDir = await getHistoryStorageDir();
+  const history = storageDir
+    ? await readHistoryFromStorageDir(storageDir)
+    : await readHistoryFromDefaultStorage();
+
+  void logInfo(
+    "HISTORY",
+    `Loaded full history entries=${history.length} approxBytes=${estimateJsonBytes(history)}`,
+  );
+  return history;
+}
+
+export async function getHistoryIndex(): Promise<HistoryListEntry[]> {
+  const storageDir = await getHistoryStorageDir();
+  const index = await invoke<HistoryListEntry[]>("read_history_index_file", {
+    storageDir,
+  });
+
+  void logInfo(
+    "HISTORY",
+    `Loaded history index entries=${index.length} approxBytes=${estimateJsonBytes(index)}`,
+  );
+  return index;
+}
+
+export async function getHistoryEntry(id: string): Promise<HistoryEntry | null> {
+  const storageDir = await getHistoryStorageDir();
+  const entry = await invoke<HistoryEntry | null>("read_history_entry_file", {
+    storageDir,
+    id,
+  });
+
+  return entry ? normalizeHistoryEntryFromStorage(entry) : null;
+}
+
+async function getHistoryForMutation(): Promise<HistoryEntry[]> {
+  const storageDir = await getHistoryStorageDir();
   if (storageDir) {
     return readHistoryFromStorageDir(storageDir);
   }
@@ -1296,20 +1658,17 @@ export async function getHistory(): Promise<HistoryEntry[]> {
 }
 
 export async function addHistoryEntry(entry: HistoryEntry): Promise<void> {
-  const history = await getHistory();
-  const updated = pruneHistory([entry, ...history]);
-  await writeHistory(updated);
+  const history = await getHistoryForMutation();
+  await writeHistory([entry, ...history]);
   // Accumulate words statistics once per transcription; de-dupes by entry id
   // and never throws, so it cannot affect history persistence.
   await recordTranscriptionStats(entry);
 }
 
 export async function updateHistoryEntry(entry: HistoryEntry): Promise<void> {
-  const history = await getHistory();
+  const history = await getHistoryForMutation();
   const previous = history.find((item) => item.id === entry.id);
-  const updated = pruneHistory(
-    history.map((item) => (item.id === entry.id ? entry : item)),
-  );
+  const updated = history.map((item) => (item.id === entry.id ? entry : item));
   await writeHistory(updated);
   if (previous) {
     const nextPaths = new Set(historyAudioPaths(entry));
@@ -1322,7 +1681,7 @@ export async function updateHistoryEntry(entry: HistoryEntry): Promise<void> {
 }
 
 export async function deleteHistoryEntry(id: string): Promise<void> {
-  const history = await getHistory();
+  const history = await getHistoryForMutation();
   const removed = history.find((entry) => entry.id === id);
   await writeHistory(history.filter((e) => e.id !== id));
   await deleteHistoryAudioForEntry(removed);
@@ -1333,11 +1692,16 @@ export async function addSummaryToEntry(
   entryId: string,
   summary: SummaryEntry,
 ): Promise<HistoryEntry | null> {
-  const history = await getHistory();
+  const history = await getHistoryForMutation();
   let updatedEntry: HistoryEntry | null = null;
   const updated = history.map((item) => {
     if (item.id !== entryId) return item;
-    updatedEntry = { ...item, summaries: [summary, ...(item.summaries ?? [])] };
+    updatedEntry = normalizeHistoryEntryFromStorage(
+      compactHistoryEntryForStorage({
+        ...item,
+        summaries: [summary, ...(item.summaries ?? [])],
+      }),
+    );
     return updatedEntry;
   });
   if (updatedEntry) await writeHistory(updated);
@@ -1350,16 +1714,18 @@ export async function updateSummaryInEntry(
   summaryId: string,
   text: string,
 ): Promise<HistoryEntry | null> {
-  const history = await getHistory();
+  const history = await getHistoryForMutation();
   let updatedEntry: HistoryEntry | null = null;
   const updated = history.map((item) => {
     if (item.id !== entryId) return item;
-    updatedEntry = {
-      ...item,
-      summaries: (item.summaries ?? []).map((s) =>
-        s.id === summaryId ? { ...s, text } : s,
-      ),
-    };
+    updatedEntry = normalizeHistoryEntryFromStorage(
+      compactHistoryEntryForStorage({
+        ...item,
+        summaries: (item.summaries ?? []).map((s) =>
+          s.id === summaryId ? { ...s, text } : s,
+        ),
+      }),
+    );
     return updatedEntry;
   });
   if (updatedEntry) await writeHistory(updated);
@@ -1371,14 +1737,16 @@ export async function deleteSummaryFromEntry(
   entryId: string,
   summaryId: string,
 ): Promise<HistoryEntry | null> {
-  const history = await getHistory();
+  const history = await getHistoryForMutation();
   let updatedEntry: HistoryEntry | null = null;
   const updated = history.map((item) => {
     if (item.id !== entryId) return item;
-    updatedEntry = {
-      ...item,
-      summaries: (item.summaries ?? []).filter((s) => s.id !== summaryId),
-    };
+    updatedEntry = normalizeHistoryEntryFromStorage(
+      compactHistoryEntryForStorage({
+        ...item,
+        summaries: (item.summaries ?? []).filter((s) => s.id !== summaryId),
+      }),
+    );
     return updatedEntry;
   });
   if (updatedEntry) await writeHistory(updated);
@@ -1392,7 +1760,7 @@ export async function deleteSummaryFromEntry(
  * from multiple windows. Returns true when at least one entry was reconciled.
  */
 export async function reconcileInterruptedProcessing(): Promise<boolean> {
-  const history = await getHistory();
+  const history = await getHistoryForMutation();
   let changed = false;
   const reconciled = history.map((entry) => {
     if (entry.status !== "processing") {
@@ -1416,7 +1784,7 @@ export async function reconcileInterruptedProcessing(): Promise<boolean> {
 }
 
 export async function clearHistory(): Promise<void> {
-  const history = await getHistory();
+  const history = await getHistoryForMutation();
   await writeHistory([]);
   await deleteHistoryAudioFiles(history.flatMap(historyAudioPaths));
 }
@@ -1443,7 +1811,10 @@ export async function writeHistoryToDefaultStorage(
 async function readHistoryFromStorageDir(
   storageDir: string,
 ): Promise<HistoryEntry[]> {
-  return invoke<HistoryEntry[]>("read_history_file", { storageDir });
+  const history = await invoke<HistoryEntry[]>("read_history_file", {
+    storageDir,
+  });
+  return normalizeHistoryFromStorage(history);
 }
 
 export async function writeHistoryToStorageDir(
@@ -1472,7 +1843,8 @@ function prepareHistoryForWrite(history: HistoryEntry[]): {
   history: HistoryEntry[];
   pathsToDelete: string[];
 } {
-  const pruned = pruneHistory(history);
+  const compacted = history.map(compactHistoryEntryForStorage);
+  const pruned = pruneHistory(compacted);
   const retainedIds = new Set(pruned.map((entry) => entry.id));
   const droppedPaths = history
     .filter((entry) => !retainedIds.has(entry.id))

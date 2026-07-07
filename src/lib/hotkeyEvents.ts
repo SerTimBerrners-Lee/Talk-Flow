@@ -10,6 +10,9 @@ export const HANDY_HOTKEY_EVENT = "handy-hotkey-event";
 export const SETTINGS_NAVIGATE_EVENT = "settings-navigate";
 export const WIDGET_RETRY_PROCESSING_EVENT = "widget-retry-processing";
 export const PROCESSING_CANCEL_REQUEST_EVENT = "processing-cancel-request";
+export const SELECTION_TEXT_REQUEST_EVENT = "selection-text-request";
+export const SELECTION_TEXT_RESPONSE_EVENT = "selection-text-response";
+export const DICTATION_STREAM_UPDATE_EVENT = "dictation-stream:update";
 
 export interface HotkeyChangeRequestPayload {
   hotkey: string;
@@ -50,4 +53,21 @@ export interface WidgetRetryProcessingPayload {
 
 export interface ProcessingCancelRequestPayload {
   entryId: string;
+}
+
+export interface SelectionTextRequestPayload {
+  requestId: string;
+}
+
+export interface SelectionTextResponsePayload {
+  requestId: string;
+  text: string;
+  sourceWindow: string;
+}
+
+export interface DictationStreamUpdatePayload {
+  requestId: string;
+  status: "started" | "partial" | "final" | "error";
+  text: string;
+  message?: string;
 }

@@ -8,6 +8,7 @@ import {
   DEFAULT_HOTKEY,
   DEFAULT_SELECTION_TRANSLATION_HOTKEY,
   getSettings,
+  isUnsafeMacGlobalHotkey,
   normalizeHotkey,
   saveSettings,
 } from "../../../lib/store";
@@ -37,13 +38,17 @@ interface UseWidgetHotkeyParams {
   machineRef: MutableRefObject<WidgetMachineState>;
   dispatch: (action: WidgetAction) => void;
   registeredHotkeyRef: MutableRefObject<string | null>;
-  clearReleaseStopTimer: () => void;
   showError: (message: string) => void;
   onSelectionTranslationHotkey: () => void;
 }
 
 type HandyHotkeyIntent = "selection" | "voice" | "ignore";
 type SelectionHotkeyAction = "arm" | "trigger" | "consume";
+type AttemptHotkeyRegistration = (
+  rawHotkey: string,
+  activeHotkeyRef?: MutableRefObject<string | null>,
+  fallbackHotkey?: string,
+) => Promise<HotkeyRegistrationResultPayload>;
 
 export function resolveHandyHotkeyIntent({
   eventHotkey,
@@ -56,12 +61,21 @@ export function resolveHandyHotkeyIntent({
   selectionHotkey: string | null;
   selectionEnabled: boolean;
 }): HandyHotkeyIntent {
-  if (selectionEnabled && eventHotkey && eventHotkey === selectionHotkey) {
+  if (
+    selectionEnabled &&
+    eventHotkey &&
+    eventHotkey === selectionHotkey &&
+    selectionHotkey !== voiceHotkey
+  ) {
     return "selection";
   }
 
   if (eventHotkey && eventHotkey === voiceHotkey) {
     return "voice";
+  }
+
+  if (selectionEnabled && eventHotkey && eventHotkey === selectionHotkey) {
+    return "ignore";
   }
 
   return "ignore";
@@ -90,17 +104,19 @@ export function useWidgetHotkey({
   machineRef,
   dispatch,
   registeredHotkeyRef,
-  clearReleaseStopTimer,
   showError,
   onSelectionTranslationHotkey,
 }: UseWidgetHotkeyParams): void {
   const { t } = useI18n();
-  const attemptHotkeyRegistrationRef = useRef<
-    (rawHotkey: string) => Promise<HotkeyRegistrationResultPayload>
-  >(attemptHotkeyRegistrationPlaceholder);
+  const attemptHotkeyRegistrationRef = useRef<AttemptHotkeyRegistration>(
+    attemptHotkeyRegistrationPlaceholder,
+  );
   const isHotkeyCaptureActiveRef = useRef(false);
   const selectionRegisteredHotkeyRef = useRef<string | null>(null);
   const selectionHotkeyArmedRef = useRef(false);
+  const handleHotkeyPressRef = useRef<(event: HandyHotkeyEventPayload) => void>(
+    () => {},
+  );
 
   const hotkeyForComparison = useCallback(
     (hotkey: string | null | undefined): string | null => {
@@ -153,6 +169,16 @@ export function useWidgetHotkey({
       }
 
       const eventHotkey = hotkeyForComparison(event.hotkey);
+      if (isUnsafeMacGlobalHotkey(eventHotkey)) {
+        selectionHotkeyArmedRef.current = false;
+        dispatch({ type: "RESET_HOTKEY_STATE" });
+        logError(
+          "HOTKEY",
+          `Ignored unsafe macOS system hotkey event: ${event.hotkey}`,
+        );
+        return;
+      }
+
       const voiceHotkey = hotkeyForComparison(
         registeredHotkeyRef.current ??
           settingsRef.current?.hotkey ??
@@ -172,6 +198,10 @@ export function useWidgetHotkey({
       });
 
       if (intent === "selection") {
+        if (machine.widgetState !== "recording") {
+          dispatch({ type: "RESET_HOTKEY_STATE" });
+        }
+
         const action = resolveSelectionHotkeyAction(
           event.state,
           selectionHotkeyArmedRef.current,
@@ -196,6 +226,9 @@ export function useWidgetHotkey({
 
       if (event.state === "Released" && selectionHotkeyArmedRef.current) {
         selectionHotkeyArmedRef.current = false;
+        if (machine.widgetState !== "recording") {
+          dispatch({ type: "RESET_HOTKEY_STATE" });
+        }
         return;
       }
 
@@ -220,6 +253,10 @@ export function useWidgetHotkey({
       settingsRef,
     ],
   );
+
+  useEffect(() => {
+    handleHotkeyPressRef.current = handleHotkeyPress;
+  }, [handleHotkeyPress]);
 
   const attemptHotkeyRegistration = useCallback(
     async (
@@ -331,7 +368,7 @@ export function useWidgetHotkey({
       await unregisterHotkeyRef(selectionRegisteredHotkeyRef);
       logInfo(
         "HOTKEY",
-        "Selection translation hotkey shares the voice hotkey; selection handler will consume matching events",
+        "Selection translation hotkey shares the voice hotkey; voice hotkey keeps ownership",
       );
       return;
     }
@@ -395,7 +432,7 @@ export function useWidgetHotkey({
     const unlistenHandyHotkey = listen<HandyHotkeyEventPayload>(
       HANDY_HOTKEY_EVENT,
       ({ payload }) => {
-        handleHotkeyPress(payload);
+        handleHotkeyPressRef.current(payload);
       },
     );
 
@@ -442,17 +479,10 @@ export function useWidgetHotkey({
       void unregisterCurrentHotkey();
       void unregisterHotkeyRef(selectionRegisteredHotkeyRef);
     };
-  }, [
-    clearReleaseStopTimer,
-    dispatch,
-    handleHotkeyPress,
-    setSettings,
-    settingsRef,
-    unregisterCurrentHotkey,
-    unregisterHotkeyRef,
-  ]);
+  }, []);
 }
 
-async function attemptHotkeyRegistrationPlaceholder(): Promise<HotkeyRegistrationResultPayload> {
-  throw new Error("attemptHotkeyRegistration called before initialization");
-}
+const attemptHotkeyRegistrationPlaceholder: AttemptHotkeyRegistration =
+  async () => {
+    throw new Error("attemptHotkeyRegistration called before initialization");
+  };

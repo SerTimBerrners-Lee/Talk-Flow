@@ -5,8 +5,10 @@ mod download_cancel;
 mod history_storage;
 mod hotkey_capture;
 mod hotkey_manager;
+mod live_dictation;
 mod llm_runtime;
 mod local_stt;
+mod local_translator;
 mod logger;
 mod media;
 mod media_permissions;
@@ -142,6 +144,7 @@ pub fn run() {
             widget::hide_widget_notice,
             widget::expand_widget_notice,
             widget::show_widget_text_overlay,
+            widget::widget_text_overlay_ready,
             widget::get_widget_text_overlay_payload,
             widget::hide_widget_text_overlay,
             paste::remember_paste_target_window,
@@ -154,6 +157,8 @@ pub fn run() {
             ai::embed_text,
             history_storage::migrate_app_data_layout,
             history_storage::read_history_file,
+            history_storage::read_history_index_file,
+            history_storage::read_history_entry_file,
             history_storage::write_history_file,
             history_storage::get_default_transcription_storage_dir,
             history_storage::save_history_audio,
@@ -174,6 +179,10 @@ pub fn run() {
             ai::list_stt_models,
             ai::install_stt_model,
             ai::delete_stt_model,
+            local_translator::list_local_translators,
+            local_translator::download_local_translator,
+            local_translator::delete_local_translator,
+            local_translator::translate_with_local_translator,
             local_stt::get_local_stt_default_models_dir,
             llm_runtime::list_local_llm_models,
             llm_runtime::download_local_llm_model,

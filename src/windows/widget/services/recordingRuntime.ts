@@ -1,6 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import { logError, logInfo } from "../../../lib/logger";
+import type {
+  LiveTranscriptionResult,
+  NativeLiveDictationOptions,
+} from "./dictationStreamOverlay";
 
 type RecorderCodec = "native-wav" | "webm" | "default" | "wav";
 
@@ -23,6 +27,7 @@ interface RecordingRuntimeState {
   active: boolean;
   nativeActive: boolean;
   nativeResult: NativeVoiceRecordingResult | null;
+  liveTranscription: LiveTranscriptionResult | null;
   recorder: MediaRecorder | null;
   chunks: Blob[];
   stream: MediaStream | null;
@@ -47,6 +52,7 @@ interface EncodedWavResult {
 
 interface NativeRecordingOptions {
   deviceLabel?: string | null;
+  liveDictation?: NativeLiveDictationOptions | null;
 }
 
 interface NativeVoiceRecordingResult {
@@ -58,6 +64,7 @@ interface NativeVoiceRecordingResult {
   channels: number;
   peak: number;
   rms: number;
+  liveTranscription?: LiveTranscriptionResult | null;
 }
 
 export interface RecordingRuntimeController {
@@ -68,6 +75,7 @@ export interface RecordingRuntimeController {
   stop(): Promise<void>;
   hasRecorder(): boolean;
   hasAudioChunks(): boolean;
+  getLiveTranscription(): LiveTranscriptionResult | null;
   getAudioBlob(): Promise<Blob>;
   reset(): void;
   dispose(): void;
@@ -383,6 +391,7 @@ export function createRecordingRuntimeController(): RecordingRuntimeController {
     active: false,
     nativeActive: false,
     nativeResult: null,
+    liveTranscription: null,
     recorder: null,
     chunks: [],
     stream: null,
@@ -394,6 +403,7 @@ export function createRecordingRuntimeController(): RecordingRuntimeController {
     async startNative(options) {
       state.chunks = [];
       state.nativeResult = null;
+      state.liveTranscription = null;
       state.stream = null;
       state.recorder = null;
       stopPcmRecorder(state.pcm);
@@ -404,6 +414,7 @@ export function createRecordingRuntimeController(): RecordingRuntimeController {
         await invoke("start_native_voice_recording", {
           req: {
             deviceLabel: options?.deviceLabel || null,
+            liveDictation: options?.liveDictation || null,
           },
         });
       } catch (error) {
@@ -421,6 +432,7 @@ export function createRecordingRuntimeController(): RecordingRuntimeController {
       state.chunks = [];
       state.nativeActive = false;
       state.nativeResult = null;
+      state.liveTranscription = null;
       state.pcm = startPcmRecorder(stream);
       state.active = true;
       state.pcmOnly = shouldUsePcmOnlyRecorder();
@@ -511,6 +523,7 @@ export function createRecordingRuntimeController(): RecordingRuntimeController {
 
       if (state.nativeActive) {
         state.nativeResult = await invoke<NativeVoiceRecordingResult>("stop_native_voice_recording");
+        state.liveTranscription = state.nativeResult.liveTranscription || null;
         state.active = false;
         state.nativeActive = false;
         return;
@@ -545,6 +558,9 @@ export function createRecordingRuntimeController(): RecordingRuntimeController {
 
       return state.chunks.length > 0 || pcmSampleCount(state.pcm.chunks) > 0;
     },
+    getLiveTranscription() {
+      return state.liveTranscription;
+    },
     async getAudioBlob() {
       if (state.nativeResult) {
         const result = state.nativeResult;
@@ -571,6 +587,7 @@ export function createRecordingRuntimeController(): RecordingRuntimeController {
       state.active = false;
       state.nativeActive = false;
       state.nativeResult = null;
+      state.liveTranscription = null;
       state.recorder = null;
       state.chunks = [];
       state.pcm = createEmptyPcmState();
@@ -586,6 +603,7 @@ export function createRecordingRuntimeController(): RecordingRuntimeController {
       state.active = false;
       state.nativeActive = false;
       state.nativeResult = null;
+      state.liveTranscription = null;
       state.recorder = null;
       state.chunks = [];
       state.pcm = createEmptyPcmState();

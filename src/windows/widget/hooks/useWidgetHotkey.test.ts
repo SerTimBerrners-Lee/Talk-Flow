@@ -6,7 +6,7 @@ import {
 } from "./useWidgetHotkey";
 
 describe("resolveHandyHotkeyIntent", () => {
-  test("selection hotkey wins when it matches voice hotkey", () => {
+  test("voice hotkey wins when selection hotkey accidentally matches it", () => {
     expect(
       resolveHandyHotkeyIntent({
         eventHotkey: "Shift+Command+V",
@@ -14,7 +14,7 @@ describe("resolveHandyHotkeyIntent", () => {
         selectionHotkey: "Shift+Command+V",
         selectionEnabled: true,
       }),
-    ).toBe("selection");
+    ).toBe("voice");
   });
 
   test("disabled selection hotkey falls back to voice", () => {

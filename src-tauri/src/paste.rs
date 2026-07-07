@@ -605,6 +605,38 @@ fn selected_text_from_clipboard(copied_text: &str, sentinel: &str) -> Option<Str
     Some(copied_text.to_string())
 }
 
+fn wait_for_selected_text_from_clipboard<F>(
+    mut read_text: F,
+    sentinel: &str,
+    timeout: Duration,
+    interval: Duration,
+) -> Result<String, String>
+where
+    F: FnMut() -> Result<String, String>,
+{
+    let started = std::time::Instant::now();
+    let mut last_error: Option<String> = None;
+
+    loop {
+        match read_text() {
+            Ok(copied_text) => {
+                if let Some(selected_text) = selected_text_from_clipboard(&copied_text, sentinel) {
+                    return Ok(selected_text);
+                }
+            }
+            Err(err) => {
+                last_error = Some(err);
+            }
+        }
+
+        if started.elapsed() >= timeout {
+            return Err(last_error.unwrap_or_else(|| "No selected text copied".to_string()));
+        }
+
+        std::thread::sleep(interval);
+    }
+}
+
 /// Copy selected text by temporarily using the clipboard and simulating Cmd/Ctrl+C.
 #[tauri::command]
 pub async fn copy_selected_text(app: tauri::AppHandle) -> Result<String, String> {
@@ -640,12 +672,17 @@ pub async fn copy_selected_text(app: tauri::AppHandle) -> Result<String, String>
                 logger::log_info("PASTE", &format!("Simulating {}", copy_shortcut_label()));
                 simulate_cmd_c()?;
 
-                std::thread::sleep(Duration::from_millis(260));
-
-                handle
-                    .clipboard()
-                    .read_text()
-                    .map_err(|e| format!("Clipboard read after copy failed: {}", e))
+                wait_for_selected_text_from_clipboard(
+                    || {
+                        handle
+                            .clipboard()
+                            .read_text()
+                            .map_err(|e| format!("Clipboard read after copy failed: {}", e))
+                    },
+                    &sentinel,
+                    Duration::from_millis(1200),
+                    Duration::from_millis(60),
+                )
             })();
 
             let restore_result: Result<(), String> = match &previous_clipboard_text {
@@ -670,10 +707,7 @@ pub async fn copy_selected_text(app: tauri::AppHandle) -> Result<String, String>
             };
 
             restore_result?;
-            let copied_text = copy_result?;
-
-            selected_text_from_clipboard(&copied_text, &sentinel)
-                .ok_or_else(|| "No selected text copied".to_string())
+            copy_result
         })();
 
         if let Err(err) = &result {
@@ -788,7 +822,9 @@ pub async fn paste_text(app: tauri::AppHandle, text: String) -> Result<(), Strin
 
 #[cfg(test)]
 mod tests {
-    use super::selected_text_from_clipboard;
+    use std::time::Duration;
+
+    use super::{selected_text_from_clipboard, wait_for_selected_text_from_clipboard};
 
     #[test]
     fn sentinel_means_no_selected_text() {
@@ -809,5 +845,37 @@ mod tests {
             selected_text_from_clipboard("hello", "__sentinel__"),
             Some("hello".to_string())
         );
+    }
+
+    #[test]
+    fn waits_for_delayed_selected_text() {
+        let mut attempts = 0;
+        let selected_text = wait_for_selected_text_from_clipboard(
+            || {
+                attempts += 1;
+                Ok(if attempts < 3 {
+                    "__sentinel__".to_string()
+                } else {
+                    "delayed text".to_string()
+                })
+            },
+            "__sentinel__",
+            Duration::from_millis(50),
+            Duration::from_millis(1),
+        );
+
+        assert_eq!(selected_text, Ok("delayed text".to_string()));
+    }
+
+    #[test]
+    fn sentinel_timeout_means_no_selected_text() {
+        let selected_text = wait_for_selected_text_from_clipboard(
+            || Ok("__sentinel__".to_string()),
+            "__sentinel__",
+            Duration::ZERO,
+            Duration::from_millis(1),
+        );
+
+        assert_eq!(selected_text, Err("No selected text copied".to_string()));
     }
 }

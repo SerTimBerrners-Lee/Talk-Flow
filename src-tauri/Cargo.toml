@@ -1,6 +1,6 @@
 [package]
 name = "talkis"
-version = "0.3.7"
+version = "0.3.8"
 description = "Talkis - Voice to Text Desktop Widget"
 authors = ["trixter"]
 license = "AGPL-3.0-or-later"
@@ -41,6 +41,7 @@ transcribe-cpp = { version = "0.1.1", default-features = false }
 hound = "3.5.1"
 tauri-plugin-dialog = "2"
 handy-keys = "0.2.4"
+ct2rs = { version = "0.9.19", default-features = false, features = ["all-tokenizers", "ruy"] }
 # Local LLM runtime engine (talkis-llm sidecar) — llama.cpp bindings, compiled
 # and bundled with the app like transcribe-cpp. Metal acceleration added on macOS.
 llama-cpp-2 = { version = "0.1.150", default-features = false, features = ["openmp", "sampler"] }

@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent, ReactElement, UIEvent } from "react";
-import { listen } from "@tauri-apps/api/event";
 
+import { LANGUAGES } from "../../../config/languages";
 import {
   IconArrowUp,
   IconCheck,
   IconChevronDown,
   IconCopy,
+  IconLanguage,
   IconLoader2,
   IconRotate2,
 } from "../../../lib/icons";
@@ -22,14 +23,10 @@ import {
   ensureHistorySearchEmbeddings,
 } from "../../../lib/historyEmbeddings";
 import { getHistory, getSettings, type AppSettings } from "../../../lib/store";
-import {
-  HISTORY_CLEARED_EVENT,
-  HISTORY_DELETED_EVENT,
-  HISTORY_UPDATED_EVENT,
-} from "../../../lib/hotkeyEvents";
 import { LOCAL_TEXT_PROCESSING_LIMITS, processLongTextWithPrompt } from "../../../lib/summarize";
 import { useI18n } from "../../../lib/i18n";
 import { formatDurationMs, formatErrorMessage } from "../../../lib/utils";
+import { translateSelectedText } from "../../widget/services/selectionTranslation";
 
 interface ChatMessage {
   id: string;
@@ -39,11 +36,16 @@ interface ChatMessage {
   sources?: DevChatHistorySource[];
 }
 
-type RunningStatus = "searching" | "thinking";
+type RunningStatus = "searching" | "thinking" | "translating";
 
 interface QuickSuggestion {
   label: string;
   prompt: string;
+}
+
+interface ChatTranslationRequest {
+  text: string;
+  targetLanguage?: string;
 }
 
 const DEV_CHAT_SYSTEM_PROMPT =
@@ -62,12 +64,175 @@ const DEV_CHAT_MESSAGES_KEY = "messages";
 const DEV_CHAT_INITIAL_VISIBLE_MESSAGES = 40;
 const DEV_CHAT_VISIBLE_INCREMENT = 40;
 const DEV_CHAT_COLLAPSED_TEXT_CHARS = 6000;
+const TRANSLATION_INTENT_PATTERN =
+  /^\s*(?:(?:привет|здравствуй|здравствуйте|добрый\s+день|доброе\s+утро|добрый\s+вечер|hi|hello|hey)[,!.]?\s*)?(?:(?:пожалуйста|please)[,.]?\s*)?(?:(?:можешь|можно|надо|нужно|помоги)\s+)?(?:мне\s+)?(?:переведи|перевести|сделай\s+перевод|translate)(?:$|[\s:,.!?'"»”])/i;
+const TRANSLATION_REFERENCE_PATTERN =
+  /\b(это|этот текст|его|последнее сообщение|предыдущее сообщение|прошлое сообщение|последний ответ|предыдущий ответ|last message|previous message|last response|previous response|this|it|that)\b/i;
+const COMMON_LANGUAGE_ALIASES: Record<string, string[]> = {
+  en: ["английский", "английскии", "англ", "english"],
+  ru: ["русский", "русскии", "рус", "russian"],
+  es: ["испанский", "испанскии", "испан", "spanish", "espanol"],
+  fr: ["французский", "французскии", "франц", "french", "francais"],
+  de: ["немецкий", "немецкии", "нем", "german", "deutsch"],
+  it: ["итальянский", "итальянскии", "итал", "italian", "italiano"],
+  pt: ["португальский", "португальскии", "portuguese", "portugues"],
+  zh: ["китайский", "китайскии", "chinese", "中文"],
+  ja: ["японский", "японскии", "japanese"],
+  ko: ["корейский", "корейскии", "korean"],
+  uk: ["украинский", "украинскии", "ukrainian"],
+  kk: ["казахский", "казахскии", "қазақша", "kazakh"],
+  tr: ["турецкий", "турецкии", "turkish", "turkce"],
+};
 
 function chatPayload(messages: ChatMessage[]): string {
   const lines = messages
     .slice(-12)
     .map((message) => `${message.role === "user" ? "Пользователь" : "Модель"}: ${message.text}`);
   return lines.join("\n\n");
+}
+
+function normalizeTextToken(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/ё/g, "е")
+    .toLocaleLowerCase("ru-RU")
+    .replace(/[^a-zа-я0-9]+/g, " ")
+    .trim();
+}
+
+function textContainsLanguageAlias(text: string, alias: string): boolean {
+  if (alias.length <= 2) {
+    return text.split(/\s+/).includes(alias);
+  }
+
+  return text.includes(alias);
+}
+
+function resolveLanguageCodeFromText(text: string): string | null {
+  const normalized = normalizeTextToken(text);
+  if (!normalized) return null;
+
+  for (const [code, aliases] of Object.entries(COMMON_LANGUAGE_ALIASES)) {
+    if (aliases.some((alias) => textContainsLanguageAlias(normalized, normalizeTextToken(alias)))) {
+      return code;
+    }
+  }
+
+  for (const language of LANGUAGES) {
+    if (language.code === "auto") continue;
+    const aliases = [language.code, language.name, language.native]
+      .map(normalizeTextToken)
+      .filter(Boolean);
+    if (aliases.some((alias) => textContainsLanguageAlias(normalized, alias))) {
+      return language.code;
+    }
+  }
+
+  return null;
+}
+
+function resolveRequestedTargetLanguage(commandText: string): string | null {
+  const normalized = normalizeTextToken(commandText);
+  const match = normalized.match(/(?:^|\s)(?:на|в|to|into|in)\s+(.{2,80})/);
+  if (match?.[1]) {
+    return resolveLanguageCodeFromText(match[1]);
+  }
+
+  return null;
+}
+
+function stripWrappedText(text: string): string {
+  return text
+    .trim()
+    .replace(/^```[^\n]*\n?/, "")
+    .replace(/```$/, "")
+    .replace(/^["'«“]+/, "")
+    .replace(/["'»”]+$/, "")
+    .trim();
+}
+
+function stripLeadingTargetPhrase(text: string): string {
+  return text.replace(/^(?:на|в|to|into|in)\s+\S+(?:\s+язык)?\s*/i, "").trim();
+}
+
+function stripTrailingTargetPhrase(text: string): string {
+  return text.replace(/\s+(?:на|в|to|into|in)\s+\S+(?:\s+язык)?\s*$/i, "").trim();
+}
+
+function stripTranslationCommandPrefix(text: string): string {
+  return text
+    .replace(
+      /^\s*(?:(?:привет|здравствуй|здравствуйте|добрый\s+день|доброе\s+утро|добрый\s+вечер|hi|hello|hey)[,!.]?\s*)?(?:(?:пожалуйста|please)[,.]?\s*)?(?:(?:можешь|можно|надо|нужно|помоги)\s+)?(?:мне\s+)?(?:переведи|перевести|сделай\s+перевод|translate)(?:\s+(?:этот|следующий|данный|this|the following)?\s*(?:текст|сообщение|фразу|предложение|message|text|phrase|sentence))?/i,
+      "",
+    )
+    .trim();
+}
+
+function extractExplicitTranslationText(text: string): string | null {
+  const trimmed = text.trim();
+  const fenceMatch = /```[^\n]*\n([\s\S]*?)```/.exec(trimmed);
+  if (fenceMatch?.[1]) {
+    return stripWrappedText(fenceMatch[1]);
+  }
+
+  const separatorIndex = trimmed.search(/[:：]/);
+  if (separatorIndex >= 0 && separatorIndex < 280) {
+    const sourceText = stripWrappedText(trimmed.slice(separatorIndex + 1));
+    return sourceText || null;
+  }
+
+  const lines = trimmed.split(/\r?\n/);
+  if (lines.length > 1 && TRANSLATION_INTENT_PATTERN.test(lines[0] ?? "")) {
+    const sourceText = stripWrappedText(lines.slice(1).join("\n"));
+    if (sourceText) return sourceText;
+  }
+
+  const candidate = stripWrappedText(
+    stripTrailingTargetPhrase(
+      stripLeadingTargetPhrase(stripTranslationCommandPrefix(trimmed)),
+    ).replace(/^[:：,.;—-]+/, ""),
+  );
+  if (!candidate || TRANSLATION_REFERENCE_PATTERN.test(candidate)) {
+    return null;
+  }
+
+  return candidate;
+}
+
+function lastMessageText(messages: ChatMessage[]): string | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const text = messages[index]?.text.trim();
+    if (text) return text;
+  }
+
+  return null;
+}
+
+function detectChatTranslationRequest(
+  latestUserText: string,
+  previousMessages: ChatMessage[],
+): ChatTranslationRequest | null {
+  const trimmed = latestUserText.trim();
+  if (!TRANSLATION_INTENT_PATTERN.test(trimmed)) {
+    return null;
+  }
+
+  const instructionSegment = trimmed.split(/[:：\n]/, 1)[0] ?? trimmed;
+  const targetLanguage = resolveRequestedTargetLanguage(instructionSegment) ?? undefined;
+  const explicitText = extractExplicitTranslationText(trimmed);
+  if (explicitText) {
+    return { text: explicitText, targetLanguage };
+  }
+
+  if (TRANSLATION_REFERENCE_PATTERN.test(trimmed)) {
+    const previousText = lastMessageText(previousMessages);
+    if (previousText) {
+      return { text: previousText, targetLanguage };
+    }
+  }
+
+  return null;
 }
 
 function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
@@ -222,6 +387,7 @@ export function DevChatTab({
   const [expandedMessageIds, setExpandedMessageIds] = useState<Set<string>>(() => new Set());
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [regeneratingMessageId, setRegeneratingMessageId] = useState<string | null>(null);
+  const [translatingMessageId, setTranslatingMessageId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [runningStatus, setRunningStatus] = useState<RunningStatus>("thinking");
   const [error, setError] = useState<string | null>(null);
@@ -318,6 +484,35 @@ export function DevChatTab({
     latestUserText: string,
     startedAt: number,
   ): Promise<ChatMessage> => {
+    const translationRequest = detectChatTranslationRequest(
+      latestUserText,
+      contextMessages.slice(0, -1),
+    );
+    if (translationRequest) {
+      setRunningStatus("translating");
+      const settings = await getSettings({ reload: true });
+      const translationSettings: AppSettings = {
+        ...settings,
+        translation: {
+          ...settings.translation,
+          selectionTargetLanguage:
+            translationRequest.targetLanguage ||
+            settings.translation.selectionTargetLanguage,
+        },
+      };
+      const translated = await translateSelectedText({
+        text: translationRequest.text,
+        settings: translationSettings,
+      });
+
+      return {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        text: translated.trim() || t("widget.selectionTranslation.emptyResult"),
+        durationMs: Date.now() - startedAt,
+      };
+    }
+
     const isLongText = latestUserText.length > LOCAL_TEXT_PROCESSING_LIMITS.directChars;
     const embedded = isLongText
       ? splitEmbeddedInstruction(latestUserText)
@@ -416,6 +611,46 @@ export function DevChatTab({
     }
   };
 
+  const translateChatMessage = async (message: ChatMessage): Promise<void> => {
+    if (running || translatingMessageId || !message.text.trim()) return;
+
+    setTranslatingMessageId(message.id);
+    setError(null);
+    const startedAt = Date.now();
+
+    try {
+      const settings = await getSettings({ reload: true });
+      const translated = await translateSelectedText({
+        text: message.text,
+        settings,
+      });
+      const translatedText = translated.trim();
+      if (!translatedText) {
+        throw new Error(t("widget.selectionTranslation.emptyResult"));
+      }
+
+      setMessages((current) =>
+        current.map((item) =>
+          item.id === message.id
+            ? { ...item, text: translatedText, durationMs: Date.now() - startedAt }
+            : item,
+        ),
+      );
+      setExpandedMessageIds((current) => {
+        if (!current.has(message.id)) return current;
+        const next = new Set(current);
+        next.delete(message.id);
+        return next;
+      });
+    } catch (caughtError) {
+      setError(formatErrorMessage(caughtError));
+    } finally {
+      setTranslatingMessageId((current) =>
+        current === message.id ? null : current,
+      );
+    }
+  };
+
   const regenerateAssistantMessage = async (messageId: string): Promise<void> => {
     if (running) return;
 
@@ -496,47 +731,6 @@ export function DevChatTab({
 
     return () => window.clearTimeout(timeout);
   }, [messages, messagesLoaded]);
-
-  useEffect(() => {
-    let cancelled = false;
-    let debounce: number | null = null;
-
-    const refreshIndex = (): void => {
-      if (debounce != null) {
-        window.clearTimeout(debounce);
-      }
-
-      debounce = window.setTimeout(() => {
-        void Promise.all([getHistory(), getSettings({ reload: true })])
-          .then(async ([history, settings]) => {
-            const searchIndex = await getCachedHistorySearchIndex(history);
-            await ensureHistorySearchEmbeddings(searchIndex, settings);
-          })
-          .catch(() => {});
-      }, 300);
-    };
-
-    refreshIndex();
-
-    const subscriptions = Promise.all([
-      listen(HISTORY_UPDATED_EVENT, refreshIndex),
-      listen(HISTORY_DELETED_EVENT, refreshIndex),
-      listen(HISTORY_CLEARED_EVENT, refreshIndex),
-    ]);
-
-    return () => {
-      cancelled = true;
-      if (debounce != null) {
-        window.clearTimeout(debounce);
-      }
-      void subscriptions.then((disposeAll) => {
-        if (!cancelled) return;
-        for (const dispose of disposeAll) {
-          dispose();
-        }
-      });
-    };
-  }, []);
 
   useEffect(() => {
     if (showScrollToBottom) {
@@ -889,13 +1083,13 @@ export function DevChatTab({
                           {isExpanded ? t("devChat.collapseMessage") : t("devChat.showFullMessage")}
                         </button>
                       )}
-                      {(message.role === "assistant" || message.durationMs != null) && (
+                      {message.role === "assistant" && (
                         <div
                           style={{
                             display: "inline-flex",
                             alignItems: "center",
                             gap: 4,
-                            justifySelf: message.role === "user" ? "end" : "start",
+                            justifySelf: "start",
                             minHeight: 24,
                           }}
                         >
@@ -905,85 +1099,125 @@ export function DevChatTab({
                                 fontSize: 12,
                                 lineHeight: "14px",
                                 color: "var(--text-low)",
-                                padding: message.role === "user" ? "0 2px" : "0",
+                                padding: 0,
                               }}
                             >
                               {formatDurationMs(message.durationMs, lang)}
                             </span>
                           )}
-                          {message.role === "assistant" && (
-                            <div
+                          <div
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 1,
+                            }}
+                          >
+                            <button
+                              type="button"
+                              aria-label={
+                                copiedMessageId === message.id
+                                  ? t("devChat.copied")
+                                  : t("devChat.copyResponse")
+                              }
+                              title={
+                                copiedMessageId === message.id
+                                  ? t("devChat.copied")
+                                  : t("devChat.copyResponse")
+                              }
+                              onClick={() => void copyAssistantMessage(message)}
                               style={{
+                                width: 24,
+                                height: 24,
+                                borderRadius: 7,
+                                border: "1px solid transparent",
+                                background: "transparent",
+                                color: "var(--text-low)",
                                 display: "inline-flex",
                                 alignItems: "center",
-                                gap: 1,
+                                justifyContent: "center",
+                                cursor: "pointer",
                               }}
                             >
-                              <button
-                                type="button"
-                                aria-label={
-                                  copiedMessageId === message.id
-                                    ? t("devChat.copied")
-                                    : t("devChat.copyResponse")
-                                }
-                                title={
-                                  copiedMessageId === message.id
-                                    ? t("devChat.copied")
-                                    : t("devChat.copyResponse")
-                                }
-                                onClick={() => void copyAssistantMessage(message)}
-                                style={{
-                                  width: 24,
-                                  height: 24,
-                                  borderRadius: 7,
-                                  border: "1px solid transparent",
-                                  background: "transparent",
-                                  color: "var(--text-low)",
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  cursor: "pointer",
-                                }}
-                              >
-                                {copiedMessageId === message.id ? (
-                                  <IconCheck size={14} stroke={2.5} aria-hidden="true" />
-                                ) : (
-                                  <IconCopy size={14} stroke={2} aria-hidden="true" />
-                                )}
-                              </button>
-                              <button
-                                type="button"
-                                aria-label={t("devChat.regenerateResponse")}
-                                title={t("devChat.regenerateResponse")}
-                                disabled={running}
-                                onClick={() => void regenerateAssistantMessage(message.id)}
-                                style={{
-                                  width: 24,
-                                  height: 24,
-                                  borderRadius: 7,
-                                  border: "1px solid transparent",
-                                  background: "transparent",
-                                  color: "var(--text-low)",
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  cursor: running ? "default" : "pointer",
-                                  opacity: running ? 0.5 : 1,
-                                }}
-                              >
-                                {regeneratingMessageId === message.id ? (
-                                  <IconLoader2
-                                    className="loading-soft-icon"
-                                    size={14}
-                                    stroke={2.1}
-                                    aria-hidden="true"
-                                  />
-                                ) : (
-                                  <IconRotate2 size={14} stroke={2} aria-hidden="true" />
-                                )}
-                              </button>
-                            </div>
-                          )}
+                              {copiedMessageId === message.id ? (
+                                <IconCheck size={14} stroke={2.5} aria-hidden="true" />
+                              ) : (
+                                <IconCopy size={14} stroke={2} aria-hidden="true" />
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={
+                                translatingMessageId === message.id
+                                  ? t("devChat.translating")
+                                  : t("devChat.translateMessage")
+                              }
+                              title={
+                                translatingMessageId === message.id
+                                  ? t("devChat.translating")
+                                  : t("devChat.translateMessage")
+                              }
+                              disabled={running || Boolean(translatingMessageId)}
+                              onClick={() => void translateChatMessage(message)}
+                              style={{
+                                width: 24,
+                                height: 24,
+                                borderRadius: 7,
+                                border: "1px solid transparent",
+                                background: "transparent",
+                                color: "var(--text-low)",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                cursor:
+                                  running || translatingMessageId
+                                    ? "default"
+                                    : "pointer",
+                                opacity: running || translatingMessageId ? 0.5 : 1,
+                              }}
+                            >
+                              {translatingMessageId === message.id ? (
+                                <IconLoader2
+                                  className="loading-soft-icon"
+                                  size={14}
+                                  stroke={2.1}
+                                  aria-hidden="true"
+                                />
+                              ) : (
+                                <IconLanguage size={14} stroke={2} aria-hidden="true" />
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={t("devChat.regenerateResponse")}
+                              title={t("devChat.regenerateResponse")}
+                              disabled={running}
+                              onClick={() => void regenerateAssistantMessage(message.id)}
+                              style={{
+                                width: 24,
+                                height: 24,
+                                borderRadius: 7,
+                                border: "1px solid transparent",
+                                background: "transparent",
+                                color: "var(--text-low)",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                cursor: running ? "default" : "pointer",
+                                opacity: running ? 0.5 : 1,
+                              }}
+                            >
+                              {regeneratingMessageId === message.id ? (
+                                <IconLoader2
+                                  className="loading-soft-icon"
+                                  size={14}
+                                  stroke={2.1}
+                                  aria-hidden="true"
+                                />
+                              ) : (
+                                <IconRotate2 size={14} stroke={2} aria-hidden="true" />
+                              )}
+                            </button>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -1010,7 +1244,13 @@ export function DevChatTab({
                   stroke={2.1}
                   aria-hidden="true"
                 />
-                {t(runningStatus === "searching" ? "devChat.searchingHistory" : "devChat.running")}
+                {t(
+                  runningStatus === "searching"
+                    ? "devChat.searchingHistory"
+                    : runningStatus === "translating"
+                      ? "devChat.translating"
+                      : "devChat.running",
+                )}
               </div>
             )}
             <div ref={messagesEndRef} style={{ height: 1, flexShrink: 0 }} />

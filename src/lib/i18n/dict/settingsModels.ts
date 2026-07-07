@@ -268,13 +268,36 @@ export const settingsModels = {
   // ── Local auxiliary components ──
   "models.localOther.sectionTitle": { ru: "Другие", en: "Other" },
   "models.localOther.sectionDesc": {
-    ru: "Локальные библиотеки и компоненты, которые используются не для распознавания или текстовой модели.",
-    en: "Local libraries and components used outside recognition or text models.",
+    ru: "Локальные модели и компоненты, которые используются не для распознавания или основной текстовой модели.",
+    en: "Local models and components used outside recognition or the primary text model.",
   },
-  "models.localOther.status.planned": { ru: "Готовится", en: "Planned" },
-  "models.localOther.trad.description": {
-    ru: "Локальная библиотека перевода. Будет использоваться для перевода выделенного текста без подмены текста в активном приложении.",
-    en: "A local translation library. It will be used for selected-text translation without replacing text in the active app.",
+  "models.localOther.status.notInstalled": { ru: "Не установлен", en: "Not installed" },
+  "models.localOther.status.downloading": { ru: "Скачивается", en: "Downloading" },
+  "models.localOther.status.ready": { ru: "Готов", en: "Ready" },
+  "models.localOther.status.error": { ru: "Ошибка", en: "Error" },
+  "models.localOther.selected": {
+    ru: "Выбран для перевода выделенного текста.",
+    en: "Selected for selected-text translation.",
+  },
+  "models.localOther.installedNotSelected": {
+    ru: "Установлен, но не используется.",
+    en: "Installed, but not used.",
+  },
+  "models.localOther.select": {
+    ru: "Выбрать",
+    en: "Select",
+  },
+  "models.localOther.cancelSelection": {
+    ru: "Отменить выбор",
+    en: "Deselect",
+  },
+  "models.localOther.nllb-200.description": {
+    ru: "Универсальная локальная модель перевода NLLB-200 через CTranslate2. После установки её можно выбрать для перевода выделенного текста без LLM-промпта.",
+    en: "A universal local NLLB-200 translation model via CTranslate2. After installation, it can be selected for selected-text translation without an LLM prompt.",
+  },
+  "models.localOther.opus-mt-ru-en.description": {
+    ru: "Быстрая локальная модель OPUS-MT для перевода с русского на английский через CTranslate2. Меньше и быстрее универсальной NLLB-200.",
+    en: "A fast local OPUS-MT model for Russian to English translation via CTranslate2. Smaller and faster than the universal NLLB-200 model.",
   },
 
   // ── Speed / accuracy value labels ──

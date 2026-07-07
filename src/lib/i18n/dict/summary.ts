@@ -60,6 +60,8 @@ export const summary = {
   "devChat.collapseMessage": { ru: "Свернуть", en: "Collapse" },
   "devChat.copyResponse": { ru: "Скопировать ответ в буфер обмена", en: "Copy response to clipboard" },
   "devChat.copied": { ru: "Ответ скопирован", en: "Response copied" },
+  "devChat.translateMessage": { ru: "Перевести сообщение", en: "Translate message" },
+  "devChat.translating": { ru: "Переводим…", en: "Translating…" },
   "devChat.regenerateResponse": { ru: "Сгенерировать этот ответ заново", en: "Regenerate this response" },
   "devChat.usedSources": { ru: "Использованы записи:", en: "Used records:" },
   "devChat.openSource": { ru: "Открыть запись {title}", en: "Open record {title}" },

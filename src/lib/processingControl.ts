@@ -60,6 +60,7 @@ export async function beginProcessing(
     ...entry,
     status: "processing",
     errorMessage: undefined,
+    audioBase64: undefined,
   };
   active.set(entry.id, { cancelled: false, abort, entry: processingEntry });
   await persist(processingEntry, mode);

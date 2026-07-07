@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { PhysicalPosition } from "@tauri-apps/api/dpi";
+import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import {
@@ -11,6 +12,11 @@ import {
 } from "../../../lib/store";
 import { tn } from "../../../lib/i18n";
 import { logError, logInfo } from "../../../lib/logger";
+import {
+  SELECTION_TEXT_REQUEST_EVENT,
+  SELECTION_TEXT_RESPONSE_EVENT,
+  type SelectionTextResponsePayload,
+} from "../../../lib/hotkeyEvents";
 import { formatErrorMessage } from "../../../lib/utils";
 import {
   DEFAULT_WIDGET_SCALE,
@@ -397,6 +403,67 @@ export function useWidgetController({
     [],
   );
 
+  const hideSelectionTextOverlay = useCallback((): void => {
+    void invoke("hide_widget_text_overlay").catch((error) => {
+      logError(
+        "TRANSLATION",
+        `Failed to hide text overlay: ${formatErrorMessage(error)}`,
+      );
+    });
+  }, []);
+
+  const requestTalkisSelectedText = useCallback((): Promise<string> => {
+    const requestId =
+      typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random()}`;
+
+    return new Promise((resolve) => {
+      let settled = false;
+      let dispose: (() => void) | null = null;
+      let timeoutId: number | null = null;
+
+      const finish = (text: string): void => {
+        if (settled) return;
+        settled = true;
+        if (timeoutId != null) {
+          window.clearTimeout(timeoutId);
+        }
+        dispose?.();
+        resolve(text);
+      };
+
+      const unlistenPromise = listen<SelectionTextResponsePayload>(
+        SELECTION_TEXT_RESPONSE_EVENT,
+        ({ payload }) => {
+          if (payload.requestId !== requestId) return;
+          if (payload.text.trim()) {
+            logInfo(
+              "TRANSLATION",
+              `Using selected text from ${payload.sourceWindow}, chars=${payload.text.trim().length}`,
+            );
+            finish(payload.text);
+          }
+        },
+      );
+
+      timeoutId = window.setTimeout(() => finish(""), 160);
+
+      unlistenPromise
+        .then((unlisten) => {
+          if (settled) {
+            unlisten();
+            return;
+          }
+          dispose = unlisten;
+          void emit(SELECTION_TEXT_REQUEST_EVENT, { requestId }).catch(() => {
+            finish("");
+          });
+        })
+        .catch(() => finish(""));
+    });
+  }, []);
+
   const translateSelectionFromHotkey = useCallback(async (): Promise<void> => {
     if (selectionTranslationBusyRef.current) {
       return;
@@ -420,49 +487,50 @@ export function useWidgetController({
         return;
       }
 
-      showSelectionTextOverlay({
-        status: "copying",
-        targetLanguage,
-        message: "Считываем выделенный текст через буфер обмена.",
-      });
-
-      await invoke("remember_paste_target_window").catch((error) => {
-        logError(
-          "PASTE",
-          `Failed to remember selection translation target: ${formatErrorMessage(error)}`,
-        );
-      });
-
-      let selectedText = "";
-      try {
-        selectedText = await invoke<string>("copy_selected_text");
-      } catch (error) {
-        logError(
-          "TRANSLATION",
-          `Failed to copy selected text: ${formatErrorMessage(error)}`,
-        );
-        const message = formatErrorMessage(error);
-        showSelectionTextOverlay({
-          status: "error",
-          targetLanguage,
-          message: /no selected text/i.test(message)
-            ? tn("widget.selectionTranslation.noSelection")
-            : tn("widget.selectionTranslation.copyFailed"),
-        });
-        showError(
-          /no selected text/i.test(message)
-            ? tn("widget.selectionTranslation.noSelection")
-            : tn("widget.selectionTranslation.copyFailed"),
-        );
-        return;
-      }
+      let selectedText = await requestTalkisSelectedText();
 
       if (!selectedText.trim()) {
         showSelectionTextOverlay({
-          status: "error",
+          status: "copying",
           targetLanguage,
-          message: tn("widget.selectionTranslation.noSelection"),
         });
+
+        await invoke("remember_paste_target_window").catch((error) => {
+          logError(
+            "PASTE",
+            `Failed to remember selection translation target: ${formatErrorMessage(error)}`,
+          );
+        });
+
+        try {
+          selectedText = await invoke<string>("copy_selected_text");
+        } catch (error) {
+          logError(
+            "TRANSLATION",
+            `Failed to copy selected text: ${formatErrorMessage(error)}`,
+          );
+          const message = formatErrorMessage(error);
+          const hasNoSelection = /no selected text/i.test(message);
+          const visibleMessage = hasNoSelection
+            ? tn("widget.selectionTranslation.noSelection")
+            : tn("widget.selectionTranslation.copyFailed");
+
+          if (hasNoSelection) {
+            hideSelectionTextOverlay();
+          } else {
+            showSelectionTextOverlay({
+              status: "error",
+              targetLanguage,
+              message: visibleMessage,
+            });
+          }
+          showError(visibleMessage);
+          return;
+        }
+      }
+
+      if (!selectedText.trim()) {
+        hideSelectionTextOverlay();
         showError(tn("widget.selectionTranslation.noSelection"));
         return;
       }
@@ -471,7 +539,6 @@ export function useWidgetController({
         status: "translating",
         sourceText: selectedText,
         targetLanguage,
-        message: "Исходный язык определяется автоматически.",
       });
 
       const translatedText = await translateSelectedText({
@@ -483,10 +550,6 @@ export function useWidgetController({
             sourceText: progress.sourceText,
             translatedText: progress.translatedText,
             targetLanguage,
-            message:
-              progress.total > 1
-                ? `Переведено ${progress.current} из ${progress.total} фрагментов.`
-                : "Перевод готовится к вставке.",
           });
         },
       });
@@ -507,7 +570,6 @@ export function useWidgetController({
         sourceText: selectedText,
         translatedText,
         targetLanguage,
-        message: "Перевод показан над виджетом.",
       });
     } catch (error) {
       showSelectionTextOverlay({
@@ -518,7 +580,12 @@ export function useWidgetController({
     } finally {
       selectionTranslationBusyRef.current = false;
     }
-  }, [showError, showSelectionTextOverlay]);
+  }, [
+    hideSelectionTextOverlay,
+    requestTalkisSelectedText,
+    showError,
+    showSelectionTextOverlay,
+  ]);
 
   // ── Recording ───────────────────────────────────────────────────────────
   const startRecordingRef = useRef<() => Promise<void>>(async () => {});
@@ -551,7 +618,6 @@ export function useWidgetController({
     machineRef,
     dispatch,
     registeredHotkeyRef,
-    clearReleaseStopTimer,
     showError,
     onSelectionTranslationHotkey: () => {
       void translateSelectionFromHotkey();

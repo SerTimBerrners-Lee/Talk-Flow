@@ -5,6 +5,7 @@ import { IconCheck, IconClipboard, IconPencil, IconTrash } from "../lib/icons";
 import { SETTINGS_UPDATED_EVENT } from "../lib/hotkeyEvents";
 import {
   getSettings,
+  HISTORY_MAX_SUMMARIES_PER_ENTRY,
   listPromptsByKind,
   addSummaryToEntry,
   updateSummaryInEntry,
@@ -52,6 +53,10 @@ export function SummaryModal({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const summaryRunRef = useRef<{ id: number; cancelled: boolean } | null>(null);
   const nextRunIdRef = useRef(0);
+
+  useEffect(() => {
+    setSummaries(entry.summaries ?? []);
+  }, [entry.summaries]);
 
   useEffect(() => {
     let cancelled = false;
@@ -151,7 +156,10 @@ export function SummaryModal({
         text: result.trim(),
       };
       const updated = await addSummaryToEntry(entry.id, summary);
-      setSummaries(updated?.summaries ?? [summary, ...summaries]);
+      setSummaries(
+        updated?.summaries ??
+          [summary, ...summaries].slice(0, HISTORY_MAX_SUMMARIES_PER_ENTRY),
+      );
       if (updated) onEntryChange?.(updated);
       setExpandedId(summary.id);
     } catch (e) {

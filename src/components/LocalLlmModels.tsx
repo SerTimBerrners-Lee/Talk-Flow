@@ -21,11 +21,6 @@ import {
   localLlmDeleteSettingsPatch,
   selectedLocalLlmModelId,
 } from "../lib/localLlmSelection";
-import gemmaAvatar from "../assets/adapters/gemma.png";
-import huggingFaceAvatar from "../assets/adapters/huggingface.svg";
-import ibmAvatar from "../assets/adapters/ibm.svg";
-import microsoftAvatar from "../assets/adapters/microsoft.svg";
-import qwenAvatar from "../assets/adapters/qwen.png";
 
 interface LocalLlmModel {
   id: string;
@@ -37,7 +32,6 @@ interface LocalLlmModel {
   speed: string;
   accuracy: string;
   language_label: string;
-  avatar_family: string;
   recommended: boolean;
   downloaded: boolean;
 }
@@ -60,64 +54,6 @@ const ACTION_BUTTON_BASE = {
   alignItems: "center",
   gap: 8,
 } as const;
-
-function localLlmBrand(model: LocalLlmModel): {
-  initials: string;
-  accent: string;
-  avatar?: string;
-} {
-  const family = model.avatar_family || model.id;
-  if (family === "qwen" || model.id.startsWith("qwen")) {
-    return { initials: "Q3", accent: "#2563eb", avatar: qwenAvatar };
-  }
-  if (family === "gemma" || model.id.startsWith("gemma")) {
-    return { initials: "G3", accent: "#4285f4", avatar: gemmaAvatar };
-  }
-  if (family === "microsoft" || family === "phi" || model.id.startsWith("phi")) {
-    return { initials: "MS", accent: "#7f52ff", avatar: microsoftAvatar };
-  }
-  if (family === "granite" || family === "ibm" || model.id.startsWith("granite")) {
-    return { initials: "IBM", accent: "#0f62fe", avatar: ibmAvatar };
-  }
-  if (family === "smollm" || family === "huggingface" || model.id.startsWith("smollm")) {
-    return { initials: "HF", accent: "#ffcc33", avatar: huggingFaceAvatar };
-  }
-  return { initials: "LLM", accent: "#334155" };
-}
-
-function getLocalLlmLevel(kind: "speed" | "accuracy", value: string): number {
-  if (kind === "speed") {
-    if (value === "очень быстро") return 5;
-    if (value === "быстро") return 4;
-    if (value === "средне") return 3;
-    return 2;
-  }
-
-  if (value === "максимальная") return 5;
-  if (value === "высокая") return 4;
-  if (value === "средняя+" || value === "средняя") return 3;
-  if (value === "служебная") return 2;
-  return 1;
-}
-
-function renderDotRating(level: number): ReactElement {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-      {Array.from({ length: 5 }).map((_, index) => (
-        <span
-          key={index}
-          style={{
-            width: 6,
-            height: 6,
-            borderRadius: 999,
-            background: index < level ? "var(--accent)" : "var(--border-strong)",
-            display: "block",
-          }}
-        />
-      ))}
-    </div>
-  );
-}
 
 /**
  * Local text (LLM) model slot for "Локально" mode — same card style as the local
@@ -293,9 +229,9 @@ export function LocalLlmModels({
     const speedValueLabel = translateSpeedValue(model.speed);
     const accuracyValueLabel = translateAccuracyValue(model.accuracy);
     const languageValueLabel = translateLanguageValue(model.language_label);
-    const stats: { key: string; title: string; Icon: Icon; level: number }[] = [
-      { key: "speed", title: t("models.stat.speedTitle", { value: speedValueLabel }), Icon: IconGauge, level: getLocalLlmLevel("speed", model.speed) },
-      { key: "accuracy", title: t("models.stat.accuracyTitle", { value: accuracyValueLabel }), Icon: IconTargetArrow, level: getLocalLlmLevel("accuracy", model.accuracy) },
+    const stats: { key: string; title: string; Icon: Icon; value: string }[] = [
+      { key: "speed", title: t("models.stat.speedTitle", { value: speedValueLabel }), Icon: IconGauge, value: speedValueLabel },
+      { key: "accuracy", title: t("models.stat.accuracyTitle", { value: accuracyValueLabel }), Icon: IconTargetArrow, value: accuracyValueLabel },
     ];
 
     return (
@@ -322,7 +258,7 @@ export function LocalLlmModels({
           </span>
         </div>
 
-        {stats.map(({ key, title, Icon, level }) => (
+        {stats.map(({ key, title, Icon, value }) => (
           <div
             key={key}
             title={title}
@@ -330,7 +266,9 @@ export function LocalLlmModels({
             style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}
           >
             <Icon size={14} stroke={1.9} color="var(--text-hi)" />
-            {renderDotRating(level)}
+            <span style={{ fontSize: 12, fontWeight: 650, color: "var(--text-hi)", lineHeight: 1, whiteSpace: "nowrap" }}>
+              {value}
+            </span>
           </div>
         ))}
       </div>
@@ -386,7 +324,6 @@ export function LocalLlmModels({
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {models.map((model) => {
-          const brand = localLlmBrand(model);
           const prog = progress[model.id];
           const isDownloading =
             prog?.status === "downloading" || prog?.status === "starting";
@@ -425,34 +362,6 @@ export function LocalLlmModels({
                 onClick={() => setExpandedId(expandedId === model.id ? null : model.id)}
                 style={{ width: "100%", border: "none", background: "transparent", padding: "12px 14px", display: "flex", alignItems: "center", gap: 12, cursor: "pointer", textAlign: "left", fontFamily: "var(--font-main)" }}
               >
-                <div
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 999,
-                    background: brand.avatar ? "var(--icon-soft-bg)" : brand.accent,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    flexShrink: 0,
-                    overflow: "hidden",
-                    color: brand.initials === "HF" ? "#111827" : "#fff",
-                    fontSize: brand.initials.length > 2 ? 10 : 12,
-                    fontWeight: 800,
-                  }}
-                >
-                  {brand.avatar ? (
-                    <img
-                      src={brand.avatar}
-                      alt=""
-                      aria-hidden="true"
-                      style={{ width: "100%", height: "100%", display: "block", objectFit: "contain" }}
-                    />
-                  ) : (
-                    brand.initials
-                  )}
-                </div>
-
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div
                     style={{

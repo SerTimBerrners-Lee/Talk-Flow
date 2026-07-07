@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, type CSSProperties } from "react";
+import { lazy, Suspense, useState, useEffect, useRef, useCallback, type CSSProperties } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { emit } from "@tauri-apps/api/event";
@@ -60,22 +60,14 @@ import { logInfo } from "../../../lib/logger";
 
 import { TRANSCRIPTION_STYLE_OPTIONS } from "../../../lib/transcriptionPrompts";
 import { isSummaryAvailable, generatePromptText } from "../../../lib/summarize";
-import { LocalLlmModels } from "../../../components/LocalLlmModels";
 import { SETTINGS_UPDATED_EVENT } from "../../../lib/hotkeyEvents";
 import { useI18n, type MsgKey } from "../../../lib/i18n";
-import assemblyAiAvatar from "../../../assets/adapters/assemblyai.png";
-import cartesiaAvatar from "../../../assets/adapters/cartesia.png";
-import deepgramAvatar from "../../../assets/adapters/deepgram.jpeg";
-import elevenLabsAvatar from "../../../assets/adapters/elevenlabs.png";
-import fireworksAvatar from "../../../assets/adapters/fireworks.png";
-import groqAvatar from "../../../assets/adapters/groq.png";
-import mistralAvatar from "../../../assets/adapters/mistral.png";
-import moonshineAvatar from "../../../assets/adapters/moonshine.png";
-import nvidiaAvatar from "../../../assets/adapters/nvidia.webp";
-import openAiAvatar from "../../../assets/adapters/openai.svg";
-import qwenAvatar from "../../../assets/adapters/qwen.png";
-import volcengineAvatar from "../../../assets/adapters/volcengine.webp";
-import xAiAvatar from "../../../assets/adapters/xai.png";
+
+const LocalLlmModels = lazy(() =>
+  import("../../../components/LocalLlmModels").then((module) => ({
+    default: module.LocalLlmModels,
+  })),
+);
 
 const IS_DEV = import.meta.env.DEV;
 type LocalRuntimeKind = "whisper" | "diarization";
@@ -134,6 +126,14 @@ interface LocalModelDownloadProgressEvent {
   message?: string | null;
 }
 
+interface LocalTranslatorInfo {
+  provider: string;
+  name: string;
+  status: "not_installed" | "downloading" | "ready" | "error";
+  managed: boolean;
+  message?: string | null;
+}
+
 type ApiAdapterId =
   | "openai"
   | "deepgram"
@@ -157,7 +157,6 @@ interface ApiAdapterOption {
   defaultEndpoint: string;
   initials: string;
   accent: string;
-  avatar?: string;
   testable: boolean;
 }
 
@@ -170,7 +169,6 @@ const API_ADAPTERS: ApiAdapterOption[] = [
     defaultEndpoint: "https://api.openai.com",
     initials: "AI",
     accent: "#0f172a",
-    avatar: openAiAvatar,
     testable: true,
   },
   {
@@ -181,7 +179,6 @@ const API_ADAPTERS: ApiAdapterOption[] = [
     defaultEndpoint: "",
     initials: "DG",
     accent: "#13ef93",
-    avatar: deepgramAvatar,
     testable: false,
   },
   {
@@ -192,7 +189,6 @@ const API_ADAPTERS: ApiAdapterOption[] = [
     defaultEndpoint: "",
     initials: "CA",
     accent: "#6d5dfc",
-    avatar: cartesiaAvatar,
     testable: false,
   },
   {
@@ -203,7 +199,6 @@ const API_ADAPTERS: ApiAdapterOption[] = [
     defaultEndpoint: "",
     initials: "MI",
     accent: "#ff7000",
-    avatar: mistralAvatar,
     testable: false,
   },
   {
@@ -214,7 +209,6 @@ const API_ADAPTERS: ApiAdapterOption[] = [
     defaultEndpoint: "",
     initials: "EL",
     accent: "#111827",
-    avatar: elevenLabsAvatar,
     testable: false,
   },
   {
@@ -225,7 +219,6 @@ const API_ADAPTERS: ApiAdapterOption[] = [
     defaultEndpoint: "",
     initials: "FW",
     accent: "#f97316",
-    avatar: fireworksAvatar,
     testable: false,
   },
   {
@@ -236,7 +229,6 @@ const API_ADAPTERS: ApiAdapterOption[] = [
     defaultEndpoint: "",
     initials: "GQ",
     accent: "#f55036",
-    avatar: groqAvatar,
     testable: false,
   },
   {
@@ -247,7 +239,6 @@ const API_ADAPTERS: ApiAdapterOption[] = [
     defaultEndpoint: "",
     initials: "AA",
     accent: "#2563eb",
-    avatar: assemblyAiAvatar,
     testable: false,
   },
   {
@@ -258,7 +249,6 @@ const API_ADAPTERS: ApiAdapterOption[] = [
     defaultEndpoint: "",
     initials: "VE",
     accent: "#7c3aed",
-    avatar: volcengineAvatar,
     testable: false,
   },
   {
@@ -269,7 +259,6 @@ const API_ADAPTERS: ApiAdapterOption[] = [
     defaultEndpoint: "",
     initials: "xAI",
     accent: "#000000",
-    avatar: xAiAvatar,
     testable: false,
   },
 ];
@@ -288,7 +277,6 @@ interface LocalModelOption {
   languageLabel: string;
   initials: string;
   accent: string;
-  avatar?: string;
   recommended?: boolean;
   runtimeReady?: boolean;
   unavailableReason?: string;
@@ -302,9 +290,17 @@ interface LocalOtherComponent {
   id: string;
   name: string;
   descriptionKey: MsgKey;
+  model: string;
+  engineLabel: string;
+  runtime: string;
+  size: string;
+  speed: string;
+  accuracy: string;
+  languageLabel: string;
   initials: string;
   accent: string;
-  statusKey: MsgKey;
+  runtimeReady: boolean;
+  downloadBytes?: number;
 }
 
 const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
@@ -322,7 +318,6 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
     languageLabel: "40",
     initials: "N3",
     accent: "#76b900",
-    avatar: nvidiaAvatar,
     recommended: true,
     runtimeReady: true,
     downloadBytes: 716_000_000,
@@ -445,7 +440,6 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
     languageLabel: "25",
     initials: "P3",
     accent: "#76b900",
-    avatar: nvidiaAvatar,
     runtimeReady: true,
     downloadBytes: 740_000_000,
   },
@@ -463,7 +457,6 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
     languageLabel: "English",
     initials: "P2",
     accent: "#5f9f00",
-    avatar: nvidiaAvatar,
     runtimeReady: true,
     downloadBytes: 730_000_000,
   },
@@ -481,7 +474,6 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
     languageLabel: "English",
     initials: "NS",
     accent: "#5f9f00",
-    avatar: nvidiaAvatar,
     runtimeReady: true,
     downloadBytes: 696_000_000,
     supportsStreaming: true,
@@ -501,7 +493,6 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
     languageLabel: "English",
     initials: "MT",
     accent: "#8b5cf6",
-    avatar: moonshineAvatar,
     runtimeReady: true,
     downloadBytes: 48_000_000,
     supportsStreaming: true,
@@ -521,7 +512,6 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
     languageLabel: "English",
     initials: "MS",
     accent: "#7c3aed",
-    avatar: moonshineAvatar,
     runtimeReady: true,
     downloadBytes: 189_000_000,
     supportsStreaming: true,
@@ -541,7 +531,6 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
     languageLabel: "52",
     initials: "Q3",
     accent: "#2563eb",
-    avatar: qwenAvatar,
     runtimeReady: true,
     downloadBytes: 811_000_000,
   },
@@ -549,12 +538,36 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
 
 const LOCAL_OTHER_COMPONENTS: LocalOtherComponent[] = [
   {
-    id: "trad",
-    name: "trad",
-    descriptionKey: "models.localOther.trad.description",
-    initials: "TR",
-    accent: "#0f766e",
-    statusKey: "models.localOther.status.planned",
+    id: "nllb-200",
+    name: "NLLB-200 Distilled",
+    descriptionKey: "models.localOther.nllb-200.description",
+    model: "JustFrederik/nllb-200-distilled-600M-ct2-int8",
+    engineLabel: "CTranslate2",
+    runtime: "Talkis Local / CTranslate2",
+    size: "600M INT8",
+    speed: "средне",
+    accuracy: "средняя+",
+    languageLabel: "200+",
+    initials: "N2",
+    accent: "#2563eb",
+    runtimeReady: true,
+    downloadBytes: 645_000_000,
+  },
+  {
+    id: "opus-mt-ru-en",
+    name: "OPUS-MT RU -> EN",
+    descriptionKey: "models.localOther.opus-mt-ru-en.description",
+    model: "gaudi/opus-mt-ru-en-ctranslate2",
+    engineLabel: "CTranslate2",
+    runtime: "Talkis Local / CTranslate2",
+    size: "Marian CT2",
+    speed: "быстро",
+    accuracy: "средняя",
+    languageLabel: "RU -> EN",
+    initials: "RE",
+    accent: "#16a34a",
+    runtimeReady: true,
+    downloadBytes: 308_000_000,
   },
 ];
 
@@ -1321,8 +1334,10 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
   );
   const [expandedApiAdapter, setExpandedApiAdapter] = useState<ApiAdapterId | null>(null);
   const [expandedLocalModel, setExpandedLocalModel] = useState<string | null>(null);
+  const [expandedLocalOtherComponent, setExpandedLocalOtherComponent] = useState<string | null>(null);
   const [pendingDeleteModel, setPendingDeleteModel] = useState<LocalModelOption | null>(null);
   const [localInstalledModels, setLocalInstalledModels] = useState<string[]>([]);
+  const [localTranslators, setLocalTranslators] = useState<Record<string, LocalTranslatorInfo>>({});
   const [apiAdapterTestStates, setApiAdapterTestStates] = useState<Partial<Record<ApiAdapterId, { status: AdapterTestStatus; message: string }>>>({});
   const [localModelActionStates, setLocalModelActionStates] = useState<Partial<Record<string, LocalModelActionState>>>({});
   const authPollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -1441,9 +1456,27 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
     type,
   ]);
 
+  const refreshLocalTranslators = useCallback(async () => {
+    if (type !== "model") {
+      return;
+    }
+
+    try {
+      const translators = await invoke<LocalTranslatorInfo[]>("list_local_translators");
+      setLocalTranslators(Object.fromEntries(translators.map((translator) => [translator.provider, translator])));
+    } catch (err) {
+      logInfo("SETTINGS", `Failed to refresh local translators: ${err instanceof Error ? err.message : String(err)}`);
+      setLocalTranslators({});
+    }
+  }, [type]);
+
   useEffect(() => {
     void syncSettings().catch(() => {});
   }, [syncSettings]);
+
+  useEffect(() => {
+    void refreshLocalTranslators();
+  }, [refreshLocalTranslators]);
 
   // IconCloud profile — always fetch (regardless of tab) so hooks are stable
   useEffect(() => {
@@ -2170,6 +2203,15 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
       });
     };
 
+    const handleSelectLocalTranslator = (component: LocalOtherComponent, selected: boolean) => {
+      update({
+        translation: {
+          ...settings.translation,
+          selectionLocalTranslatorProvider: selected ? component.id : "",
+        },
+      });
+    };
+
     const getLocalModelStatus = (model: LocalModelOption) => {
       const actionState = localModelActionStates[model.id];
       const cachedState = settings.localModels?.[model.id];
@@ -2267,19 +2309,72 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
       };
     };
 
-    const getLocalModelLevel = (kind: "speed" | "accuracy", value: string) => {
-      if (kind === "speed") {
-        if (value === "очень быстро") return 5;
-        if (value === "быстро") return 4;
-        if (value === "средне") return 3;
-        return 2;
+    const getLocalOtherStatus = (component: LocalOtherComponent) => {
+      const actionState = localModelActionStates[component.id];
+      const cachedState = settings.localModels?.[component.id];
+      const backendState =
+        localTranslators[component.id] || (component.id === "nllb-200" ? localTranslators.trad : undefined);
+      const isSelected =
+        settings.translation.selectionLocalTranslatorProvider === component.id ||
+        (component.id === "nllb-200" && settings.translation.selectionLocalTranslatorProvider === "trad");
+
+      if (actionState?.status === "deleting") {
+        return {
+          label: t("models.local.deleting"),
+          status: "deleting" as const,
+          color: "var(--text-hi)",
+          message: actionState.message || cachedState?.message || backendState?.message || null,
+          isInstalled: backendState?.status === "ready",
+          isSelected,
+          canDelete: backendState?.managed === true,
+        };
       }
 
-      if (value === "максимальная") return 5;
-      if (value === "высокая") return 4;
-      if (value === "средняя+" || value === "средняя") return 3;
-      if (value === "служебная") return 2;
-      return 1;
+      if (actionState?.status === "installing" || backendState?.status === "downloading") {
+        return {
+          label: t("models.localOther.status.downloading"),
+          status: "installing" as const,
+          color: "var(--text-hi)",
+          message: actionState?.message || cachedState?.message || backendState?.message || null,
+          isInstalled: false,
+          isSelected: false,
+          canDelete: false,
+        };
+      }
+
+      if (backendState?.status === "ready") {
+        return {
+          label: t("models.localOther.status.ready"),
+          status: "installed" as const,
+          color: "var(--success-bright)",
+          message: backendState.message || cachedState?.message || null,
+          isInstalled: true,
+          isSelected,
+          canDelete: backendState.managed === true,
+        };
+      }
+
+      if (actionState?.status === "error" || backendState?.status === "error") {
+        return {
+          label: t("models.localOther.status.error"),
+          status: "error" as const,
+          color: "var(--error-bright)",
+          message: actionState?.message || cachedState?.message || backendState?.message || null,
+          isInstalled: false,
+          isSelected: false,
+          canDelete: false,
+        };
+      }
+
+      return {
+        label: t("models.localOther.status.notInstalled"),
+        status: "idle" as const,
+        color: "var(--text-low)",
+        message: backendState?.message || null,
+        isInstalled: false,
+        isSelected: false,
+        canDelete: false,
+      };
     };
 
     const formatLocalDownloadBytes = (bytes?: number, options: { showZero?: boolean } = {}) => {
@@ -2293,7 +2388,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
       return t("models.size.mb", { value: mb.toFixed(mb >= 10 ? 0 : 1).replace(".", ",") });
     };
 
-    const getLocalModelStorageLabel = (model: LocalModelOption) => {
+    const getLocalModelStorageLabel = (model: Pick<LocalModelOption, "downloadBytes" | "runtimeReady">) => {
       return formatLocalDownloadBytes(model.downloadBytes) || (model.runtimeReady ? t("models.size.unknown") : t("models.size.notConnected"));
     };
 
@@ -2308,23 +2403,6 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
         streamingEnabled: enabled,
       });
     };
-
-    const renderDotRating = (level: number) => (
-      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-        {Array.from({ length: 5 }).map((_, index) => (
-          <span
-            key={index}
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: 999,
-              background: index < level ? "var(--accent)" : "var(--border-strong)",
-              display: "block",
-            }}
-          />
-        ))}
-      </div>
-    );
 
     const translateSpeedValue = (value: string) => {
       switch (value) {
@@ -2350,16 +2428,22 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
 
     const translateLanguageValue = (value: string) => {
       if (value === "English") return t("models.languageValue.english");
+      if (value.includes("->") || value.includes("→")) return value;
       return t("models.languageValue.count", { value });
     };
 
-    const renderLocalModelStats = (model: LocalModelOption) => {
+    const renderLocalModelStats = (
+      model: Pick<
+        LocalModelOption,
+        "downloadBytes" | "runtimeReady" | "speed" | "accuracy" | "languageLabel" | "supportsStreaming"
+      >,
+    ) => {
       const speedValueLabel = translateSpeedValue(model.speed);
       const accuracyValueLabel = translateAccuracyValue(model.accuracy);
       const languageValueLabel = translateLanguageValue(model.languageLabel);
-      const stats: { key: string; title: string; Icon: Icon; level: number }[] = [
-        { key: "speed", title: t("models.stat.speedTitle", { value: speedValueLabel }), Icon: IconGauge, level: getLocalModelLevel("speed", model.speed) },
-        { key: "accuracy", title: t("models.stat.accuracyTitle", { value: accuracyValueLabel }), Icon: IconTargetArrow, level: getLocalModelLevel("accuracy", model.accuracy) },
+      const stats: { key: string; title: string; Icon: Icon; value: string }[] = [
+        { key: "speed", title: t("models.stat.speedTitle", { value: speedValueLabel }), Icon: IconGauge, value: speedValueLabel },
+        { key: "accuracy", title: t("models.stat.accuracyTitle", { value: accuracyValueLabel }), Icon: IconTargetArrow, value: accuracyValueLabel },
       ];
       const storageLabel = getLocalModelStorageLabel(model);
 
@@ -2387,7 +2471,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
             </span>
           </div>
 
-          {stats.map(({ key, title, Icon, level }) => (
+          {stats.map(({ key, title, Icon, value }) => (
             <div
               key={key}
               title={title}
@@ -2395,7 +2479,9 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
               style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}
             >
               <Icon size={14} stroke={1.9} color="var(--text-hi)" />
-              {renderDotRating(level)}
+              <span style={{ fontSize: 12, fontWeight: 650, color: "var(--text-hi)", lineHeight: 1, whiteSpace: "nowrap" }}>
+                {value}
+              </span>
             </div>
           ))}
 
@@ -2557,6 +2643,89 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
           message,
           lastCheckedAt: new Date().toISOString(),
         });
+      }
+    };
+
+    const handleInstallLocalTranslator = async (component: LocalOtherComponent) => {
+      setLocalModelActionStates((prev) => ({
+        ...prev,
+        [component.id]: { status: "installing", message: t("models.install.preparingRuntime"), progress: 0 },
+      }));
+      updateLocalModelCache(component.id, {
+        status: "downloading",
+        message: t("models.install.preparingRuntime"),
+      });
+
+      try {
+        const result = await invoke<{ success: boolean; message: string }>("download_local_translator", {
+          req: { provider: component.id },
+        });
+        setLocalModelActionStates((prev) => ({
+          ...prev,
+          [component.id]: { status: result.success ? "success" : "error", message: result.success ? "" : result.message },
+        }));
+        updateLocalModelCache(component.id, {
+          status: result.success ? "downloaded" : "error",
+          message: result.success ? undefined : result.message,
+          downloadedAt: result.success ? new Date().toISOString() : undefined,
+          lastCheckedAt: new Date().toISOString(),
+        });
+        await refreshLocalTranslators();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setLocalModelActionStates((prev) => ({
+          ...prev,
+          [component.id]: { status: "error", message },
+        }));
+        updateLocalModelCache(component.id, {
+          status: "error",
+          message,
+          lastCheckedAt: new Date().toISOString(),
+        });
+        await refreshLocalTranslators();
+      }
+    };
+
+    const handleDeleteLocalTranslator = async (component: LocalOtherComponent) => {
+      setLocalModelActionStates((prev) => ({
+        ...prev,
+        [component.id]: { status: "deleting", message: t("models.delete.removingFile") },
+      }));
+
+      try {
+        const result = await invoke<{ success: boolean; message: string }>("delete_local_translator", {
+          req: { provider: component.id },
+        });
+        setLocalModelActionStates((prev) => ({
+          ...prev,
+          [component.id]: { status: result.success ? "success" : "error", message: result.success ? "" : result.message },
+        }));
+        updateLocalModelCache(component.id, {
+          status: result.success ? "not_downloaded" : "error",
+          message: result.success ? undefined : result.message,
+          downloadedAt: undefined,
+          lastCheckedAt: new Date().toISOString(),
+        });
+        if (
+          result.success &&
+          (settings.translation.selectionLocalTranslatorProvider === component.id ||
+            (component.id === "nllb-200" && settings.translation.selectionLocalTranslatorProvider === "trad"))
+        ) {
+          handleSelectLocalTranslator(component, false);
+        }
+        await refreshLocalTranslators();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setLocalModelActionStates((prev) => ({
+          ...prev,
+          [component.id]: { status: "error", message },
+        }));
+        updateLocalModelCache(component.id, {
+          status: "error",
+          message,
+          lastCheckedAt: new Date().toISOString(),
+        });
+        await refreshLocalTranslators();
       }
     };
 
@@ -2762,21 +2931,6 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                           fontFamily: "var(--font-main)",
                         }}
                       >
-                        <div style={{ width: 36, height: 36, borderRadius: 999, background: "var(--icon-soft-bg)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, overflow: "hidden" }}>
-                          {adapter.avatar ? (
-                            <img
-                              src={adapter.avatar}
-                              alt=""
-                              aria-hidden="true"
-                              style={{ width: "100%", height: "100%", display: "block", objectFit: "cover" }}
-                            />
-                          ) : (
-                            <span style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", background: adapter.accent, color: "#fff", fontSize: adapter.initials.length > 2 ? 10 : 12, fontWeight: 800 }}>
-                              {adapter.initials}
-                            </span>
-                          )}
-                        </div>
-
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 3 }}>
                             <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)" }}>{adapter.name}</div>
@@ -3022,7 +3176,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                   const isExpanded = expandedLocalModel === model.id;
                   const modelStatus = getLocalModelStatus(model);
                   const modelActionState = localModelActionStates[model.id];
-                  const isRuntimeReady = getLocalModelStatus(model).status !== "unsupported" && model.runtimeReady === true;
+                  const isRuntimeReady = modelStatus.status !== "unsupported" && model.runtimeReady === true;
                   const isDownloaded = modelStatus.isInstalled;
                   const isModelBusy = modelStatus.status === "installing" || modelStatus.status === "deleting";
                   const isInstallDisabled = isModelBusy || !isRuntimeReady;
@@ -3050,19 +3204,6 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                           fontFamily: "var(--font-main)",
                         }}
                       >
-                        <div style={{ width: 36, height: 36, borderRadius: 999, background: (model.avatar || model.engineLabel === "Whisper") ? "var(--icon-soft-bg)" : model.accent, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: "#fff", fontSize: 11, fontWeight: 800, overflow: "hidden" }}>
-                          {model.avatar || model.engineLabel === "Whisper" ? (
-                            <img
-                              src={model.avatar || openAiAvatar}
-                              alt=""
-                              aria-hidden="true"
-                              style={{ width: "100%", height: "100%", display: "block", objectFit: "cover" }}
-                            />
-                          ) : (
-                            model.initials
-                          )}
-                        </div>
-
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 3 }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
@@ -3159,7 +3300,6 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                                     height: 1,
                                   }}
                                 />
-                                <IconBroadcast size={14} stroke={2.1} color="var(--text-hi)" />
                                 <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-hi)", lineHeight: 1 }}>
                                   {t("models.local.streamingToggle")}
                                 </span>
@@ -3368,7 +3508,15 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
               )}
 
               {localModelKind === "text" && (
-                <LocalLlmModels settings={settings} update={update} />
+                <Suspense
+                  fallback={
+                    <div className="card" style={{ padding: 14, fontSize: 13, color: "var(--text-mid)" }}>
+                      {t("models.download.loading")}
+                    </div>
+                  }
+                >
+                  <LocalLlmModels settings={settings} update={update} />
+                </Suspense>
               )}
 
               {localModelKind === "other" && (
@@ -3383,57 +3531,153 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                   </div>
 
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {LOCAL_OTHER_COMPONENTS.map((component) => (
-                      <div
-                        key={component.id}
-                        className="card"
-                        style={{ padding: 0, overflow: "hidden", background: "var(--surface)" }}
-                      >
+                    {LOCAL_OTHER_COMPONENTS.map((component) => {
+                      const componentStatus = getLocalOtherStatus(component);
+                      const isBusy = componentStatus.status === "installing" || componentStatus.status === "deleting";
+                      const isExpanded = expandedLocalOtherComponent === component.id || isBusy;
+
+                      return (
                         <div
-                          style={{
-                            width: "100%",
-                            padding: "12px 14px",
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 12,
-                            textAlign: "left",
-                            fontFamily: "var(--font-main)",
-                          }}
+                          key={component.id}
+                          className="card"
+                          style={{ padding: 0, overflow: "hidden", background: "var(--surface)" }}
                         >
-                          <div
+                          <button
+                            type="button"
+                            onClick={() => setExpandedLocalOtherComponent(isExpanded ? null : component.id)}
                             style={{
-                              width: 36,
-                              height: 36,
-                              borderRadius: 999,
-                              background: component.accent,
+                              width: "100%",
+                              border: "none",
+                              background: "transparent",
+                              padding: "12px 14px",
                               display: "flex",
                               alignItems: "center",
-                              justifyContent: "center",
-                              flexShrink: 0,
-                              color: "#fff",
-                              fontSize: 12,
-                              fontWeight: 800,
+                              gap: 12,
+                              cursor: "pointer",
+                              textAlign: "left",
+                              fontFamily: "var(--font-main)",
                             }}
                           >
-                            {component.initials}
-                          </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 3 }}>
+                                <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                  {component.name}
+                                </div>
+                                <div style={{ fontSize: 11, fontWeight: 700, color: componentStatus.color, padding: "5px 9px", borderRadius: 999, background: "var(--control-muted)", whiteSpace: "nowrap" }}>
+                                  {componentStatus.label}
+                                </div>
+                              </div>
+                              <div style={{ fontSize: 12, lineHeight: 1.45, color: "var(--text-mid)" }}>
+                                {t(component.descriptionKey)}
+                              </div>
+                              {renderLocalModelStats(component)}
+                            </div>
+                          </button>
 
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 3 }}>
-                              <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                                {component.name}
-                              </div>
-                              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-low)", padding: "5px 9px", borderRadius: 999, background: "var(--control-muted)", whiteSpace: "nowrap" }}>
-                                {t(component.statusKey)}
+                          {isExpanded && (
+                            <div style={{ borderTop: "1px solid var(--border-subtle)", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
+                              {componentStatus.message && componentStatus.status !== "installed" && (
+                                <div style={{
+                                  fontSize: 12,
+                                  lineHeight: 1.6,
+                                  padding: "8px 10px",
+                                  borderRadius: 8,
+                                  background: componentStatus.status === "error" ? "var(--danger-soft)" : "var(--control-muted)",
+                                  color: componentStatus.status === "error" ? "var(--error-bright)" : "var(--text-mid)",
+                                  border: `1px solid ${componentStatus.status === "error" ? "var(--danger-border)" : "var(--border-subtle)"}`,
+                                }}>
+                                  {componentStatus.message}
+                                </div>
+                              )}
+
+                              <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+                                {componentStatus.status === "installed" && (
+                                  <div style={{ display: "flex", alignItems: "center", gap: 8, color: componentStatus.color, fontSize: 12, fontWeight: 600, marginRight: "auto" }}>
+                                    <IconCheck size={15} stroke={2.5} />
+                                    {componentStatus.isSelected
+                                      ? t("models.localOther.selected")
+                                      : t("models.localOther.installedNotSelected")}
+                                  </div>
+                                )}
+
+                                {!isBusy && componentStatus.isInstalled && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSelectLocalTranslator(component, !componentStatus.isSelected)}
+                                    style={{
+                                      padding: "9px 12px",
+                                      borderRadius: 10,
+                                      border: "1px solid var(--border-dashed)",
+                                      background: "var(--control-muted)",
+                                      color: "var(--text-hi)",
+                                      fontSize: 12,
+                                      fontWeight: 700,
+                                      fontFamily: "var(--font-main)",
+                                      cursor: "pointer",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: 8,
+                                    }}
+                                  >
+                                    {componentStatus.isSelected ? (
+                                      <>
+                                        <IconX size={14} stroke={2.2} />
+                                        {t("models.localOther.cancelSelection")}
+                                      </>
+                                    ) : (
+                                      <>
+                                        <IconCheck size={14} stroke={2.5} />
+                                        {t("models.localOther.select")}
+                                      </>
+                                    )}
+                                  </button>
+                                )}
+
+                                {!isBusy && (!componentStatus.isInstalled || componentStatus.canDelete) && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (componentStatus.isInstalled) {
+                                        void handleDeleteLocalTranslator(component);
+                                        return;
+                                      }
+
+                                      void handleInstallLocalTranslator(component);
+                                    }}
+                                    style={{
+                                      padding: "9px 12px",
+                                      borderRadius: 10,
+                                      border: "1px solid var(--border-dashed)",
+                                      background: componentStatus.isInstalled ? "var(--control-muted)" : "var(--accent)",
+                                      color: componentStatus.isInstalled ? "var(--text-hi)" : "var(--accent-contrast)",
+                                      fontSize: 12,
+                                      fontWeight: 700,
+                                      fontFamily: "var(--font-main)",
+                                      cursor: "pointer",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: 8,
+                                    }}
+                                  >
+                                    {componentStatus.isInstalled ? (
+                                      <>
+                                        <IconTrash size={14} stroke={2.2} />
+                                        {t("models.common.delete")}
+                                      </>
+                                    ) : (
+                                      <>
+                                        <IconDownload size={14} stroke={2.2} />
+                                        {t("models.common.download")}
+                                      </>
+                                    )}
+                                  </button>
+                                )}
                               </div>
                             </div>
-                            <div style={{ fontSize: 12, lineHeight: 1.45, color: "var(--text-mid)" }}>
-                              {t(component.descriptionKey)}
-                            </div>
-                          </div>
+                          )}
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}

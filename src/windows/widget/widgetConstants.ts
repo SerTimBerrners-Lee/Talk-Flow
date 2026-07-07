@@ -8,6 +8,7 @@ export interface WidgetNoticeState {
 
 export const MIN_RECORDING_DURATION_MS = 500;
 export const MIN_AUDIO_BLOB_BYTES = 1024;
+export const MAX_RECORDING_DURATION_MS = 5 * 60 * 1000;
 export const NOTICE_TIMEOUT_MS = 5000;
 export const WIDGET_SHELL_WIDTH = 74;
 export const WIDGET_SHELL_HEIGHT = 22;
@@ -42,11 +43,13 @@ export const NOTICE_AREA_HEIGHT = 52;
 export const NOTICE_WIDGET_GAP = 2;
 export const WIDGET_NOTICE_EVENT = "widget-notice:update";
 export const TEXT_OVERLAY_WIDGET_WIDTH = 324;
-export const TEXT_OVERLAY_WIDGET_HEIGHT = 182;
+export const TEXT_OVERLAY_WIDGET_HEIGHT = 131.2;
 export const TEXT_OVERLAY_EVENT = "widget-text:update";
 
 export type WidgetTextOverlayStatus =
   | "copying"
+  | "dictating"
+  | "inserting"
   | "translating"
   | "done"
   | "error";
@@ -56,5 +59,6 @@ export interface WidgetTextOverlayState {
   sourceText: string;
   translatedText: string;
   targetLanguage: string;
+  requestId?: string;
   message?: string;
 }

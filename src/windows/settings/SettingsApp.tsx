@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import type { CSSProperties, ReactElement } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   IconDownload,
@@ -25,15 +25,17 @@ import { PermissionScreen } from "../../components/PermissionScreen";
 import {
   SETTINGS_NAVIGATE_EVENT,
   SETTINGS_UPDATED_EVENT,
+  SELECTION_TEXT_REQUEST_EVENT,
+  SELECTION_TEXT_RESPONSE_EVENT,
   SettingsNavigatePayload,
+  type SelectionTextRequestPayload,
 } from "../../lib/hotkeyEvents";
 import {
   getPermissionsPassed,
   setPermissionsPassed,
-  getHistory,
+  getHistoryIndex,
   getSettings,
   isMacPlatform,
-  HistoryEntry,
   type ThemePreference,
 } from "../../lib/store";
 import { checkAllPermissions } from "../../lib/permissions";
@@ -346,6 +348,34 @@ function AppUpdateFooter(): ReactElement | null {
   );
 }
 
+function getTextControlSelection(element: Element | null): string {
+  if (
+    element instanceof HTMLTextAreaElement ||
+    element instanceof HTMLInputElement
+  ) {
+    const start = element.selectionStart ?? 0;
+    const end = element.selectionEnd ?? 0;
+    if (end > start) {
+      return element.value.slice(start, end);
+    }
+  }
+
+  return "";
+}
+
+function getCurrentDomSelectionText(): string {
+  if (!document.hasFocus()) {
+    return "";
+  }
+
+  const activeElementSelection = getTextControlSelection(document.activeElement);
+  if (activeElementSelection.trim()) {
+    return activeElementSelection;
+  }
+
+  return window.getSelection()?.toString() ?? "";
+}
+
 export function SettingsApp() {
   const { t } = useI18n();
   const [activeTab, setActiveTab] = useState<Tab>(resolveInitialTab);
@@ -358,9 +388,6 @@ export function SettingsApp() {
     useState<ThemePreference>("system");
   const [navigationNonce, setNavigationNonce] = useState(0);
   const [showPermissions, setShowPermissions] = useState<boolean | null>(null);
-  const [initialHistory, setInitialHistory] = useState<HistoryEntry[] | null>(
-    null,
-  );
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -385,19 +412,22 @@ export function SettingsApp() {
   }, [themePreference]);
 
   useEffect(() => {
-    Promise.all([getPermissionsPassed(), checkAllPermissions(), getHistory()])
-      .then(async ([passed, permissions, history]) => {
+    Promise.all([getPermissionsPassed(), checkAllPermissions()])
+      .then(async ([passed, permissions]) => {
         const hasRequiredStartupPermissions =
           permissions.microphone !== "denied" &&
           (!isMacPlatform() || permissions.accessibility === "granted");
         const shouldRecoverExistingInstall =
-          !passed && history.length > 0 && hasRequiredStartupPermissions;
+          !passed &&
+          hasRequiredStartupPermissions &&
+          (await getHistoryIndex()
+            .then((history) => history.length > 0)
+            .catch(() => false));
 
         if (shouldRecoverExistingInstall) {
           await setPermissionsPassed(true);
         }
 
-        setInitialHistory(history);
         setShowPermissions(
           !((passed || shouldRecoverExistingInstall) && hasRequiredStartupPermissions),
         );
@@ -408,7 +438,6 @@ export function SettingsApp() {
           "SETTINGS_APP",
           `Failed to load initial state: ${error instanceof Error ? error.message : String(error)}`,
         );
-        setInitialHistory([]);
         setShowPermissions(false);
         setLoadError(t("settingsApp.loadError"));
       });
@@ -443,6 +472,23 @@ export function SettingsApp() {
     };
   }, []);
 
+  useEffect(() => {
+    const unlisten = listen<SelectionTextRequestPayload>(
+      SELECTION_TEXT_REQUEST_EVENT,
+      ({ payload }) => {
+        void emit(SELECTION_TEXT_RESPONSE_EVENT, {
+          requestId: payload.requestId,
+          text: getCurrentDomSelectionText(),
+          sourceWindow: "settings",
+        });
+      },
+    );
+
+    return () => {
+      unlisten.then((dispose) => dispose());
+    };
+  }, []);
+
   const handlePermissionsComplete = async () => {
     await setPermissionsPassed(true);
     setShowPermissions(false);
@@ -454,7 +500,7 @@ export function SettingsApp() {
     setActiveTab("main");
   };
 
-  if (showPermissions === null || initialHistory === null) {
+  if (showPermissions === null) {
     return (
       <div
         className="app-root"
@@ -572,7 +618,6 @@ export function SettingsApp() {
                   style={{ display: activeTab === "main" ? "block" : "none" }}
                 >
                   <MainTab
-                    initialHistory={initialHistory}
                     focusedEntryId={focusedHistoryEntryId}
                     focusedEntryNonce={focusedHistoryEntryNonce}
                   />
@@ -604,16 +649,8 @@ export function SettingsApp() {
                 >
                   <SettingsTab />
                 </div>
-                <div
-                  style={{ display: activeTab === "model" ? "block" : "none" }}
-                >
-                  <SettingsTabs type="model" />
-                </div>
-                <div
-                  style={{ display: activeTab === "style" ? "block" : "none" }}
-                >
-                  <SettingsTabs type="style" />
-                </div>
+                {activeTab === "model" && <SettingsTabs type="model" />}
+                {activeTab === "style" && <SettingsTabs type="style" />}
               </div>
             </div>
           </main>

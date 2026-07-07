@@ -105,8 +105,11 @@ const DEFAULT_TRANSLATION_SETTINGS: TranslationSettings = {
   active: false,
   targetLanguage: "en",
   selectionTargetLanguage: "en",
+  selectionTargetMigrationVersion: 1,
   selectionEnabled: false,
   selectionHotkey: DEFAULT_SELECTION_TRANSLATION_HOTKEY,
+  selectionLocalTranslatorProvider: "",
+  selectionEnableMigrationVersion: 1,
 };
 const WIDGET_STACK_EDGE_PADDING = 10;
 

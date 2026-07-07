@@ -1,4 +1,5 @@
 use hound::WavReader;
+use serde::Serialize;
 use serde_json::json;
 use std::collections::HashMap;
 use std::env;
@@ -9,8 +10,8 @@ use std::path::PathBuf;
 use std::sync::Once;
 use transcribe_cpp::{
     CommitPolicy, ExtSlot, Model, MoonshineStreamingOptions, ParakeetBufferedStreamOptions,
-    ParakeetStreamOptions, RunExtension, RunOptions, StreamExtension, StreamOptions, TimestampKind,
-    VoxtralRealtimeStreamOptions, WhisperRunOptions,
+    ParakeetStreamOptions, RunExtension, RunOptions, Stream, StreamExtension, StreamOptions,
+    TimestampKind, VoxtralRealtimeStreamOptions, WhisperRunOptions,
 };
 
 const SERVER_NAME: &str = "talkis-stt";
@@ -48,6 +49,14 @@ struct WhisperModel {
 struct MultipartData {
     fields: HashMap<String, String>,
     file: Vec<u8>,
+}
+
+#[derive(Serialize)]
+struct StreamingTranscriptionEvent<'a> {
+    status: &'a str,
+    text: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<&'a str>,
 }
 
 const WHISPER_MODELS: &[WhisperModel] = &[
@@ -302,6 +311,28 @@ fn handle_connection(mut stream: TcpStream, config: &RuntimeConfig) {
         }
     };
 
+    if is_live_transcription_request(&request) {
+        if let Err((status, message)) = transcribe_live(&request, config, &mut stream) {
+            let _ = write_json(
+                &mut stream,
+                status,
+                json!({ "error": { "message": message, "type": "local_stt_error" } }).to_string(),
+            );
+        }
+        return;
+    }
+
+    if is_streaming_transcription_request(&request) {
+        if let Err((status, message)) = transcribe_streaming(&request, config, &mut stream) {
+            let _ = write_json(
+                &mut stream,
+                status,
+                json!({ "error": { "message": message, "type": "local_stt_error" } }).to_string(),
+            );
+        }
+        return;
+    }
+
     let response = route_request(&request, config);
     let _ = write_json(&mut stream, response.0, response.1);
 }
@@ -352,6 +383,17 @@ fn read_request(stream: &mut TcpStream) -> Result<HttpRequest, String> {
         .get("content-length")
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(0);
+    let path_only = path.split('?').next().unwrap_or(&path);
+    let is_live_request = method == "POST" && path_only == "/v1/audio/transcriptions/live";
+
+    if is_live_request {
+        return Ok(HttpRequest {
+            method,
+            path,
+            headers,
+            body: buffer[header_end..].to_vec(),
+        });
+    }
 
     while buffer.len() < header_end + content_length {
         let bytes_read = stream
@@ -451,6 +493,16 @@ fn route_request(request: &HttpRequest, config: &RuntimeConfig) -> (u16, String)
             json!({ "error": "Not found", "path": path }).to_string(),
         ),
     }
+}
+
+fn is_streaming_transcription_request(request: &HttpRequest) -> bool {
+    let path = request.path.split('?').next().unwrap_or(&request.path);
+    request.method == "POST" && path == "/v1/audio/transcriptions/stream"
+}
+
+fn is_live_transcription_request(request: &HttpRequest) -> bool {
+    let path = request.path.split('?').next().unwrap_or(&request.path);
+    request.method == "POST" && path == "/v1/audio/transcriptions/live"
 }
 
 fn find_model(value: &str) -> Option<&'static WhisperModel> {
@@ -726,6 +778,284 @@ fn transcribe(request: &HttpRequest, config: &RuntimeConfig) -> Result<String, (
     transcription_response(text, segments, &multipart.fields)
 }
 
+fn transcribe_streaming(
+    request: &HttpRequest,
+    config: &RuntimeConfig,
+    writer: &mut impl Write,
+) -> Result<(), (u16, String)> {
+    let multipart = parse_multipart(request)?;
+    let requested_model = multipart
+        .fields
+        .get("model")
+        .map(String::as_str)
+        .unwrap_or("whisper-tiny");
+    let model = find_model(requested_model).ok_or_else(|| {
+        (
+            404,
+            format!(
+                "Модель «{}» не поддерживается встроенным transcribe.cpp runtime.",
+                requested_model
+            ),
+        )
+    })?;
+
+    let path = model_path(config, model);
+    if !path.is_file() {
+        return Err((404, format!("Модель «{}» ещё не скачана.", model.id)));
+    }
+
+    let audio = read_wav_mono_16k(&multipart.file)?;
+    if is_low_signal_audio(&audio) {
+        write_ndjson_headers(writer)?;
+        write_streaming_event(writer, "started", "", None)?;
+        write_streaming_event(writer, "final", "", None)?;
+        return Ok(());
+    }
+
+    let loaded_model = Model::load(&path).map_err(|err| {
+        (
+            500,
+            format!(
+                "Не удалось загрузить модель «{}» через transcribe.cpp: {}",
+                model.id, err
+            ),
+        )
+    })?;
+    let capabilities = loaded_model.capabilities();
+    let supports_whisper_options = loaded_model.accepts_ext(ExtSlot::Run, WHISPER_RUN_EXT_KIND);
+    let mut session = loaded_model.session().map_err(|err| {
+        (
+            500,
+            format!("Не удалось создать transcribe.cpp session: {}", err),
+        )
+    })?;
+    let mut options = run_options_from_fields_with_auto(
+        &multipart.fields,
+        capabilities.max_timestamp_kind,
+        supports_whisper_options,
+        true,
+    );
+    options.language = normalize_streaming_language(model, options.language.as_deref());
+
+    if !model.supports_streaming {
+        return Err((
+            400,
+            format!("Модель «{}» не поддерживает streaming-режим.", model.id),
+        ));
+    }
+
+    let Some(stream_extension) = stream_extension_for_model(&loaded_model) else {
+        return Err((
+            400,
+            format!(
+                "transcribe.cpp не сообщил streaming extension для модели «{}».",
+                model.id
+            ),
+        ));
+    };
+
+    write_ndjson_headers(writer)?;
+    write_streaming_event(writer, "started", "", None)?;
+
+    if let Err((_, message)) = run_streaming_transcription_with_events(
+        &mut session,
+        &audio,
+        &options,
+        stream_extension,
+        writer,
+    ) {
+        let _ = write_streaming_event(writer, "error", "", Some(&message));
+    }
+
+    Ok(())
+}
+
+fn transcribe_live(
+    request: &HttpRequest,
+    config: &RuntimeConfig,
+    connection: &mut TcpStream,
+) -> Result<(), (u16, String)> {
+    let fields = live_fields_from_query(&request.path);
+    let requested_model = fields
+        .get("model")
+        .map(String::as_str)
+        .unwrap_or("whisper-tiny");
+    let model = find_model(requested_model).ok_or_else(|| {
+        (
+            404,
+            format!(
+                "Модель «{}» не поддерживается встроенным transcribe.cpp runtime.",
+                requested_model
+            ),
+        )
+    })?;
+
+    if !model.supports_streaming {
+        return Err((
+            400,
+            format!(
+                "Модель «{}» не поддерживает live streaming-режим.",
+                model.id
+            ),
+        ));
+    }
+
+    let path = model_path(config, model);
+    if !path.is_file() {
+        return Err((404, format!("Модель «{}» ещё не скачана.", model.id)));
+    }
+
+    let loaded_model = Model::load(&path).map_err(|err| {
+        (
+            500,
+            format!(
+                "Не удалось загрузить модель «{}» через transcribe.cpp: {}",
+                model.id, err
+            ),
+        )
+    })?;
+    let capabilities = loaded_model.capabilities();
+    let supports_whisper_options = loaded_model.accepts_ext(ExtSlot::Run, WHISPER_RUN_EXT_KIND);
+    let mut session = loaded_model.session().map_err(|err| {
+        (
+            500,
+            format!("Не удалось создать transcribe.cpp session: {}", err),
+        )
+    })?;
+    let mut options = run_options_from_fields_with_auto(
+        &fields,
+        capabilities.max_timestamp_kind,
+        supports_whisper_options,
+        true,
+    );
+    options.language = normalize_streaming_language(model, options.language.as_deref());
+
+    let Some(stream_extension) = stream_extension_for_model(&loaded_model) else {
+        return Err((
+            400,
+            format!(
+                "transcribe.cpp не сообщил streaming extension для модели «{}».",
+                model.id
+            ),
+        ));
+    };
+
+    write_ndjson_headers(connection)?;
+    write_streaming_event(connection, "started", "", None)?;
+
+    let stream_options = StreamOptions {
+        commit_policy: CommitPolicy::Auto,
+        family: Some(stream_extension),
+        ..Default::default()
+    };
+    let mut transcribe_stream = session.stream(&options, &stream_options).map_err(|err| {
+        (
+            500,
+            format!("transcribe.cpp не смог начать live streaming: {}", err),
+        )
+    })?;
+
+    let mut last_text = String::new();
+    let mut pending_pcm = Vec::new();
+    let initial_audio = take_live_pcm16_samples(&mut pending_pcm, &request.body);
+    if !initial_audio.is_empty() {
+        feed_live_audio(
+            &mut transcribe_stream,
+            &initial_audio,
+            connection,
+            &mut last_text,
+        )?;
+    }
+
+    let mut buffer = [0u8; 8192];
+    loop {
+        let read = connection.read(&mut buffer).map_err(|err| {
+            (
+                500,
+                format!("Не удалось прочитать live audio stream: {}", err),
+            )
+        })?;
+        if read == 0 {
+            break;
+        }
+
+        let audio = take_live_pcm16_samples(&mut pending_pcm, &buffer[..read]);
+        if audio.is_empty() {
+            continue;
+        }
+
+        feed_live_audio(&mut transcribe_stream, &audio, connection, &mut last_text)?;
+    }
+
+    transcribe_stream.finalize().map_err(|err| {
+        (
+            500,
+            format!("transcribe.cpp live streaming finalize failed: {}", err),
+        )
+    })?;
+
+    let final_text = transcribe_stream.text().display().trim().to_string();
+    if final_text != last_text {
+        write_streaming_partial_if_changed(connection, &mut last_text, &final_text)?;
+    }
+    write_streaming_event(connection, "final", &final_text, None)?;
+
+    Ok(())
+}
+
+fn live_fields_from_query(path: &str) -> HashMap<String, String> {
+    let mut fields = HashMap::new();
+    let Some((_, query)) = path.split_once('?') else {
+        return fields;
+    };
+
+    for pair in query.split('&') {
+        if pair.is_empty() {
+            continue;
+        }
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        fields.insert(
+            percent_decode(&key.replace('+', " ")),
+            percent_decode(&value.replace('+', " ")),
+        );
+    }
+
+    fields
+}
+
+fn take_live_pcm16_samples(pending: &mut Vec<u8>, bytes: &[u8]) -> Vec<f32> {
+    pending.extend_from_slice(bytes);
+    let sample_bytes = pending.len() - (pending.len() % 2);
+    if sample_bytes == 0 {
+        return Vec::new();
+    }
+
+    let audio = pending[..sample_bytes]
+        .chunks_exact(2)
+        .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]) as f32 / i16::MAX as f32)
+        .collect::<Vec<_>>();
+    pending.drain(..sample_bytes);
+    audio
+}
+
+fn feed_live_audio(
+    stream: &mut Stream<'_>,
+    audio: &[f32],
+    writer: &mut impl Write,
+    last_text: &mut String,
+) -> Result<(), (u16, String)> {
+    stream.feed(audio).map_err(|err| {
+        (
+            500,
+            format!("transcribe.cpp live streaming feed failed: {}", err),
+        )
+    })?;
+
+    let current_text = stream.text().display().trim().to_string();
+    write_streaming_partial_if_changed(writer, last_text, &current_text)?;
+    Ok(())
+}
+
 fn init_transcribe_cpp() {
     INIT_TRANSCRIBE_CPP.call_once(|| {
         transcribe_cpp::init_logging();
@@ -903,6 +1233,109 @@ fn run_streaming_transcription(
     })?;
 
     Ok(stream.text().display().trim().to_string())
+}
+
+fn run_streaming_transcription_with_events(
+    session: &mut transcribe_cpp::Session,
+    audio: &[f32],
+    run_options: &RunOptions,
+    stream_extension: StreamExtension,
+    writer: &mut impl Write,
+) -> Result<String, (u16, String)> {
+    let stream_options = StreamOptions {
+        commit_policy: CommitPolicy::Auto,
+        family: Some(stream_extension),
+        ..Default::default()
+    };
+    let mut stream = session
+        .stream(run_options, &stream_options)
+        .map_err(|err| {
+            (
+                500,
+                format!("transcribe.cpp не смог начать streaming: {}", err),
+            )
+        })?;
+
+    let mut last_text = String::new();
+    for chunk in audio.chunks(1600) {
+        stream.feed(chunk).map_err(|err| {
+            (
+                500,
+                format!("transcribe.cpp streaming feed failed: {}", err),
+            )
+        })?;
+
+        let current_text = stream.text().display().trim().to_string();
+        write_streaming_partial_if_changed(writer, &mut last_text, &current_text)?;
+    }
+
+    stream.finalize().map_err(|err| {
+        (
+            500,
+            format!("transcribe.cpp streaming finalize failed: {}", err),
+        )
+    })?;
+
+    let final_text = stream.text().display().trim().to_string();
+    if final_text != last_text {
+        write_streaming_partial_if_changed(writer, &mut last_text, &final_text)?;
+    }
+    write_streaming_event(writer, "final", &final_text, None)?;
+
+    Ok(final_text)
+}
+
+fn write_streaming_partial_if_changed(
+    writer: &mut impl Write,
+    last_text: &mut String,
+    text: &str,
+) -> Result<bool, (u16, String)> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() || trimmed == last_text {
+        return Ok(false);
+    }
+
+    write_streaming_event(writer, "partial", trimmed, None)?;
+    *last_text = trimmed.to_string();
+    Ok(true)
+}
+
+fn write_streaming_event(
+    writer: &mut impl Write,
+    status: &str,
+    text: &str,
+    message: Option<&str>,
+) -> Result<(), (u16, String)> {
+    let event = StreamingTranscriptionEvent {
+        status,
+        text,
+        message,
+    };
+    let line = serde_json::to_string(&event).map_err(|err| {
+        (
+            500,
+            format!("Не удалось сериализовать streaming event: {}", err),
+        )
+    })?;
+    writer
+        .write_all(line.as_bytes())
+        .and_then(|_| writer.write_all(b"\n"))
+        .and_then(|_| writer.flush())
+        .map_err(|err| {
+            (
+                500,
+                format!("Не удалось отправить streaming event: {}", err),
+            )
+        })
+}
+
+fn write_ndjson_headers(writer: &mut impl Write) -> Result<(), (u16, String)> {
+    writer
+        .write_all(
+            b"HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson; charset=utf-8\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n",
+        )
+        .and_then(|_| writer.flush())
+        .map_err(|err| (500, format!("Не удалось открыть streaming response: {}", err)))
 }
 
 fn transcription_response(
@@ -1145,6 +1578,67 @@ mod tests {
 
         fields.insert("streaming".to_string(), "0".to_string());
         assert!(!streaming_requested_from_fields(&fields));
+    }
+
+    #[test]
+    fn live_query_fields_are_decoded() {
+        let fields = live_fields_from_query(
+            "/v1/audio/transcriptions/live?model=nvidia%2Fnemotron-3.5-asr-streaming-0.6b&language=ru-RU",
+        );
+
+        assert_eq!(
+            fields.get("model").map(String::as_str),
+            Some("nvidia/nemotron-3.5-asr-streaming-0.6b"),
+        );
+        assert_eq!(fields.get("language").map(String::as_str), Some("ru-RU"));
+    }
+
+    #[test]
+    fn live_pcm16_decoder_keeps_odd_byte_for_next_chunk() {
+        let mut pending = Vec::new();
+        let first = take_live_pcm16_samples(&mut pending, &[0x00, 0x40, 0x00]);
+        assert_eq!(first.len(), 1);
+        assert!((first[0] - 0.50001526).abs() < 0.0001);
+        assert_eq!(pending, vec![0x00]);
+
+        let second = take_live_pcm16_samples(&mut pending, &[0xC0]);
+        assert_eq!(second.len(), 1);
+        assert!((second[0] + 0.50001526).abs() < 0.0001);
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn streaming_partial_events_are_deduplicated_before_final() {
+        let mut output = Vec::new();
+        let mut last_text = String::new();
+
+        assert!(
+            write_streaming_partial_if_changed(&mut output, &mut last_text, "Привет")
+                .expect("first partial")
+        );
+        assert!(
+            !write_streaming_partial_if_changed(&mut output, &mut last_text, "Привет")
+                .expect("duplicate partial")
+        );
+        assert!(
+            write_streaming_partial_if_changed(&mut output, &mut last_text, "Привет, мир",)
+                .expect("second partial")
+        );
+        write_streaming_event(&mut output, "final", &last_text, None).expect("final");
+
+        let lines = String::from_utf8(output).expect("utf8");
+        let events = lines
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("json"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[0]["status"], "partial");
+        assert_eq!(events[0]["text"], "Привет");
+        assert_eq!(events[1]["status"], "partial");
+        assert_eq!(events[1]["text"], "Привет, мир");
+        assert_eq!(events[2]["status"], "final");
+        assert_eq!(events[2]["text"], events[1]["text"]);
     }
 
     #[test]

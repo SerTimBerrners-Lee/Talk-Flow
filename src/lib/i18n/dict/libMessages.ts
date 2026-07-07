@@ -57,8 +57,8 @@ export const libMessages = {
     en: "The file is too large to transcribe. Maximum size: 8 GB.",
   },
   "fileTranscription.errCannotReadAudio": {
-    ru: "Не удалось прочитать аудио из этого файла. Попробуйте MP3, WAV, M4A, MP4 или MOV.",
-    en: "Could not read audio from this file. Try MP3, WAV, M4A, MP4, or MOV.",
+    ru: "Не удалось прочитать аудио из этого файла. Попробуйте MP3, WAV, M4A, MP4, MOV, WEBM или OGG.",
+    en: "Could not read audio from this file. Try MP3, WAV, M4A, MP4, MOV, WEBM, or OGG.",
   },
   "fileTranscription.errCloudSessionMissing": {
     ru: "Войдите в Talkis Cloud заново, чтобы использовать облачный режим.",

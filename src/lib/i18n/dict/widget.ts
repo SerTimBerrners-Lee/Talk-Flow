@@ -258,6 +258,10 @@ export const widget = {
     ru: "Речь не распознана. Попробуйте еще раз.",
     en: "No speech recognized. Try again.",
   },
+  "widget.recording.maxDurationReached": {
+    ru: "Запись остановлена: достигнут лимит 5 минут.",
+    en: "Recording stopped: the 5-minute limit was reached.",
+  },
   "widget.recording.processingError": {
     ru: "Ошибка обработки",
     en: "Processing error",

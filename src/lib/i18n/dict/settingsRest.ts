@@ -58,6 +58,10 @@ export const settingsRest = {
     ru: "В этом фильтре записей пока нет.",
     en: "No recordings in this filter yet.",
   },
+  "mainTab.showMoreHistory": {
+    ru: "Показать ещё {count}",
+    en: "Show {count} more",
+  },
   "mainTab.colTime": { ru: "Время", en: "Time" },
   "mainTab.colText": { ru: "Текст", en: "Text" },
   "mainTab.durationMs": { ru: "{value}мс", en: "{value}ms" },
