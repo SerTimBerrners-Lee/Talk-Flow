@@ -37,10 +37,12 @@
   - Hotkey FSM smoke tests passed.
   - Vite production build passed with warnings for Bun's emulated Node version, `SummaryModal.tsx` mixed static/dynamic import, and a large main chunk.
 - `TAURI_SIGNING_PRIVATE_KEY_PATH=/Users/trixter/.tauri/talkis-updater.key bun run build:release:macos`: built release sidecars, frontend, Rust release binary, `Talkis.app`, and `Talkis.app.tar.gz`; failed only at updater signature because this shell does not have the correct `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` for the encrypted local key.
-- GitHub Release Preflight: pending for `Preflight macos`, `Preflight windows`, and `Preflight linux` on this exact release commit.
+- GitHub Release Preflight: must be green for `Preflight macos`, `Preflight windows`, and `Preflight linux` on the final release commit before `main` merge and tag push.
   - First preflight run `29252319785` on commit `5aa28f5` passed macOS and Linux, passed Windows `Run release checks` and `Build frontend`, then failed Windows `Build bundles` with MSVC CRT mismatch around `libct2rs`.
-- Native/GitHub Windows build: must be validated by Release Preflight before tagging.
-- Native/GitHub Linux build: must be validated by Release Preflight before tagging.
+  - Second preflight run `29254503310` on commit `8b07413` passed macOS, Linux, and Windows; Windows passed `Build bundles` after adding Windows `RUSTFLAGS=-C target-feature=+crt-static`.
+  - This review update changes the release commit, so a final preflight run is still required on the exact commit that will be merged and tagged. Do not edit release files after that final green run.
+- Native/GitHub Windows build: passed in Release Preflight run `29254503310`; must pass once more on the final release commit.
+- Native/GitHub Linux build: passed in Release Preflight run `29254503310`; must pass once more on the final release commit.
 - Additional manual checks:
   - Confirmed release run `29250361300` for v0.3.11 failed at Windows `Build frontend` after Windows `Run release checks` succeeded.
 
@@ -55,7 +57,7 @@
 ## Findings
 
 - Blockers:
-  - Tag publish is blocked until Release Preflight is green for macOS, Windows, and Linux on the exact release commit.
+  - Tag publish is blocked until the final Release Preflight is green for macOS, Windows, and Linux on the exact release commit.
   - Local updater signing may still require the encrypted updater key password in this shell. GitHub Actions must have valid `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets for final updater signatures and `latest.json`.
 - Non-blocking issues:
   - Vite still reports the existing large main chunk warning.
@@ -67,6 +69,6 @@
 
 ## Decision
 
-- Ready for `main` merge: no, pending Release Preflight.
-- Release preflight green on exact tag commit: no, pending.
-- Ready for tag publish: no, pending Release Preflight.
+- Ready for `main` merge: yes after the final Release Preflight is green on this commit.
+- Release preflight green on exact tag commit: pending final Release Preflight on this commit.
+- Ready for tag publish: yes after the final Release Preflight is green on this commit.
