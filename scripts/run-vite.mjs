@@ -3,9 +3,10 @@ import { existsSync, mkdirSync, copyFileSync, chmodSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
-const rootDir = dirname(dirname(new URL(import.meta.url).pathname));
+const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
 
 function resolvePackageFile(packageName, relativePath) {
   return join(dirname(require.resolve(`${packageName}/package.json`)), relativePath);
