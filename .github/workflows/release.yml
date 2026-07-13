@@ -84,6 +84,7 @@ jobs:
       TALKIS_STT_RELEASE: "1"
       TALKIS_SKIP_BEFORE_BUILD: "1"
       TALKIS_UPDATER_PLATFORM: ${{ matrix.updater_platform }}
+      RUSTFLAGS: ${{ matrix.platform == 'windows' && '-C target-feature=+crt-static' || '' }}
 
     steps:
       - name: Checkout repository

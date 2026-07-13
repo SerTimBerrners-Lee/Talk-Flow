@@ -43,6 +43,7 @@ It is designed for practical daily work: IDEs, chats, notes, CRM fields, email, 
 ### v0.3.12
 
 - Fixed the Windows frontend release build by invoking Vite through its package JavaScript entrypoint instead of the platform-specific `.cmd` shim.
+- Fixed Windows release bundle linking by using the static MSVC CRT expected by the bundled C++ translation runtime.
 - This release candidate must pass Release Preflight on macOS, Windows, and Linux before a tag is created.
 
 ### v0.3.11

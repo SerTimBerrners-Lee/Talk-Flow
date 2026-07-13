@@ -13,13 +13,16 @@
 - Key changes included in this release:
   - Re-publishes the v0.3.8-v0.3.11 app changes after v0.3.11 identified the remaining Windows failure stage as `Build frontend`.
   - Fixes `scripts/run-vite.mjs` to invoke Vite through `vite/bin/vite.js` with the current runtime instead of the Windows `.cmd` shim.
+  - Aligns Windows release builds with `ct2rs`/CTranslate2 by using `RUSTFLAGS=-C target-feature=+crt-static` in Release and Release Preflight matrix jobs.
   - Uses the new Release Preflight gate before any tag is created.
   - Updates release versions and README release notes for v0.3.12.
 - User-facing changes:
   - No new app behavior beyond v0.3.8.
   - Windows release publishing should no longer fail in frontend build because of the Vite shim path.
+  - Windows release publishing should no longer fail while linking the bundled C++ translation runtime.
 - Risky areas:
   - Cross-platform Vite wrapper execution through `process.execPath`.
+  - Windows static MSVC CRT release linking for C++ translation dependencies.
   - Release preflight must be green on macOS, Windows, and Linux before tag publish.
   - Release updater signing still depends on valid GitHub Actions secrets.
 
@@ -35,6 +38,7 @@
   - Vite production build passed with warnings for Bun's emulated Node version, `SummaryModal.tsx` mixed static/dynamic import, and a large main chunk.
 - `TAURI_SIGNING_PRIVATE_KEY_PATH=/Users/trixter/.tauri/talkis-updater.key bun run build:release:macos`: built release sidecars, frontend, Rust release binary, `Talkis.app`, and `Talkis.app.tar.gz`; failed only at updater signature because this shell does not have the correct `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` for the encrypted local key.
 - GitHub Release Preflight: pending for `Preflight macos`, `Preflight windows`, and `Preflight linux` on this exact release commit.
+  - First preflight run `29252319785` on commit `5aa28f5` passed macOS and Linux, passed Windows `Run release checks` and `Build frontend`, then failed Windows `Build bundles` with MSVC CRT mismatch around `libct2rs`.
 - Native/GitHub Windows build: must be validated by Release Preflight before tagging.
 - Native/GitHub Linux build: must be validated by Release Preflight before tagging.
 - Additional manual checks:
