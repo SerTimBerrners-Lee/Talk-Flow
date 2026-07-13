@@ -12,10 +12,55 @@ on:
 
 permissions:
   contents: write
+  checks: read
 
 jobs:
+  verify-preflight:
+    name: Verify release preflight
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require successful release preflight
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          git fetch --tags --force
+          target_sha="$(git rev-list -n 1 "$RELEASE_REF")"
+          echo "Checking Release Preflight checks for ${RELEASE_REF} (${target_sha})"
+
+          checks_json="$(curl -fsSL \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/commits/${target_sha}/check-runs?per_page=100")"
+
+          missing=0
+          for check_name in "Preflight macos" "Preflight windows" "Preflight linux"; do
+            conclusion="$(jq -r --arg name "$check_name" '[.check_runs[] | select(.name == $name)] | sort_by(.completed_at // "") | last | .conclusion // ""' <<< "$checks_json")"
+
+            if [[ "$conclusion" != "success" ]]; then
+              echo "::error title=Release preflight missing::${check_name} must be successful on ${target_sha} before publishing a release tag. Current conclusion: ${conclusion:-missing}."
+              missing=1
+            else
+              echo "${check_name}: success"
+            fi
+          done
+
+          if [[ "$missing" != "0" ]]; then
+            echo "Run the Release Preflight workflow on the release branch and do not push a release tag until all three platform checks pass."
+            exit 1
+          fi
+
   build:
     name: Build ${{ matrix.platform }}
+    needs: verify-preflight
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false

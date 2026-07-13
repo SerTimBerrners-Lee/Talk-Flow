@@ -20,6 +20,7 @@ Copy this file to `docs/release/review-vX.Y.Z.md` for each release.
 
 - `bun run check:release`
 - `bun run build:release:macos`
+- GitHub Release Preflight:
 - Native/GitHub Windows build:
 - Native/GitHub Linux build:
 - Additional manual checks:
@@ -41,4 +42,5 @@ Copy this file to `docs/release/review-vX.Y.Z.md` for each release.
 ## Decision
 
 - Ready for `main` merge: yes/no
+- Release preflight green on exact tag commit: yes/no
 - Ready for tag publish: yes/no
