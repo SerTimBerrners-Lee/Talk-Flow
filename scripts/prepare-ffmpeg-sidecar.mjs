@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,6 +36,24 @@ function resolveSourceBinary() {
   return require("ffmpeg-static");
 }
 
+function fileHash(path) {
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+function copyFileIfChanged(source, destination) {
+  if (existsSync(destination)) {
+    const sourceStat = statSync(source);
+    const destinationStat = statSync(destination);
+
+    if (sourceStat.size === destinationStat.size && fileHash(source) === fileHash(destination)) {
+      return false;
+    }
+  }
+
+  copyFileSync(source, destination);
+  return true;
+}
+
 const targetTriple = readTargetTriple();
 const sourceBinary = resolveSourceBinary();
 const extension = targetTriple.includes("windows") ? ".exe" : "";
@@ -49,7 +68,7 @@ if (!statSync(sourceBinary).isFile()) {
 }
 
 mkdirSync(binariesDir, { recursive: true });
-copyFileSync(sourceBinary, destinationBinary);
+copyFileIfChanged(sourceBinary, destinationBinary);
 
 if (!targetTriple.includes("windows")) {
   chmodSync(destinationBinary, 0o755);

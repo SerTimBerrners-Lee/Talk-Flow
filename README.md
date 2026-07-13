@@ -40,6 +40,11 @@ It is designed for practical daily work: IDEs, chats, notes, CRM fields, email, 
 
 ## Latest Changes
 
+### v0.3.11
+
+- Fixed the Windows release workflow by reusing sidecars prepared during release checks instead of running the sidecar preparation step twice.
+- Made sidecar preparation idempotent by skipping copies when the source and destination binaries are already identical.
+
 ### v0.3.10
 
 - Hardened the Windows Vite wrapper path normalization used by release builds.

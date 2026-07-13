@@ -98,9 +98,6 @@ jobs:
           cargo check --manifest-path src-tauri/Cargo.toml
           bun run smoke:hotkey
 
-      - name: Prepare release sidecars
-        run: bun run prepare:sidecars
-
       - name: Build frontend
         run: bun run build
 

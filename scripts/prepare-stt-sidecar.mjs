@@ -1,5 +1,6 @@
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -154,6 +155,24 @@ function markExecutable(path, targetTriple) {
   }
 }
 
+function fileHash(path) {
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+function copyFileIfChanged(source, destination) {
+  if (existsSync(destination)) {
+    const sourceStat = statSync(source);
+    const destinationStat = statSync(destination);
+
+    if (sourceStat.size === destinationStat.size && fileHash(source) === fileHash(destination)) {
+      return false;
+    }
+  }
+
+  copyFileSync(source, destination);
+  return true;
+}
+
 const targetTriple = readTargetTriple();
 ensureLinuxBuildDependencies(targetTriple);
 
@@ -195,7 +214,7 @@ for (const sidecar of sidecars) {
   }
 
   markExecutable(sourceBinary, targetTriple);
-  copyFileSync(sourceBinary, destinationBinary);
+  copyFileIfChanged(sourceBinary, destinationBinary);
   markExecutable(destinationBinary, targetTriple);
 
   console.log(`Prepared ${sidecar} sidecar: ${destinationBinary}`);
