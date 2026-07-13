@@ -35,9 +35,8 @@ function prepareEsbuildBinary() {
   return target;
 }
 
-function resolveViteBin() {
-  const binName = process.platform === "win32" ? "vite.cmd" : "vite";
-  return normalizeWindowsPath(join(rootDir, "node_modules", ".bin", binName));
+function resolveViteScript() {
+  return normalizeWindowsPath(resolvePackageFile("vite", "bin/vite.js"));
 }
 
 const env = { ...process.env };
@@ -47,11 +46,10 @@ if (esbuildBinary) {
   env.ESBUILD_BINARY_PATH = esbuildBinary;
 }
 
-const child = spawn(resolveViteBin(), process.argv.slice(2), {
+const child = spawn(process.execPath, [resolveViteScript(), ...process.argv.slice(2)], {
   cwd: rootDir,
   env,
   stdio: "inherit",
-  shell: process.platform === "win32",
 });
 
 child.on("exit", (code, signal) => {

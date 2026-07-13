@@ -40,6 +40,11 @@ Talkis сделан для повседневной работы: IDE, чаты,
 
 ## Последние изменения
 
+### v0.3.12
+
+- Исправлена Windows frontend release-сборка: Vite теперь запускается через JavaScript entrypoint пакета, без зависимости от platform-specific `.cmd` shim.
+- Этот release candidate должен пройти Release Preflight на macOS, Windows и Linux до создания tag.
+
 ### v0.3.11
 
 - Исправлен Windows release workflow: sidecars, подготовленные во время release checks, теперь переиспользуются без повторного запуска подготовки.
