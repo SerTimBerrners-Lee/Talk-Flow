@@ -40,6 +40,11 @@ It is designed for practical daily work: IDEs, chats, notes, CRM fields, email, 
 
 ## Latest Changes
 
+### v0.3.9
+
+- Fixed Windows release builds by resolving the Vite wrapper root path with `fileURLToPath`, avoiding malformed `/D:/...` paths on GitHub Actions Windows runners.
+- Re-publishing the v0.3.8 app changes with the Windows bundle fix so macOS, Windows, and Linux artifacts can be produced by the release workflow.
+
 ### v0.3.8
 
 - Added live local dictation for streaming STT models: the text overlay opens when recording starts, shows partial results while speaking, and still pastes only after stop.

@@ -38,6 +38,13 @@ Talkis сделан для повседневной работы: IDE, чаты,
 - Единый управляемый локальный STT runtime `transcribe.cpp` для Whisper, Qwen ASR, NVIDIA Parakeet и локальные summary через управляемый GGUF LLM runtime.
 - Нативные сборки для macOS, Windows и Linux.
 
+## Последние изменения
+
+### v0.3.9
+
+- Исправлена Windows release-сборка: Vite wrapper теперь вычисляет корень проекта через `fileURLToPath`, без некорректных путей вида `/D:/...` на GitHub Actions Windows runners.
+- Повторно публикуются изменения v0.3.8 с исправлением Windows bundle, чтобы release workflow собрал артефакты для macOS, Windows и Linux.
+
 ## Демонстрация
 
 В репозиторий добавлены те же GIF-демо, которые используются на сайте Talkis.
