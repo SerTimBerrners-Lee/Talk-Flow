@@ -40,6 +40,11 @@ Talkis сделан для повседневной работы: IDE, чаты,
 
 ## Последние изменения
 
+### v0.3.10
+
+- Усилена нормализация Windows-путей в Vite wrapper, который используется release-сборками.
+- GitHub Actions release-сборка разделена на явные шаги sidecar, frontend и native bundle, чтобы Windows packaging failures были видны без доступа к raw logs.
+
 ### v0.3.9
 
 - Исправлена Windows release-сборка: Vite wrapper теперь вычисляет корень проекта через `fileURLToPath`, без некорректных путей вида `/D:/...` на GitHub Actions Windows runners.

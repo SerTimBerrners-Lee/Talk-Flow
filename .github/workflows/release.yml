@@ -23,20 +23,21 @@ jobs:
         include:
           - platform: macos
             runner: macos-latest
-            release_script: build:release:macos
+            bundle_targets: app
             updater_platform: darwin-aarch64
           - platform: windows
             runner: windows-latest
-            release_script: build:release:windows
+            bundle_targets: nsis
             updater_platform: windows-x86_64
           - platform: linux
             runner: ubuntu-24.04
-            release_script: build:release:linux
+            bundle_targets: appimage,deb
             updater_platform: linux-x86_64
 
     env:
       MACOSX_DEPLOYMENT_TARGET: "11.0"
       TALKIS_STT_RELEASE: "1"
+      TALKIS_SKIP_BEFORE_BUILD: "1"
       TALKIS_UPDATER_PLATFORM: ${{ matrix.updater_platform }}
 
     steps:
@@ -97,11 +98,21 @@ jobs:
           cargo check --manifest-path src-tauri/Cargo.toml
           bun run smoke:hotkey
 
+      - name: Prepare release sidecars
+        run: bun run prepare:sidecars
+
+      - name: Build frontend
+        run: bun run build
+
       - name: Build bundles
-        run: bun run ${{ matrix.release_script }}
+        run: bun run tauri build --bundles ${{ matrix.bundle_targets }}
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - name: Postprocess macOS release
+        if: matrix.platform == 'macos'
+        run: bun run postprocess:macos-release
 
       - name: Archive macOS app bundle
         if: matrix.platform == 'macos'

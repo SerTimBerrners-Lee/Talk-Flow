@@ -40,6 +40,11 @@ It is designed for practical daily work: IDEs, chats, notes, CRM fields, email, 
 
 ## Latest Changes
 
+### v0.3.10
+
+- Hardened the Windows Vite wrapper path normalization used by release builds.
+- Split the GitHub Actions release bundle phase into explicit sidecar, frontend, and native bundle steps so Windows packaging failures are visible without raw log access.
+
 ### v0.3.9
 
 - Fixed Windows release builds by resolving the Vite wrapper root path with `fileURLToPath`, avoiding malformed `/D:/...` paths on GitHub Actions Windows runners.

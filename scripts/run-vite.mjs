@@ -6,7 +6,14 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
-const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
+
+function normalizeWindowsPath(path) {
+  if (process.platform !== "win32") return path;
+
+  return path.replace(/^\/([A-Za-z]:[\\/])/, "$1");
+}
+
+const rootDir = dirname(dirname(normalizeWindowsPath(fileURLToPath(import.meta.url))));
 
 function resolvePackageFile(packageName, relativePath) {
   return join(dirname(require.resolve(`${packageName}/package.json`)), relativePath);
@@ -30,7 +37,7 @@ function prepareEsbuildBinary() {
 
 function resolveViteBin() {
   const binName = process.platform === "win32" ? "vite.cmd" : "vite";
-  return join(rootDir, "node_modules", ".bin", binName);
+  return normalizeWindowsPath(join(rootDir, "node_modules", ".bin", binName));
 }
 
 const env = { ...process.env };
