@@ -22,6 +22,29 @@ function settings(overrides: Partial<AppSettings>): AppSettings {
 }
 
 describe("resolveSummaryBackend local LLM behavior", () => {
+  it("treats the persisted none sentinel as no selected text model", () => {
+    const backend = resolveSummaryBackend(
+      settings({ apiKey: "transcription-key", llmModel: "none" }),
+    );
+    expect(backend).toBeNull();
+    expect(
+      isSummaryAvailable(
+        settings({ apiKey: "transcription-key", llmModel: "none" }),
+      ),
+    ).toBe(false);
+  });
+
+  it("requires a text model even when a custom endpoint is configured", () => {
+    expect(
+      resolveSummaryBackend(
+        settings({
+          llmEndpoint: "http://localhost:11434/v1",
+          llmModel: " ",
+        }),
+      ),
+    ).toBeNull();
+  });
+
   it("treats bundled runtime port 8011 without a selected model as unavailable", () => {
     const backend = resolveSummaryBackend(
       settings({ llmEndpoint: "http://127.0.0.1:8011/v1" }),

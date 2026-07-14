@@ -587,7 +587,7 @@ export function DevChatTab({
         temperature: 0.3,
       },
       settings: nextSettings,
-      noModelError: t("summary.noModel"),
+      noModelError: t("devChat.noModel"),
     });
 
     return {

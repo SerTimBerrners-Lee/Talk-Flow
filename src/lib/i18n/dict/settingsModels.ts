@@ -42,6 +42,21 @@ export const settingsModels = {
   "models.textModel.apiKeyPlaceholder": { ru: "Необязательно для локального endpoint", en: "Optional for a local endpoint" },
   "models.textModel.statusSet": { ru: "Настроена", en: "Configured" },
   "models.textModel.statusUnset": { ru: "Не настроена", en: "Not configured" },
+  "models.textModel.statusTesting": { ru: "Проверяем", en: "Testing" },
+  "models.textModel.statusError": { ru: "Ошибка", en: "Error" },
+  "models.textModel.needModel": {
+    ru: "Укажите название текстовой модели перед проверкой.",
+    en: "Enter a text model name before testing.",
+  },
+  "models.textModel.needApiKey": {
+    ru: "Укажите API-ключ для удалённой текстовой модели.",
+    en: "Enter an API key for the remote text model.",
+  },
+  "models.textModel.testSuccess": {
+    ru: "Текстовая модель отвечает. Настройки сохранены.",
+    en: "The text model responded. Settings saved.",
+  },
+  "models.textModel.testButton": { ru: "Тестировать", en: "Test" },
 
   "models.modeCommit.label": { ru: "Режим: {mode}", en: "Mode: {mode}" },
   "models.modeCommit.select": { ru: "Выбрать", en: "Select" },

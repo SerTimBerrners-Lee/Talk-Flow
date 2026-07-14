@@ -276,6 +276,12 @@ export function resolveSummaryBackend(
   // (Ollama/LM Studio) has no marker, so we just use its endpoint as-is.
   const localModelId = settings.llmLocalModelId?.trim() ?? "";
 
+  // "none" is the persisted sentinel for an intentionally unselected text
+  // model. Never send it to an OpenAI-compatible endpoint as a real model id.
+  if (!model || model.toLowerCase() === "none") {
+    return null;
+  }
+
   if (endpoint) {
     // Bundled runtime referenced but no model selected → nothing will start it
     // (dead port). Treat as not configured so the UI tells the user to pick a

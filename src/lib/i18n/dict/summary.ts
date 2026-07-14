@@ -66,6 +66,10 @@ export const summary = {
   "devChat.usedSources": { ru: "Использованы записи:", en: "Used records:" },
   "devChat.openSource": { ru: "Открыть запись {title}", en: "Open record {title}" },
   "devChat.emptyResponse": { ru: "Модель вернула пустой ответ.", en: "The model returned an empty response." },
+  "devChat.noModel": {
+    ru: "Для чата выберите текстовую модель во вкладке «Модели» → «API» → «Текстовая».",
+    en: "Select a text model in Models → API → Text to use the chat.",
+  },
   "devChat.duration": { ru: "{seconds} с", en: "{seconds} s" },
 
   // History-row action menu (MainTab)

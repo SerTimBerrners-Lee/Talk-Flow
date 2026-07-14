@@ -1232,10 +1232,28 @@ function TextModelCard({
 }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
-  // The model name has a built-in default ("gpt-4o-mini"), so only the endpoint
-  // or the text-model's own API key signal that the user actually set this up.
-  const configured =
-    Boolean((settings.llmEndpoint || "").trim()) || Boolean((settings.llmApiKey || "").trim());
+  const [testState, setTestState] = useState<{
+    status: AdapterTestStatus;
+    message: string;
+  }>({ status: "idle", message: "" });
+  const endpoint = (settings.llmEndpoint || "").trim();
+  const model = (settings.llmModel || "").trim();
+  const apiKey = (settings.llmApiKey || settings.apiKey || "").trim();
+  const isLocalEndpoint = /127\.0\.0\.1|localhost/i.test(endpoint);
+  const hasSelectedModel = Boolean(model) && model.toLowerCase() !== "none";
+  const configured = hasSelectedModel && (isLocalEndpoint || Boolean(apiKey));
+  const statusLabel = testState.status === "testing"
+    ? t("models.textModel.statusTesting")
+    : testState.status === "error"
+      ? t("models.textModel.statusError")
+      : configured
+        ? t("models.textModel.statusSet")
+        : t("models.textModel.statusUnset");
+  const statusColor = testState.status === "error"
+    ? "var(--error-bright)"
+    : configured || testState.status === "success"
+      ? "var(--success-bright)"
+      : "var(--text-low)";
   const FIELD_STYLE: CSSProperties = {
     flex: 1,
     minWidth: 0,
@@ -1246,7 +1264,41 @@ function TextModelCard({
   };
   // Editing a custom text model means it's no longer the bundled local runtime, so
   // drop the marker that tells summary to auto-start the sidecar.
-  const editField = (patch: Partial<AppSettings>) => update({ ...patch, llmLocalModelId: "" });
+  const editField = (patch: Partial<AppSettings>) => {
+    setTestState({ status: "idle", message: "" });
+    update({ ...patch, llmLocalModelId: "" });
+  };
+  const testTextModel = async (): Promise<void> => {
+    if (!hasSelectedModel) {
+      setTestState({ status: "error", message: t("models.textModel.needModel") });
+      return;
+    }
+    if (!isLocalEndpoint && !apiKey) {
+      setTestState({ status: "error", message: t("models.textModel.needApiKey") });
+      return;
+    }
+
+    setTestState({ status: "testing", message: t("models.connection.testing") });
+    try {
+      await invoke<{ result: string }>("process_text", {
+        req: {
+          text: "Connection test",
+          prompt: "Reply only with OK.",
+          temperature: 0,
+          max_tokens: 8,
+          endpoint: endpoint || null,
+          model,
+          api_key: apiKey || null,
+        },
+      });
+      setTestState({ status: "success", message: t("models.textModel.testSuccess") });
+    } catch (error) {
+      setTestState({
+        status: "error",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
   return (
     <div className="card" style={{ padding: 0, overflow: "hidden", background: "var(--surface)" }}>
       <button
@@ -1260,8 +1312,8 @@ function TextModelCard({
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 3 }}>
             <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)" }}>{t("models.textModel.title")}</div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: configured ? "var(--success-bright)" : "var(--text-low)", padding: "5px 9px", borderRadius: 999, background: "var(--control-muted)", whiteSpace: "nowrap" }}>
-              {configured ? t("models.textModel.statusSet") : t("models.textModel.statusUnset")}
+            <div style={{ fontSize: 11, fontWeight: 700, color: statusColor, padding: "5px 9px", borderRadius: 999, background: "var(--control-muted)", whiteSpace: "nowrap" }}>
+              {statusLabel}
             </div>
           </div>
           <div style={{ fontSize: 12, lineHeight: 1.45, color: "var(--text-mid)" }}>
@@ -1307,6 +1359,52 @@ function TextModelCard({
               spellCheck={false}
               style={FIELD_STYLE}
             />
+          </div>
+          {testState.message && (
+            <div style={{
+              fontSize: 12,
+              lineHeight: 1.6,
+              padding: "8px 10px",
+              borderRadius: 8,
+              background: testState.status === "success" ? "var(--success-soft)" : testState.status === "error" ? "var(--danger-soft)" : "var(--control-muted)",
+              color: testState.status === "success" ? "var(--success-bright)" : testState.status === "error" ? "var(--error-bright)" : "var(--text-mid)",
+              border: `1px solid ${testState.status === "success" ? "var(--success-border)" : testState.status === "error" ? "var(--danger-border)" : "var(--border-subtle)"}`,
+            }}>
+              {testState.message}
+            </div>
+          )}
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button
+              type="button"
+              onClick={() => void testTextModel()}
+              disabled={testState.status === "testing"}
+              style={{
+                padding: "9px 12px",
+                borderRadius: 10,
+                border: "1px solid var(--border-dashed)",
+                background: testState.status === "testing" ? "var(--control-muted)" : "var(--accent)",
+                color: testState.status === "testing" ? "var(--text-mid)" : "var(--accent-contrast)",
+                fontSize: 12,
+                fontWeight: 700,
+                fontFamily: "var(--font-main)",
+                cursor: testState.status === "testing" ? "wait" : "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              {testState.status === "testing" ? (
+                <>
+                  <span className="loading-soft-ring" />
+                  {t("models.test.checking")}
+                </>
+              ) : (
+                <>
+                  <IconBolt size={14} stroke={2.2} />
+                  {t("models.textModel.testButton")}
+                </>
+              )}
+            </button>
           </div>
         </div>
       )}
