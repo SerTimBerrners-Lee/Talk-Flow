@@ -5,8 +5,8 @@
   "version": "0.3.12",
   "identifier": "com.trixter.talkis",
   "build": {
-    "beforeDevCommand": "bun run prepare:sidecars && bun run dev",
-    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "bun scripts/run-vite.mjs --talkis-check-dev-port && bun run prepare:sidecars && bun run dev",
+    "devUrl": "http://localhost:14320",
     "beforeBuildCommand": "bun scripts/before-tauri-build.mjs",
     "frontendDist": "../dist"
   },
