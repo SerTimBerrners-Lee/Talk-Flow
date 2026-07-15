@@ -32,13 +32,25 @@ It is designed for practical daily work: IDEs, chats, notes, CRM fields, email, 
 - Use locked recording mode for longer speech without holding the keys.
 - Paste cleaned text automatically after transcription.
 - Choose cloud mode, your own API key, or local STT and text LLM models.
+- Translate system audio in real time through Talkis Cloud or a verified Realtime API connection, with optional spoken translation on macOS.
+- Translate selected text with a separate configurable global hotkey.
 - Transcribe audio and video files from the Files tab or by dropping files onto the widget.
-- Record macOS calls with separate microphone and system-audio tracks.
-- Keep local history for voice recordings and file transcriptions.
+- Record calls with separate microphone and system-audio tracks on macOS, Windows, and Linux.
+- Keep local history for voice recordings, file transcriptions, calls, and live translations.
 - Run managed local STT through one native `transcribe.cpp` runtime for Whisper, Qwen ASR, NVIDIA Parakeet, plus local text summaries through a managed GGUF LLM runtime.
 - Build native bundles for macOS, Windows, and Linux.
 
 ## Latest Changes
+
+### v0.3.13
+
+- Added synchronous system-audio translation through Talkis Cloud or verified OpenAI/Gemini Realtime API adapters; local models remain available for the rest of the app, while live translation requires Cloud or API.
+- Added optional translated voice playback on macOS, with Talkis audio excluded from capture and the original source ducked to prevent feedback loops.
+- Added realtime streaming dictation for supported local and API STT models, including live partial text and a batch fallback for the final result.
+- Reworked dictation and selected-text hotkey capture into one release-on-complete transaction with conflict checks, rollback, stale-request protection, and runtime registration without restart.
+- Improved the floating text overlay: wider streaming layout, compact speaker turns, dark-theme support, drag-to-move, immediate replacement by a new request, and automatic dismissal ten seconds after terminal results.
+- Fixed selected-text translation, permission recovery after relaunch, widget edge clipping, history action menus near the viewport edge, live-translation audio playback, and persisted widget/streaming settings.
+- Added a stable signed macOS development app runner so TCC permissions survive local rebuilds when an Apple Development identity is available.
 
 ### v0.3.12
 
@@ -147,11 +159,13 @@ The hotkey, microphone, language, model source, cleanup style, and app appearanc
 
 ### Talkis Cloud
 
-Sign in to [Talkis Cloud](https://talkis.ru) and use transcription without managing API keys. Requests go through `proxy.talkis.ru`.
+Sign in to [Talkis Cloud](https://talkis.ru) and use transcription without managing API keys. Requests go through `proxy.talkis.ru`. Synchronous translation uses a short-lived Realtime credential issued by the authenticated proxy; the provider key is never stored in the desktop app.
 
 ### Own API Key
 
 Use an OpenAI-compatible STT endpoint and a separate LLM endpoint for text cleanup. The Models tab also contains API adapter cards for supported providers.
+
+Realtime dictation and synchronous translation are enabled only after the exact provider, model, endpoint, and key configuration passes its connection check.
 
 Supported STT model names include:
 
@@ -228,6 +242,12 @@ Call recording captures two tracks:
 System-audio capture is implemented with Core Audio on macOS, WASAPI loopback on
 Windows, and PipeWire monitor streams on Linux. Linux requires a running PipeWire
 daemon with an active output device.
+
+## Synchronous Translation
+
+Enable the translation button in Settings -> Translation, choose the target language, and start it from the floating widget. Cloud mode uses the Talkis proxy; API mode uses a verified OpenAI or Gemini Realtime adapter. Local mode does not provide synchronous translation, but local dictation, selected-text translation, file transcription, summaries, and other local features remain available.
+
+The live text overlay keeps consecutive chunks from the same source together and stores the finished session in local history. On macOS, OpenAI-backed sessions can also play translated speech while reducing the original source volume.
 
 ## Privacy
 

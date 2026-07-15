@@ -24,8 +24,8 @@ import {
   scaleWidgetDimension,
 } from "../../../lib/widgetScale";
 import {
-  CALL_STACK_WIDGET_HEIGHT,
-  CALL_STACK_WIDGET_WIDTH,
+  widgetStackHeight,
+  widgetStackWidth,
   WidgetNoticeState,
   WidgetState,
 } from "../widgetConstants";
@@ -101,18 +101,18 @@ export function useWidgetController({
   const positionReadyRef = useRef(false);
   const widgetScaleRef = useRef(DEFAULT_WIDGET_SCALE);
   const widgetBaseSizeRef = useRef<{ width: number; height: number }>({
-    width: CALL_STACK_WIDGET_WIDTH,
-    height: CALL_STACK_WIDGET_HEIGHT,
+    width: widgetStackWidth(false),
+    height: widgetStackHeight(false),
   });
   const widgetSizeRef = useRef<{ width: number; height: number }>({
-    width: scaleWidgetDimension(CALL_STACK_WIDGET_WIDTH, DEFAULT_WIDGET_SCALE),
+    width: scaleWidgetDimension(widgetStackWidth(false), DEFAULT_WIDGET_SCALE),
     height: scaleWidgetDimension(
-      CALL_STACK_WIDGET_HEIGHT,
+      widgetStackHeight(false),
       DEFAULT_WIDGET_SCALE,
     ),
   });
   const stopAndProcessRef = useRef<() => Promise<void>>(async () => {});
-  const selectionTranslationBusyRef = useRef(false);
+  const selectionTranslationRequestRef = useRef<string | null>(null);
 
   // ── Dispatch: apply action → update machine state → execute effects ─────
   const dispatch = useCallback((action: WidgetAction) => {
@@ -379,6 +379,7 @@ export function useWidgetController({
 
   const showSelectionTextOverlay = useCallback(
     (payload: {
+      requestId: string;
       status: WidgetTextOverlayStatus;
       sourceText?: string;
       translatedText?: string;
@@ -387,6 +388,7 @@ export function useWidgetController({
     }): void => {
       void invoke("show_widget_text_overlay", {
         payload: {
+          requestId: payload.requestId,
           status: payload.status,
           sourceText: payload.sourceText ?? "",
           translatedText: payload.translatedText ?? "",
@@ -465,20 +467,23 @@ export function useWidgetController({
   }, []);
 
   const translateSelectionFromHotkey = useCallback(async (): Promise<void> => {
-    if (selectionTranslationBusyRef.current) {
-      return;
-    }
-
     if (machineRef.current.widgetState !== "idle") {
       return;
     }
 
-    selectionTranslationBusyRef.current = true;
+    const requestId =
+      typeof crypto.randomUUID === "function"
+        ? `selection-${crypto.randomUUID()}`
+        : `selection-${Date.now()}-${Math.random()}`;
+    selectionTranslationRequestRef.current = requestId;
+    const isCurrentRequest = (): boolean =>
+      selectionTranslationRequestRef.current === requestId;
 
     try {
       const activeSettings =
         settingsRef.current ?? (await getSettings({ reload: true }));
       settingsRef.current = activeSettings;
+      if (!isCurrentRequest()) return;
       const targetLanguage = selectionTranslationLanguageLabel(
         activeSettings.translation.selectionTargetLanguage,
       );
@@ -487,24 +492,29 @@ export function useWidgetController({
         return;
       }
 
+      showSelectionTextOverlay({
+        requestId,
+        status: "copying",
+        targetLanguage,
+      });
+
       let selectedText = await requestTalkisSelectedText();
+      if (!isCurrentRequest()) return;
 
       if (!selectedText.trim()) {
-        showSelectionTextOverlay({
-          status: "copying",
-          targetLanguage,
-        });
-
         await invoke("remember_paste_target_window").catch((error) => {
           logError(
             "PASTE",
             `Failed to remember selection translation target: ${formatErrorMessage(error)}`,
           );
         });
+        if (!isCurrentRequest()) return;
 
         try {
           selectedText = await invoke<string>("copy_selected_text");
+          if (!isCurrentRequest()) return;
         } catch (error) {
+          if (!isCurrentRequest()) return;
           logError(
             "TRANSLATION",
             `Failed to copy selected text: ${formatErrorMessage(error)}`,
@@ -519,6 +529,7 @@ export function useWidgetController({
             hideSelectionTextOverlay();
           } else {
             showSelectionTextOverlay({
+              requestId,
               status: "error",
               targetLanguage,
               message: visibleMessage,
@@ -530,12 +541,14 @@ export function useWidgetController({
       }
 
       if (!selectedText.trim()) {
+        if (!isCurrentRequest()) return;
         hideSelectionTextOverlay();
         showError(tn("widget.selectionTranslation.noSelection"));
         return;
       }
 
       showSelectionTextOverlay({
+        requestId,
         status: "translating",
         sourceText: selectedText,
         targetLanguage,
@@ -545,7 +558,9 @@ export function useWidgetController({
         text: selectedText,
         settings: activeSettings,
         onProgress: (progress: SelectionTranslationProgress) => {
+          if (!isCurrentRequest()) return;
           showSelectionTextOverlay({
+            requestId,
             status: "translating",
             sourceText: progress.sourceText,
             translatedText: progress.translatedText,
@@ -553,9 +568,11 @@ export function useWidgetController({
           });
         },
       });
+      if (!isCurrentRequest()) return;
 
       if (!translatedText.trim()) {
         showSelectionTextOverlay({
+          requestId,
           status: "error",
           sourceText: selectedText,
           targetLanguage,
@@ -566,19 +583,20 @@ export function useWidgetController({
       }
 
       showSelectionTextOverlay({
+        requestId,
         status: "done",
         sourceText: selectedText,
         translatedText,
         targetLanguage,
       });
     } catch (error) {
+      if (!isCurrentRequest()) return;
       showSelectionTextOverlay({
+        requestId,
         status: "error",
         message: formatErrorMessage(error),
       });
       showError(formatErrorMessage(error));
-    } finally {
-      selectionTranslationBusyRef.current = false;
     }
   }, [
     hideSelectionTextOverlay,

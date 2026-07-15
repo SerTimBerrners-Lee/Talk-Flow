@@ -1,4 +1,5 @@
 use crate::logger;
+use crate::realtime::{self, RealtimeAudioCommand, RealtimeConnectionRequest};
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Shutdown, TcpStream};
@@ -13,6 +14,8 @@ const DICTATION_STREAM_UPDATE_EVENT: &str = "dictation-stream:update";
 const TARGET_SAMPLE_RATE: u32 = 16_000;
 const TARGET_CHANNELS: u16 = 1;
 const LIVE_FINISH_TIMEOUT: Duration = Duration::from_secs(12);
+const PCM_CHUNK_BYTES: usize = (TARGET_SAMPLE_RATE as usize / 10) * 2;
+const LIVE_QUEUE_CHUNKS: usize = 24;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -22,6 +25,8 @@ pub struct LiveDictationStartRequest {
     pub language: String,
     pub endpoint: String,
     pub streaming_enabled: bool,
+    pub provider: Option<String>,
+    pub api_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -34,23 +39,17 @@ pub struct LiveDictationFinal {
 #[derive(Clone)]
 pub struct LiveDictationFeeder {
     request_id: String,
-    tx: mpsc::Sender<LiveDictationCommand>,
+    tx: tokio::sync::mpsc::Sender<RealtimeAudioCommand>,
     encoder: Arc<Mutex<LivePcmEncoder>>,
     closed: Arc<AtomicBool>,
 }
 
 pub struct LiveDictationSession {
     request_id: String,
-    tx: mpsc::Sender<LiveDictationCommand>,
+    tx: tokio::sync::mpsc::Sender<RealtimeAudioCommand>,
     result_rx: mpsc::Receiver<Result<LiveDictationFinal, String>>,
     encoder: Arc<Mutex<LivePcmEncoder>>,
     closed: Arc<AtomicBool>,
-}
-
-enum LiveDictationCommand {
-    Pcm(Vec<u8>),
-    Finish,
-    Cancel,
 }
 
 #[derive(Deserialize)]
@@ -82,6 +81,7 @@ struct LivePcmEncoder {
     source_sample_rate: u32,
     pending: Vec<f32>,
     next_source_pos: f64,
+    pending_pcm: Vec<u8>,
 }
 
 impl LiveDictationSession {
@@ -101,10 +101,11 @@ impl LivePcmEncoder {
             source_sample_rate: source_sample_rate.max(1),
             pending: Vec::new(),
             next_source_pos: 0.0,
+            pending_pcm: Vec::with_capacity(PCM_CHUNK_BYTES * 2),
         }
     }
 
-    fn encode(&mut self, samples: &[f32]) -> Vec<u8> {
+    fn encode(&mut self, samples: &[f32]) -> Vec<Vec<u8>> {
         if samples.is_empty() {
             return Vec::new();
         }
@@ -130,7 +131,20 @@ impl LivePcmEncoder {
             self.next_source_pos -= drain as f64;
         }
 
-        pcm
+        self.pending_pcm.extend_from_slice(&pcm);
+        let mut chunks = Vec::new();
+        while self.pending_pcm.len() >= PCM_CHUNK_BYTES {
+            chunks.push(self.pending_pcm.drain(..PCM_CHUNK_BYTES).collect());
+        }
+        chunks
+    }
+
+    fn flush(&mut self) -> Option<Vec<u8>> {
+        if self.pending_pcm.is_empty() {
+            None
+        } else {
+            Some(std::mem::take(&mut self.pending_pcm))
+        }
     }
 }
 
@@ -162,16 +176,26 @@ pub fn start_live_dictation_session(
         return None;
     }
 
-    let endpoint = match resolve_live_endpoint(&req) {
-        Ok(endpoint) => endpoint,
-        Err(message) => {
-            emit_dictation_stream_update(&app, &request_id, "error", "", Some(&message));
-            logger::log_error("LIVE_DICTATION", &message);
-            return None;
+    let provider = req
+        .provider
+        .as_deref()
+        .unwrap_or("local")
+        .trim()
+        .to_lowercase();
+    let endpoint = if provider == "local" {
+        match resolve_live_endpoint(&req) {
+            Ok(endpoint) => Some(endpoint),
+            Err(message) => {
+                emit_dictation_stream_update(&app, &request_id, "error", "", Some(&message));
+                logger::log_error("LIVE_DICTATION", &message);
+                return None;
+            }
         }
+    } else {
+        None
     };
 
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = tokio::sync::mpsc::channel(LIVE_QUEUE_CHUNKS);
     let (result_tx, result_rx) = mpsc::channel();
     let encoder = Arc::new(Mutex::new(LivePcmEncoder::new(source_sample_rate)));
     let closed = Arc::new(AtomicBool::new(false));
@@ -181,11 +205,9 @@ pub fn start_live_dictation_session(
     logger::log_info(
         "LIVE_DICTATION",
         &format!(
-            "Starting live dictation session: request_id={}, endpoint={}:{}{}, model={}, language={}, source_sample_rate={}",
+            "Starting live dictation session: request_id={}, provider={}, model={}, language={}, source_sample_rate={}",
             request_id,
-            endpoint.host,
-            endpoint.port,
-            endpoint.path_and_query,
+            provider,
             req.model,
             req.language,
             source_sample_rate
@@ -195,7 +217,11 @@ pub fn start_live_dictation_session(
     thread::Builder::new()
         .name("talkis-live-dictation".to_string())
         .spawn(move || {
-            let result = run_live_dictation_client(app, thread_request_id, endpoint, rx);
+            let result = if let Some(endpoint) = endpoint {
+                run_live_dictation_client(app, thread_request_id, endpoint, rx)
+            } else {
+                run_remote_live_dictation_client(app, thread_request_id, req, provider, rx)
+            };
             if let Err(message) = &result {
                 logger::log_error(
                     "LIVE_DICTATION",
@@ -227,7 +253,7 @@ pub fn feed_source_samples(feeder: &LiveDictationFeeder, samples: &[f32]) {
         return;
     }
 
-    let pcm = {
+    let chunks = {
         let mut encoder = match feeder.encoder.lock() {
             Ok(encoder) => encoder,
             Err(err) => err.into_inner(),
@@ -235,44 +261,57 @@ pub fn feed_source_samples(feeder: &LiveDictationFeeder, samples: &[f32]) {
         encoder.encode(samples)
     };
 
-    if pcm.is_empty() {
+    if chunks.is_empty() {
         return;
     }
 
-    if feeder.tx.send(LiveDictationCommand::Pcm(pcm)).is_err()
-        && !feeder.closed.swap(true, Ordering::Relaxed)
-    {
-        logger::log_error(
-            "LIVE_DICTATION",
-            &format!(
-                "Live dictation feed channel closed; disabling live feed for this recording: request_id={}",
-                feeder.request_id
-            ),
-        );
+    for pcm in chunks {
+        match feeder.tx.try_send(RealtimeAudioCommand::Pcm(pcm)) {
+            Ok(()) | Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {}
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                if !feeder.closed.swap(true, Ordering::Relaxed) {
+                    logger::log_error("LIVE_DICTATION", &format!("Live dictation feed channel closed; disabling live feed for this recording: request_id={}", feeder.request_id));
+                }
+                break;
+            }
+        }
     }
 }
 
 pub fn finish_live_dictation_session(
     session: LiveDictationSession,
 ) -> Result<LiveDictationFinal, String> {
-    let _ = session.tx.send(LiveDictationCommand::Finish);
-    session.closed.store(true, Ordering::Relaxed);
-    match session.result_rx.recv_timeout(LIVE_FINISH_TIMEOUT) {
+    let LiveDictationSession {
+        request_id,
+        tx,
+        result_rx,
+        encoder,
+        closed,
+    } = session;
+    if let Ok(mut encoder) = encoder.lock() {
+        if let Some(pcm) = encoder.flush() {
+            let _ = tx.try_send(RealtimeAudioCommand::Pcm(pcm));
+        }
+    }
+    let _ = tx.try_send(RealtimeAudioCommand::Finish);
+    closed.store(true, Ordering::Relaxed);
+    drop(tx);
+    match result_rx.recv_timeout(LIVE_FINISH_TIMEOUT) {
         Ok(result) => result,
         Err(mpsc::RecvTimeoutError::Timeout) => Err(format!(
             "Live dictation session timed out waiting for final text: request_id={}",
-            session.request_id
+            request_id
         )),
         Err(mpsc::RecvTimeoutError::Disconnected) => Err(format!(
             "Live dictation session ended before final text: request_id={}",
-            session.request_id
+            request_id
         )),
     }
 }
 
 pub fn cancel_live_dictation_session(session: LiveDictationSession) {
     session.closed.store(true, Ordering::Relaxed);
-    let _ = session.tx.send(LiveDictationCommand::Cancel);
+    let _ = session.tx.try_send(RealtimeAudioCommand::Cancel);
 }
 
 fn resolve_live_endpoint(req: &LiveDictationStartRequest) -> Result<LiveEndpoint, String> {
@@ -308,11 +347,75 @@ fn resolve_live_endpoint(req: &LiveDictationStartRequest) -> Result<LiveEndpoint
     })
 }
 
+fn run_remote_live_dictation_client(
+    app: AppHandle,
+    request_id: String,
+    req: LiveDictationStartRequest,
+    provider: String,
+    rx: tokio::sync::mpsc::Receiver<RealtimeAudioCommand>,
+) -> Result<LiveDictationFinal, String> {
+    let language = req.language.trim().to_string();
+    let connection = RealtimeConnectionRequest {
+        provider,
+        api_key: req.api_key.unwrap_or_default(),
+        model: req.model,
+        endpoint: req.endpoint,
+        target_language: if language.is_empty() {
+            None
+        } else {
+            Some(language)
+        },
+        purpose: "stt".to_string(),
+        voice_output: false,
+        voice: None,
+        voice_speed: None,
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|err| format!("Failed to start realtime runtime: {}", err))?;
+    let event_app = app.clone();
+    let event_request_id = request_id.clone();
+    let text =
+        runtime.block_on(realtime::run_streaming_stt(
+            connection,
+            rx,
+            move |event| match event.status {
+                realtime::NormalizedRealtimeStatus::Started => {
+                    emit_dictation_stream_update(&event_app, &event_request_id, "started", "", None)
+                }
+                realtime::NormalizedRealtimeStatus::Partial => emit_dictation_stream_update(
+                    &event_app,
+                    &event_request_id,
+                    "partial",
+                    &event.original,
+                    None,
+                ),
+                realtime::NormalizedRealtimeStatus::Final => emit_dictation_stream_update(
+                    &event_app,
+                    &event_request_id,
+                    "final",
+                    &event.original,
+                    None,
+                ),
+                realtime::NormalizedRealtimeStatus::Error => emit_dictation_stream_update(
+                    &event_app,
+                    &event_request_id,
+                    "error",
+                    "",
+                    event.message.as_deref(),
+                ),
+            },
+        ))?;
+
+    Ok(LiveDictationFinal { request_id, text })
+}
+
 fn run_live_dictation_client(
     app: AppHandle,
     request_id: String,
     endpoint: LiveEndpoint,
-    rx: mpsc::Receiver<LiveDictationCommand>,
+    mut rx: tokio::sync::mpsc::Receiver<RealtimeAudioCommand>,
 ) -> Result<LiveDictationFinal, String> {
     let mut stream =
         TcpStream::connect((endpoint.host.as_str(), endpoint.port)).map_err(|err| {
@@ -360,9 +463,9 @@ fn run_live_dictation_client(
 
     let mut write_error: Option<String> = None;
     let mut write_closed = false;
-    while let Ok(command) = rx.recv() {
+    while let Some(command) = rx.blocking_recv() {
         match command {
-            LiveDictationCommand::Pcm(bytes) => {
+            RealtimeAudioCommand::Pcm(bytes) => {
                 if let Err(err) = stream.write_all(&bytes) {
                     write_error = Some(format!("Failed to feed live STT audio: {}", err));
                     let _ = stream.shutdown(Shutdown::Write);
@@ -370,12 +473,12 @@ fn run_live_dictation_client(
                     break;
                 }
             }
-            LiveDictationCommand::Finish => {
+            RealtimeAudioCommand::Finish => {
                 let _ = stream.shutdown(Shutdown::Write);
                 write_closed = true;
                 break;
             }
-            LiveDictationCommand::Cancel => {
+            RealtimeAudioCommand::Cancel => {
                 let _ = stream.shutdown(Shutdown::Both);
                 return Err("Live dictation session cancelled.".to_string());
             }
@@ -522,8 +625,9 @@ mod tests {
         let mut encoder = LivePcmEncoder::new(48_000);
         let input = vec![0.5; 4_800];
         let output = encoder.encode(&input);
-        assert_eq!(output.len(), 1_600 * 2);
-        assert_eq!(i16::from_le_bytes([output[0], output[1]]), 16_384);
+        assert_eq!(output.len(), 1);
+        assert_eq!(output[0].len(), 1_600 * 2);
+        assert_eq!(i16::from_le_bytes([output[0][0], output[0][1]]), 16_384);
     }
 
     #[test]
@@ -534,6 +638,8 @@ mod tests {
             language: "ru".to_string(),
             endpoint: "http://127.0.0.1:15223/v1/audio/transcriptions".to_string(),
             streaming_enabled: true,
+            provider: None,
+            api_key: None,
         })
         .expect("endpoint");
 
@@ -546,5 +652,28 @@ mod tests {
             .path_and_query
             .contains("model=nvidia%2Fnemotron-3.5-asr-streaming-0.6b"));
         assert!(endpoint.path_and_query.contains("language=ru"));
+    }
+
+    #[test]
+    fn finish_does_not_block_when_audio_queue_is_full() {
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        tx.try_send(RealtimeAudioCommand::Pcm(vec![0; PCM_CHUNK_BYTES]))
+            .unwrap();
+        let (result_tx, result_rx) = mpsc::channel();
+        result_tx
+            .send(Err("mock realtime failure".to_string()))
+            .unwrap();
+        let session = LiveDictationSession {
+            request_id: "req-full-queue".to_string(),
+            tx,
+            result_rx,
+            encoder: Arc::new(Mutex::new(LivePcmEncoder::new(TARGET_SAMPLE_RATE))),
+            closed: Arc::new(AtomicBool::new(false)),
+        };
+
+        assert_eq!(
+            finish_live_dictation_session(session).unwrap_err(),
+            "mock realtime failure"
+        );
     }
 }

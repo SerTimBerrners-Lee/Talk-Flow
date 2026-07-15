@@ -119,6 +119,18 @@ export const settingsGeneral = {
     en: "Folder for dictation history and call recordings. Leave empty to use the default directory.",
   },
 
+  // Realtime transcription
+  "settings.realtimeTranscription.title": {
+    ru: "Транскрибация в реальном времени",
+    en: "Realtime transcription",
+  },
+  "settings.realtimeTranscription.on": { ru: "Включена", en: "On" },
+  "settings.realtimeTranscription.off": { ru: "Выключена", en: "Off" },
+  "settings.realtimeTranscription.desc": {
+    ru: "Использовать streaming автоматически для всех моделей, которые его поддерживают.",
+    en: "Automatically use streaming for every model that supports it.",
+  },
+
   // Recording audio
   "settings.recordingAudio.title": {
     ru: "Сохранять аудио записей",

@@ -15,10 +15,8 @@ const isSettings =
 const isWidgetNotice = new URLSearchParams(window.location.search).get("window") === "widget-notice";
 const isWidgetText = new URLSearchParams(window.location.search).get("window") === "widget-text";
 
-if (isSettings) {
-  applyThemePreference("system");
-  void applySavedTheme();
-}
+applyThemePreference("system");
+void applySavedTheme();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <I18nProvider>

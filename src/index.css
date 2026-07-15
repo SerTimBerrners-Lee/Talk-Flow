@@ -567,7 +567,7 @@ select {
 
 .widget-text-overlay-scroll {
   scrollbar-width: thin;
-  scrollbar-color: rgba(0, 0, 0, 0.18) transparent;
+  scrollbar-color: var(--border-strong) transparent;
 }
 
 .widget-text-overlay-scroll::-webkit-scrollbar {
@@ -582,7 +582,7 @@ select {
 
 .widget-text-overlay-scroll::-webkit-scrollbar-thumb {
   border-radius: 999px;
-  background: rgba(0, 0, 0, 0.18);
+  background: var(--border-strong);
 }
 
 @keyframes voice-logo-pulse {

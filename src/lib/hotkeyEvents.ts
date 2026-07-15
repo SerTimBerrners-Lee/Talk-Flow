@@ -14,11 +14,17 @@ export const SELECTION_TEXT_REQUEST_EVENT = "selection-text-request";
 export const SELECTION_TEXT_RESPONSE_EVENT = "selection-text-response";
 export const DICTATION_STREAM_UPDATE_EVENT = "dictation-stream:update";
 
+export type HotkeyTarget = "dictation" | "selection";
+
 export interface HotkeyChangeRequestPayload {
+  requestId: string;
+  target: HotkeyTarget;
   hotkey: string;
 }
 
 export interface HotkeyRegistrationResultPayload {
+  requestId: string;
+  target: HotkeyTarget;
   success: boolean;
   requestedHotkey: string;
   activeHotkey: string;
@@ -26,12 +32,16 @@ export interface HotkeyRegistrationResultPayload {
 }
 
 export interface NativeHotkeyCapturePayload {
+  requestId: string;
+  target: HotkeyTarget;
   status: "listening" | "preview" | "completed" | "cancelled" | "stopped";
   hotkey?: string | null;
   message?: string | null;
 }
 
 export interface HotkeyCaptureStatePayload {
+  requestId: string;
+  target: HotkeyTarget;
   active: boolean;
 }
 

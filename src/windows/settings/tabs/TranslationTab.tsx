@@ -1,43 +1,28 @@
-import {
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-import type {
-  Dispatch,
-  KeyboardEvent as ReactKeyboardEvent,
-  MouseEvent as ReactMouseEvent,
-  ReactElement,
-  RefObject,
-  SetStateAction,
-} from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { Dispatch, ReactElement, RefObject, SetStateAction } from "react";
 import { createPortal } from "react-dom";
-import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 
 import { LANGUAGES } from "../../../config/languages";
-import { buildFrontendHotkeyCandidate } from "../../../lib/frontendHotkeyCapture";
+import { Dropdown } from "../../../components/Dropdown";
+import { SETTINGS_UPDATED_EVENT } from "../../../lib/hotkeyEvents";
 import {
-  HOTKEY_CAPTURE_STATE_EVENT,
-  NATIVE_HOTKEY_CAPTURE_EVENT,
-  SETTINGS_UPDATED_EVENT,
-  type NativeHotkeyCapturePayload,
-} from "../../../lib/hotkeyEvents";
-import { IconCheck, IconChevronDown, IconSearch } from "../../../lib/icons";
+  IconCheck,
+  IconChevronDown,
+  IconSearch,
+} from "../../../lib/icons";
 import {
   DEFAULT_SELECTION_TRANSLATION_HOTKEY,
   formatHotkeyLabel,
   getSettings,
   isMacPlatform,
-  normalizeHotkey,
   saveSettings,
   type AppSettings,
   type TranslationSettings,
 } from "../../../lib/store";
 import { useI18n } from "../../../lib/i18n";
-import { logError, logInfo } from "../../../lib/logger";
+import { logError } from "../../../lib/logger";
+import { useHotkeyCapture } from "../useHotkeyCapture";
 
 const SETTING_ROW_COLUMNS = "minmax(0, 1fr) 280px";
 const SETTING_ROW_GAP = 16;
@@ -71,6 +56,10 @@ const TRANSLATION_GROUP_LAST_SECTION_STYLE = {
   ...TRANSLATION_GROUP_SECTION_STYLE,
   paddingBottom: 0,
 } as const;
+const LIVE_VOICES = ["marin", "cedar", "coral", "verse"] as const;
+const LIVE_VOICE_SPEEDS = [0.9, 1, 1.05, 1.1, 1.2] as const;
+
+type TranslationView = "live" | "other";
 
 interface LanguageOption {
   code: string;
@@ -124,24 +113,20 @@ function LanguageDropdownPortal({
       const availableBelow =
         window.innerHeight - rect.bottom - viewportPadding - gap;
       const availableAbove = rect.top - viewportPadding - gap;
-      const shouldFlip = availableBelow < 220 && availableAbove > availableBelow;
+      const shouldFlip =
+        availableBelow < 220 && availableAbove > availableBelow;
 
       let maxHeight = Math.min(
         320,
         Math.max(120, shouldFlip ? availableAbove : availableBelow),
       );
-      let top = shouldFlip
-        ? rect.top - gap - maxHeight
-        : rect.bottom + gap;
+      let top = shouldFlip ? rect.top - gap - maxHeight : rect.bottom + gap;
 
       if (top < viewportPadding) {
         top = viewportPadding;
       }
       if (top + maxHeight > window.innerHeight - viewportPadding) {
-        maxHeight = Math.max(
-          120,
-          window.innerHeight - viewportPadding - top,
-        );
+        maxHeight = Math.max(120, window.innerHeight - viewportPadding - top);
       }
 
       setPosition({ top, left, width, maxHeight });
@@ -286,19 +271,6 @@ function LanguageDropdownPortal({
   );
 }
 
-function stopSelectionHotkeyCaptureProcess(): void {
-  void emit(HOTKEY_CAPTURE_STATE_EVENT, { active: false }).catch(() => null);
-  if (isMacPlatform()) {
-    void invoke("stop_native_hotkey_capture").catch(() => null);
-  }
-}
-
-if (import.meta.hot) {
-  import.meta.hot.dispose(() => {
-    stopSelectionHotkeyCaptureProcess();
-  });
-}
-
 function fallbackTargetLanguage(sourceLanguage: string): string {
   return sourceLanguage === "en" ? "ru" : "en";
 }
@@ -336,36 +308,58 @@ function normalizeSelectionTargetLanguage(
 export function TranslationTab(): ReactElement {
   const { t } = useI18n();
   const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [activeView, setActiveView] = useState<TranslationView>("live");
+  const [liveVoiceVolumeDraft, setLiveVoiceVolumeDraft] = useState<
+    number | null
+  >(null);
+  const liveVoiceVolumeDraftRef = useRef<number | null>(null);
   const [targetSearch, setTargetSearch] = useState("");
   const [targetOpen, setTargetOpen] = useState(false);
   const [selectionTargetSearch, setSelectionTargetSearch] = useState("");
   const [selectionTargetOpen, setSelectionTargetOpen] = useState(false);
-  const [selectionHotkeyCaptureActive, setSelectionHotkeyCaptureActive] =
-    useState(false);
-  const [selectionHotkeyDraft, setSelectionHotkeyDraft] = useState<
-    string | null
-  >(null);
-  const [selectionHotkeyFeedback, setSelectionHotkeyFeedback] = useState("");
-  const [selectionHotkeyTone, setSelectionHotkeyTone] = useState<
-    "idle" | "success" | "error"
-  >("idle");
-  const [selectionHotkeySubmitting, setSelectionHotkeySubmitting] =
-    useState(false);
+  const [liveTargetSearch, setLiveTargetSearch] = useState("");
+  const [liveTargetOpen, setLiveTargetOpen] = useState(false);
   const targetRef = useRef<HTMLDivElement>(null);
   const selectionTargetRef = useRef<HTMLDivElement>(null);
-  const selectionHotkeyRef = useRef<HTMLDivElement>(null);
-  const selectionHotkeyCaptureActiveRef = useRef(false);
-  const usesNativeHotkeyCapture = isMacPlatform();
-
-  const setSelectionHotkeyCaptureActiveValue = (active: boolean): void => {
-    selectionHotkeyCaptureActiveRef.current = active;
-    setSelectionHotkeyCaptureActive(active);
-  };
+  const liveTargetRef = useRef<HTMLDivElement>(null);
+  const selectionHotkeyCapture = useHotkeyCapture({
+    target: "selection",
+    logTag: "TRANSLATION",
+    messages: {
+      initial: "",
+      applyFailed: t("settingsGeneralExtra.hotkey.applyFailed"),
+      saved: t("translation.selection.hotkeySaved"),
+      changeAgain: t("settingsGeneralExtra.hotkey.changeAgain"),
+      pressNew: t("settingsGeneralExtra.hotkey.pressNew"),
+      releaseToApply: t("settingsGeneralExtra.hotkey.releaseToApply"),
+      cancelledKept: t("settingsGeneralExtra.hotkey.cancelledKept"),
+      needMainKey: t("settingsGeneralExtra.hotkey.needMainKey"),
+      invalid: t("translation.selection.hotkeyInvalid"),
+      recognizeFailed: t("settingsGeneralExtra.hotkey.recognizeFailed"),
+      checkingFree: t("settingsGeneralExtra.hotkey.checkingFree"),
+      sendFailed: t("settingsGeneralExtra.hotkey.sendFailed"),
+      startingCapture: t("settingsGeneralExtra.hotkey.startingCapture"),
+      pressNewCombo: t("settingsGeneralExtra.hotkey.pressNewCombo"),
+      captureStartFailed: t("settingsGeneralExtra.hotkey.captureStartFailed"),
+    },
+    onApplied: async () => {
+      const latest = await getSettings({ reload: true });
+      setSettings(latest);
+    },
+  });
+  const {
+    surfaceRef: selectionHotkeyRef,
+    active: selectionHotkeyCaptureActive,
+    submitting: selectionHotkeySubmitting,
+    draft: selectionHotkeyDraft,
+    feedback: selectionHotkeyFeedback,
+    tone: selectionHotkeyTone,
+    handleSurfaceKeyDown: handleSelectionHotkeyCaptureSurfaceKeyDown,
+    handleSurfaceMouseDown: handleSelectionHotkeyCaptureSurfaceMouseDown,
+  } = selectionHotkeyCapture;
 
   useEffect(() => {
     let mounted = true;
-    stopSelectionHotkeyCaptureProcess();
-
     const loadSettings = async (): Promise<void> => {
       try {
         const next = await getSettings({ reload: true });
@@ -390,163 +384,6 @@ export function TranslationTab(): ReactElement {
   }, []);
 
   useEffect(() => {
-    const unlistenNativeHotkeyCapture = listen<NativeHotkeyCapturePayload>(
-      NATIVE_HOTKEY_CAPTURE_EVENT,
-      async ({ payload }) => {
-        if (!selectionHotkeyCaptureActiveRef.current) {
-          return;
-        }
-
-        if (payload.status === "stopped") {
-          setSelectionHotkeyCaptureActiveValue(false);
-          setSelectionHotkeyDraft(null);
-          return;
-        }
-
-        if (payload.status === "listening") {
-          setSelectionHotkeyDraft(null);
-          setSelectionHotkeyTone("idle");
-          setSelectionHotkeyFeedback(
-            payload.message || t("settingsGeneralExtra.hotkey.pressNew"),
-          );
-          return;
-        }
-
-        if (payload.status === "preview") {
-          setSelectionHotkeyDraft(payload.hotkey || null);
-          setSelectionHotkeyTone("idle");
-          setSelectionHotkeyFeedback(
-            payload.message || t("settingsGeneralExtra.hotkey.releaseToApply"),
-          );
-          return;
-        }
-
-        if (payload.status === "cancelled") {
-          await stopSelectionHotkeyCapture(
-            t("settingsGeneralExtra.hotkey.cancelledKept"),
-          );
-          return;
-        }
-
-        if (payload.status !== "completed") {
-          return;
-        }
-
-        await stopNativeSelectionHotkeyCapture();
-        await applySelectionHotkey(payload.hotkey?.trim() || null);
-      },
-    );
-
-    return () => {
-      void unlistenNativeHotkeyCapture.then((unlisten) => unlisten());
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!selectionHotkeyCaptureActive || usesNativeHotkeyCapture) {
-      return;
-    }
-
-    const handleKeyDown = (event: KeyboardEvent): void => {
-      event.preventDefault();
-      event.stopPropagation();
-
-      if (
-        event.key === "Escape" &&
-        !event.ctrlKey &&
-        !event.altKey &&
-        !event.shiftKey &&
-        !event.metaKey
-      ) {
-        void stopSelectionHotkeyCapture(
-          t("settingsGeneralExtra.hotkey.cancelledKept"),
-        );
-        return;
-      }
-
-      const candidate = buildFrontendHotkeyCandidate(event);
-      if (!candidate) {
-        setSelectionHotkeyDraft(null);
-        setSelectionHotkeyTone("idle");
-        setSelectionHotkeyFeedback(
-          t("settingsGeneralExtra.hotkey.needMainKey"),
-        );
-        return;
-      }
-
-      const normalized = normalizeHotkey(candidate);
-      setSelectionHotkeyDraft(candidate);
-
-      if (!normalized.valid) {
-        setSelectionHotkeyTone("error");
-        setSelectionHotkeyFeedback(
-          normalized.error || t("translation.selection.hotkeyInvalid"),
-        );
-        return;
-      }
-
-      void applySelectionHotkey(normalized.normalized || candidate);
-    };
-
-    window.addEventListener("keydown", handleKeyDown, true);
-    window.setTimeout(() => selectionHotkeyRef.current?.focus(), 0);
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown, true);
-    };
-  }, [selectionHotkeyCaptureActive, usesNativeHotkeyCapture]);
-
-  useEffect(() => {
-    const handler = (event: MouseEvent): void => {
-      if (
-        selectionHotkeyCaptureActive &&
-        selectionHotkeyRef.current &&
-        !selectionHotkeyRef.current.contains(event.target as Node)
-      ) {
-        void stopSelectionHotkeyCapture(
-          t("settingsGeneralExtra.hotkey.cancelledKept"),
-        );
-      }
-    };
-
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [selectionHotkeyCaptureActive]);
-
-  useEffect(() => {
-    return () => {
-      setSelectionHotkeyCaptureActiveValue(false);
-      setSelectionHotkeyDraft(null);
-      stopSelectionHotkeyCaptureProcess();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!selectionHotkeyCaptureActive) {
-      return;
-    }
-
-    const cancelCapture = (): void => {
-      void stopSelectionHotkeyCapture(
-        t("settingsGeneralExtra.hotkey.cancelledKept"),
-      );
-    };
-    const handleVisibilityChange = (): void => {
-      if (document.visibilityState === "hidden") {
-        cancelCapture();
-      }
-    };
-
-    window.addEventListener("blur", cancelCapture);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    return () => {
-      window.removeEventListener("blur", cancelCapture);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [selectionHotkeyCaptureActive]);
-
-  useEffect(() => {
     const handler = (event: MouseEvent): void => {
       if (
         targetRef.current &&
@@ -559,6 +396,12 @@ export function TranslationTab(): ReactElement {
         !selectionTargetRef.current.contains(event.target as Node)
       ) {
         setSelectionTargetOpen(false);
+      }
+      if (
+        liveTargetRef.current &&
+        !liveTargetRef.current.contains(event.target as Node)
+      ) {
+        setLiveTargetOpen(false);
       }
     };
 
@@ -598,6 +441,15 @@ export function TranslationTab(): ReactElement {
         language.code.toLowerCase().includes(search),
     );
   }, [selectionTargetOptions, selectionTargetSearch]);
+  const filteredLiveTargetOptions = useMemo(() => {
+    const search = liveTargetSearch.toLowerCase();
+    return selectionTargetOptions.filter(
+      (language) =>
+        language.name.toLowerCase().includes(search) ||
+        language.native.toLowerCase().includes(search) ||
+        language.code.toLowerCase().includes(search),
+    );
+  }, [selectionTargetOptions, liveTargetSearch]);
   const targetLanguage = settings
     ? normalizeTargetLanguage(
         sourceLanguage,
@@ -616,37 +468,22 @@ export function TranslationTab(): ReactElement {
   const currentSelectionTargetLanguage = selectionTargetOptions.find(
     (language) => language.code === selectionTargetLanguage,
   );
-
-  const verifySelectionHotkeyAvailable = async (
-    hotkey: string,
-  ): Promise<{ success: boolean; message?: string }> => {
-    const currentSelectionHotkey = settings?.translation.selectionHotkey
-      ? normalizeHotkey(settings.translation.selectionHotkey).normalized
-      : null;
-    const isAlreadyActive =
-      settings?.translation.selectionEnabled &&
-      currentSelectionHotkey === hotkey;
-
-    if (isAlreadyActive) {
-      return { success: true };
-    }
-
-    try {
-      await invoke("register_handy_hotkey", { hotkey });
-      await invoke("unregister_handy_hotkey", { hotkey }).catch((error) => {
-        void logError(
-          "TRANSLATION",
-          `Failed to unregister probed selection hotkey ${hotkey}: ${error}`,
-        );
-      });
-      return { success: true };
-    } catch (error) {
-      return {
-        success: false,
-        message: t("widget.hotkey.registerFailed", { hotkey }),
-      };
-    }
-  };
+  const liveTargetLanguage = settings?.translation.liveTargetLanguage || "en";
+  const currentLiveTargetLanguage = selectionTargetOptions.find(
+    (language) => language.code === liveTargetLanguage,
+  );
+  const localModelMode = Boolean(
+    settings?.useOwnKey &&
+      /127\.0\.0\.1|localhost/i.test(settings.whisperEndpoint || ""),
+  );
+  const liveVoiceSupported = Boolean(
+    isMacPlatform() &&
+      settings &&
+      (!settings.useOwnKey ||
+        (!localModelMode && settings.selectedTranslationAdapter === "openai")),
+  );
+  const liveVoiceActive =
+    liveVoiceSupported && Boolean(settings?.translation.liveVoiceEnabled);
 
   const updateTranslation = async (
     patch: Partial<TranslationSettings>,
@@ -657,9 +494,6 @@ export function TranslationTab(): ReactElement {
       ...settings.translation,
       ...patch,
     };
-    if (!nextTranslation.widgetEnabled) {
-      nextTranslation.active = false;
-    }
     nextTranslation.targetLanguage = normalizeTargetLanguage(
       settings.language,
       nextTranslation.targetLanguage,
@@ -676,7 +510,7 @@ export function TranslationTab(): ReactElement {
     setSettings(nextSettings);
 
     try {
-      await saveSettings({ translation: nextTranslation });
+      await saveSettings({ translation: patch });
       const latest = await getSettings({ reload: true });
       setSettings(latest);
       await emit(SETTINGS_UPDATED_EVENT);
@@ -693,229 +527,35 @@ export function TranslationTab(): ReactElement {
     }
   };
 
+  const previewLiveVoiceVolume = (value: number): void => {
+    liveVoiceVolumeDraftRef.current = value;
+    setLiveVoiceVolumeDraft(value);
+  };
+
+  const commitLiveVoiceVolume = async (): Promise<void> => {
+    const value = liveVoiceVolumeDraftRef.current;
+    if (value === null) return;
+
+    liveVoiceVolumeDraftRef.current = null;
+    setLiveVoiceVolumeDraft(null);
+    if (!settings || value === settings.translation.liveVoiceVolume) return;
+
+    await updateTranslation({ liveVoiceVolume: value });
+  };
+
   const toggleSelectionTranslation = async (): Promise<void> => {
     if (!settings || selectionHotkeySubmitting) return;
 
     if (settings.translation.selectionEnabled) {
-      setSelectionHotkeyTone("idle");
-      setSelectionHotkeyFeedback("");
+      selectionHotkeyCapture.resetFeedback();
       await updateTranslation({ selectionEnabled: false });
       return;
     }
 
-    const normalized = normalizeHotkey(
-      settings.translation.selectionHotkey || DEFAULT_SELECTION_TRANSLATION_HOTKEY,
-    );
-    if (!normalized.valid || !normalized.normalized) {
-      setSelectionHotkeyTone("error");
-      setSelectionHotkeyFeedback(
-        normalized.error || t("translation.selection.hotkeyInvalid"),
+    await selectionHotkeyCapture.submit(
+      settings.translation.selectionHotkey ||
+        DEFAULT_SELECTION_TRANSLATION_HOTKEY,
       );
-      return;
-    }
-
-    if (
-      normalizeHotkey(settings.hotkey).normalized === normalized.normalized
-    ) {
-      setSelectionHotkeyTone("error");
-      setSelectionHotkeyFeedback(t("widget.hotkey.conflict"));
-      return;
-    }
-
-    setSelectionHotkeySubmitting(true);
-    setSelectionHotkeyTone("idle");
-    setSelectionHotkeyFeedback(t("settingsGeneralExtra.hotkey.checkingFree"));
-
-    try {
-      const availability = await verifySelectionHotkeyAvailable(
-        normalized.normalized,
-      );
-      if (!availability.success) {
-        setSelectionHotkeyTone("error");
-        setSelectionHotkeyFeedback(
-          availability.message ||
-            t("widget.hotkey.registerFailed", {
-              hotkey: normalized.normalized,
-            }),
-        );
-        return;
-      }
-
-      await updateTranslation({
-        selectionEnabled: true,
-        selectionHotkey: normalized.normalized,
-      });
-      setSelectionHotkeyTone("success");
-      setSelectionHotkeyFeedback(t("translation.selection.hotkeySaved"));
-      void logInfo(
-        "TRANSLATION",
-        `Selected-text translation enabled with hotkey: ${normalized.normalized}`,
-      );
-    } finally {
-      setSelectionHotkeySubmitting(false);
-    }
-  };
-
-  const applySelectionHotkey = async (
-    candidate: string | null,
-  ): Promise<void> => {
-    await emit(HOTKEY_CAPTURE_STATE_EVENT, { active: false }).catch(() => null);
-    setSelectionHotkeyCaptureActiveValue(false);
-    setSelectionHotkeySubmitting(false);
-
-    if (!candidate) {
-      setSelectionHotkeyDraft(null);
-      setSelectionHotkeyTone("error");
-      setSelectionHotkeyFeedback(
-        t("settingsGeneralExtra.hotkey.recognizeFailed"),
-      );
-      return;
-    }
-
-    const normalized = normalizeHotkey(candidate);
-    if (!normalized.valid || !normalized.normalized) {
-      setSelectionHotkeyTone("error");
-      setSelectionHotkeyFeedback(
-        normalized.error || t("translation.selection.hotkeyInvalid"),
-      );
-      return;
-    }
-
-    if (
-      settings?.hotkey &&
-      normalizeHotkey(settings.hotkey).normalized === normalized.normalized
-    ) {
-      setSelectionHotkeyTone("error");
-      setSelectionHotkeyFeedback(t("widget.hotkey.conflict"));
-      return;
-    }
-
-    setSelectionHotkeySubmitting(true);
-    setSelectionHotkeyTone("idle");
-    setSelectionHotkeyFeedback(t("settingsGeneralExtra.hotkey.checkingFree"));
-
-    try {
-      const availability = await verifySelectionHotkeyAvailable(
-        normalized.normalized,
-      );
-      if (!availability.success) {
-        setSelectionHotkeyDraft(null);
-        setSelectionHotkeyTone("error");
-        setSelectionHotkeyFeedback(
-          availability.message ||
-            t("widget.hotkey.registerFailed", {
-              hotkey: normalized.normalized,
-            }),
-        );
-        return;
-      }
-
-      const latest = await updateTranslation({
-        selectionEnabled: true,
-        selectionHotkey: normalized.normalized,
-      });
-      setSelectionHotkeyDraft(null);
-      setSelectionHotkeyTone("success");
-      setSelectionHotkeyFeedback(t("translation.selection.hotkeySaved"));
-      void logInfo(
-        "TRANSLATION",
-        `Selected-text translation hotkey saved and enabled: ${normalized.normalized}`,
-      );
-      if (latest) {
-        setSettings(latest);
-      }
-    } catch (error) {
-      setSelectionHotkeyDraft(null);
-      setSelectionHotkeyTone("error");
-      setSelectionHotkeyFeedback(
-        error instanceof Error
-          ? error.message
-          : t("widget.hotkey.registerFailedGeneric"),
-      );
-    } finally {
-      setSelectionHotkeySubmitting(false);
-    }
-  };
-
-  const stopNativeSelectionHotkeyCapture = async (): Promise<void> => {
-    if (usesNativeHotkeyCapture) {
-      await invoke("stop_native_hotkey_capture").catch(() => null);
-    }
-    await emit(HOTKEY_CAPTURE_STATE_EVENT, { active: false }).catch(() => null);
-  };
-
-  const stopSelectionHotkeyCapture = async (
-    message?: string,
-  ): Promise<void> => {
-    setSelectionHotkeyCaptureActiveValue(false);
-    setSelectionHotkeyDraft(null);
-    await stopNativeSelectionHotkeyCapture();
-
-    if (message) {
-      setSelectionHotkeyTone("idle");
-      setSelectionHotkeyFeedback(message);
-    }
-  };
-
-  const startSelectionHotkeyCapture = async (): Promise<void> => {
-    if (selectionHotkeyCaptureActive || selectionHotkeySubmitting) {
-      return;
-    }
-
-    setSelectionHotkeyCaptureActiveValue(true);
-    setSelectionHotkeyDraft(null);
-    setSelectionHotkeyTone("idle");
-    setSelectionHotkeyFeedback(
-      usesNativeHotkeyCapture
-        ? t("settingsGeneralExtra.hotkey.startingCapture")
-        : t("settingsGeneralExtra.hotkey.pressNewCombo"),
-    );
-
-    try {
-      await emit(HOTKEY_CAPTURE_STATE_EVENT, { active: true });
-      if (usesNativeHotkeyCapture) {
-        await invoke("start_native_hotkey_capture");
-      } else {
-        window.setTimeout(() => selectionHotkeyRef.current?.focus(), 0);
-      }
-    } catch (error) {
-      setSelectionHotkeyCaptureActiveValue(false);
-      setSelectionHotkeyDraft(null);
-      setSelectionHotkeyTone("error");
-      setSelectionHotkeyFeedback(
-        t("settingsGeneralExtra.hotkey.captureStartFailed"),
-      );
-      await stopNativeSelectionHotkeyCapture();
-      void logError(
-        "TRANSLATION",
-        `Failed to start selection hotkey capture: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  };
-
-  const handleSelectionHotkeyCaptureSurfaceKeyDown = (
-    event: ReactKeyboardEvent<HTMLDivElement>,
-  ): void => {
-    if (selectionHotkeyCaptureActive || selectionHotkeySubmitting) {
-      return;
-    }
-
-    if (event.key !== "Enter" && event.key !== " ") {
-      return;
-    }
-
-    event.preventDefault();
-    void startSelectionHotkeyCapture();
-  };
-
-  const handleSelectionHotkeyCaptureSurfaceMouseDown = (
-    event: ReactMouseEvent<HTMLDivElement>,
-  ): void => {
-    event.preventDefault();
-    if (selectionHotkeySubmitting) {
-      return;
-    }
-    void startSelectionHotkeyCapture();
   };
 
   if (!settings) {
@@ -931,32 +571,97 @@ export function TranslationTab(): ReactElement {
     );
   }
 
+  const displayedLiveVoiceVolume =
+    liveVoiceVolumeDraft ?? settings.translation.liveVoiceVolume;
+
   return (
     <div
-      className="card"
       style={{
-        ...DROPDOWN_CARD_STYLE,
-        gap: 0,
-        position: "relative",
-        zIndex: targetOpen || selectionTargetOpen ? 1000 : 1,
+        display: "grid",
+        gap: 12,
       }}
     >
       <div
         style={{
+          display: "flex",
+          gap: 2,
+          padding: 3,
+          borderRadius: 10,
+          background: "var(--control-track)",
+        }}
+      >
+        {([
+          {
+            id: "live",
+            label: t("translation.view.live"),
+          },
+          {
+            id: "other",
+            label: t("translation.view.other"),
+          },
+        ] as const).map((view) => {
+          const active = activeView === view.id;
+          return (
+            <button
+              key={view.id}
+              type="button"
+              aria-pressed={active}
+              onClick={() => {
+                setActiveView(view.id);
+                setTargetOpen(false);
+                setSelectionTargetOpen(false);
+                setLiveTargetOpen(false);
+              }}
+              style={{
+                flex: 1,
+                minWidth: 0,
+                minHeight: CONTROL_HEIGHT,
+                padding: "8px 12px",
+                border: "none",
+                borderRadius: 8,
+                background: active ? "var(--dropdown-active)" : "transparent",
+                color: active ? "var(--text-hi)" : "var(--text-mid)",
+                fontFamily: "var(--font-main)",
+                fontSize: 13,
+                fontWeight: active ? 700 : 500,
+                lineHeight: 1.3,
+                cursor: "pointer",
+              }}
+            >
+              {view.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div
+        className="card"
+        style={{
+          ...DROPDOWN_CARD_STYLE,
+          gap: 0,
+          position: "relative",
+          zIndex: targetOpen || selectionTargetOpen || liveTargetOpen ? 1000 : 1,
+        }}
+      >
+      <div
+        style={{
           ...TRANSLATION_GROUP_FIRST_SECTION_STYLE,
+          display: activeView === "other" ? "grid" : "none",
           position: "relative",
           zIndex: targetOpen ? 2 : 1,
         }}
       >
-        <div
-          style={{
-            fontSize: 13,
-            fontWeight: 700,
-            color: "var(--text-hi)",
-            margin: 0,
-          }}
-        >
-          {t("translation.dictation.title")}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 700,
+              color: "var(--text-hi)",
+              margin: 0,
+            }}
+          >
+            {t("translation.dictation.title")}
+          </div>
         </div>
         <div
           style={{
@@ -1058,10 +763,10 @@ export function TranslationTab(): ReactElement {
           <button
             type="button"
             role="switch"
-            aria-checked={settings.translation.widgetEnabled}
+            aria-checked={settings.translation.active}
             onClick={() => {
               void updateTranslation({
-                widgetEnabled: !settings.translation.widgetEnabled,
+                active: !settings.translation.active,
               });
             }}
             className="btn"
@@ -1089,7 +794,7 @@ export function TranslationTab(): ReactElement {
                 minWidth: 0,
               }}
             >
-              {settings.translation.widgetEnabled
+              {settings.translation.active
                 ? t("translation.widget.on")
                 : t("translation.widget.off")}
             </span>
@@ -1099,12 +804,12 @@ export function TranslationTab(): ReactElement {
                 width: 34,
                 height: 20,
                 borderRadius: 999,
-                background: settings.translation.widgetEnabled
+                background: settings.translation.active
                   ? "var(--text-hi)"
                   : "rgba(0,0,0,0.12)",
                 padding: 2,
                 display: "flex",
-                justifyContent: settings.translation.widgetEnabled
+                justifyContent: settings.translation.active
                   ? "flex-end"
                   : "flex-start",
                 transition: "background 0.16s ease",
@@ -1126,7 +831,491 @@ export function TranslationTab(): ReactElement {
 
       <div
         style={{
+          ...TRANSLATION_GROUP_FIRST_SECTION_STYLE,
+          display: activeView === "live" ? "grid" : "none",
+          position: "relative",
+          zIndex: liveTargetOpen ? 3 : 1,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-hi)" }}>
+            {t("translation.live.title")}
+          </div>
+        </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: SETTING_ROW_COLUMNS,
+            alignItems: "center",
+            gap: SETTING_ROW_GAP,
+          }}
+        >
+          <div
+            style={{ fontSize: 13, fontWeight: 600, color: "var(--text-mid)" }}
+          >
+            {t("translation.live.target")}
+          </div>
+          <div
+            ref={liveTargetRef}
+            style={{ position: "relative", width: "100%" }}
+          >
+            <button
+              type="button"
+              onClick={() => setLiveTargetOpen((open) => !open)}
+              className="btn"
+              style={{
+                width: "100%",
+                justifyContent: "space-between",
+                minHeight: CONTROL_HEIGHT,
+                padding: "0 10px",
+                borderRadius: CONTROL_RADIUS,
+                fontSize: CONTROL_FONT_SIZE,
+              }}
+            >
+              <span>
+                {currentLiveTargetLanguage
+                  ? `${currentLiveTargetLanguage.native} (${currentLiveTargetLanguage.name})`
+                  : liveTargetLanguage}
+              </span>
+              <IconChevronDown size={13} stroke={2} />
+            </button>
+            {liveTargetOpen && (
+              <LanguageDropdownPortal
+                anchorRef={liveTargetRef}
+                options={filteredLiveTargetOptions}
+                selectedCode={liveTargetLanguage}
+                search={liveTargetSearch}
+                setSearch={setLiveTargetSearch}
+                placeholder={t("settings.recognitionLang.searchPlaceholder")}
+                notFoundLabel={t("common.notFound")}
+                onSelect={(code) => {
+                  void updateTranslation({ liveTargetLanguage: code });
+                  setLiveTargetOpen(false);
+                  setLiveTargetSearch("");
+                }}
+              />
+            )}
+          </div>
+        </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: SETTING_ROW_COLUMNS,
+            alignItems: "center",
+            gap: SETTING_ROW_GAP,
+          }}
+        >
+          <div
+            style={{ fontSize: 13, fontWeight: 600, color: "var(--text-mid)" }}
+          >
+            {t("translation.live.widget")}
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={settings.translation.liveWidgetEnabled}
+            onClick={() => {
+              void updateTranslation({
+                liveWidgetEnabled: !settings.translation.liveWidgetEnabled,
+              });
+            }}
+            className="btn"
+            style={{
+              width: "100%",
+              minHeight: CONTROL_HEIGHT,
+              padding: "0 10px",
+              borderRadius: CONTROL_RADIUS,
+              display: "grid",
+              gridTemplateColumns: "minmax(0, 1fr) 34px",
+              alignItems: "center",
+              gap: 10,
+              transform: "none",
+            }}
+          >
+            <span style={{ fontSize: CONTROL_FONT_SIZE, fontWeight: 700 }}>
+              {settings.translation.liveWidgetEnabled
+                ? t("translation.widget.on")
+                : t("translation.widget.off")}
+            </span>
+            <span
+              aria-hidden="true"
+              style={{
+                width: 34,
+                height: 20,
+                borderRadius: 999,
+                background: settings.translation.liveWidgetEnabled
+                  ? "var(--text-hi)"
+                  : "rgba(0,0,0,0.12)",
+                padding: 2,
+                display: "flex",
+                justifyContent: settings.translation.liveWidgetEnabled
+                  ? "flex-end"
+                  : "flex-start",
+              }}
+            >
+              <span
+                style={{
+                  width: 16,
+                  height: 16,
+                  borderRadius: 999,
+                  background: "#fff",
+                }}
+              />
+            </span>
+          </button>
+        </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: SETTING_ROW_COLUMNS,
+            alignItems: "center",
+            gap: SETTING_ROW_GAP,
+          }}
+        >
+          <div
+            style={{ fontSize: 13, fontWeight: 600, color: "var(--text-mid)" }}
+          >
+            {t("translation.live.microphone")}
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={settings.translation.liveMicrophoneEnabled}
+            onClick={() => {
+              void updateTranslation({
+                liveMicrophoneEnabled:
+                  !settings.translation.liveMicrophoneEnabled,
+              });
+            }}
+            className="btn"
+            style={{
+              width: "100%",
+              minHeight: CONTROL_HEIGHT,
+              padding: "0 10px",
+              borderRadius: CONTROL_RADIUS,
+              display: "grid",
+              gridTemplateColumns: "minmax(0, 1fr) 34px",
+              alignItems: "center",
+              gap: 10,
+              transform: "none",
+            }}
+          >
+            <span style={{ fontSize: CONTROL_FONT_SIZE, fontWeight: 700 }}>
+              {settings.translation.liveMicrophoneEnabled
+                ? t("translation.widget.on")
+                : t("translation.widget.off")}
+            </span>
+            <span
+              aria-hidden="true"
+              style={{
+                width: 34,
+                height: 20,
+                borderRadius: 999,
+                background: settings.translation.liveMicrophoneEnabled
+                  ? "var(--text-hi)"
+                  : "rgba(0,0,0,0.12)",
+                padding: 2,
+                display: "flex",
+                justifyContent: settings.translation.liveMicrophoneEnabled
+                  ? "flex-end"
+                  : "flex-start",
+              }}
+            >
+              <span
+                style={{
+                  width: 16,
+                  height: 16,
+                  borderRadius: 999,
+                  background: "#fff",
+                  display: "block",
+                }}
+              />
+            </span>
+          </button>
+        </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: SETTING_ROW_COLUMNS,
+            alignItems: "center",
+            gap: SETTING_ROW_GAP,
+          }}
+        >
+          <div
+            style={{ fontSize: 13, fontWeight: 600, color: "var(--text-mid)" }}
+          >
+            {t("translation.live.voice")}
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={liveVoiceActive}
+            aria-describedby="translation-live-voice-help"
+            disabled={!liveVoiceSupported}
+            onClick={() => {
+              void updateTranslation({
+                liveVoiceEnabled: !settings.translation.liveVoiceEnabled,
+              });
+            }}
+            className="btn"
+            style={{
+              width: "100%",
+              minHeight: CONTROL_HEIGHT,
+              padding: "0 10px",
+              borderRadius: CONTROL_RADIUS,
+              display: "grid",
+              gridTemplateColumns: "minmax(0, 1fr) 34px",
+              alignItems: "center",
+              gap: 10,
+              transform: "none",
+              opacity: liveVoiceSupported ? 1 : 0.55,
+              cursor: liveVoiceSupported ? "pointer" : "not-allowed",
+            }}
+          >
+            <span style={{ fontSize: CONTROL_FONT_SIZE, fontWeight: 700 }}>
+              {liveVoiceActive
+                ? t("translation.widget.on")
+                : t("translation.widget.off")}
+            </span>
+            <span
+              aria-hidden="true"
+              style={{
+                width: 34,
+                height: 20,
+                borderRadius: 999,
+                background: liveVoiceActive
+                  ? "var(--text-hi)"
+                  : "rgba(0,0,0,0.12)",
+                padding: 2,
+                display: "flex",
+                justifyContent: liveVoiceActive
+                  ? "flex-end"
+                  : "flex-start",
+              }}
+            >
+              <span
+                style={{
+                  width: 16,
+                  height: 16,
+                  borderRadius: 999,
+                  background: "#fff",
+                }}
+              />
+            </span>
+          </button>
+        </div>
+        {liveVoiceActive && (
+          <>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: SETTING_ROW_COLUMNS,
+                alignItems: "center",
+                gap: SETTING_ROW_GAP,
+              }}
+            >
+              <div
+                style={{ fontSize: 13, fontWeight: 600, color: "var(--text-mid)" }}
+              >
+                {t("translation.live.muteOriginal")}
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={settings.translation.liveMuteOriginalEnabled}
+                aria-describedby="translation-live-mute-original-help"
+                onClick={() => {
+                  void updateTranslation({
+                    liveMuteOriginalEnabled:
+                      !settings.translation.liveMuteOriginalEnabled,
+                  });
+                }}
+                className="btn"
+                style={{
+                  width: "100%",
+                  minHeight: CONTROL_HEIGHT,
+                  padding: "0 10px",
+                  borderRadius: CONTROL_RADIUS,
+                  display: "grid",
+                  gridTemplateColumns: "minmax(0, 1fr) 34px",
+                  alignItems: "center",
+                  gap: 10,
+                  transform: "none",
+                }}
+              >
+                <span style={{ fontSize: CONTROL_FONT_SIZE, fontWeight: 700 }}>
+                  {settings.translation.liveMuteOriginalEnabled
+                    ? t("translation.widget.on")
+                    : t("translation.widget.off")}
+                </span>
+                <span
+                  aria-hidden="true"
+                  style={{
+                    width: 34,
+                    height: 20,
+                    borderRadius: 999,
+                    background: settings.translation.liveMuteOriginalEnabled
+                      ? "var(--text-hi)"
+                      : "rgba(0,0,0,0.12)",
+                    padding: 2,
+                    display: "flex",
+                    justifyContent: settings.translation.liveMuteOriginalEnabled
+                      ? "flex-end"
+                      : "flex-start",
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 16,
+                      height: 16,
+                      borderRadius: 999,
+                      background: "#fff",
+                    }}
+                  />
+                </span>
+              </button>
+            </div>
+            <div
+              id="translation-live-mute-original-help"
+              style={{ fontSize: 12, color: "var(--text-low)", lineHeight: 1.5 }}
+            >
+              {t("translation.live.muteOriginalDesc")}
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: SETTING_ROW_COLUMNS,
+                alignItems: "center",
+                gap: SETTING_ROW_GAP,
+              }}
+            >
+              <div
+                style={{ fontSize: 13, fontWeight: 600, color: "var(--text-mid)" }}
+              >
+                {t("translation.live.voiceName")}
+              </div>
+              <div style={{ width: "100%" }}>
+                <Dropdown
+                  value={settings.translation.liveVoice}
+                  options={LIVE_VOICES.map((voice) => ({
+                    value: voice,
+                    label: t(`translation.live.voice.${voice}`),
+                  }))}
+                  onChange={(voice) => {
+                    void updateTranslation({ liveVoice: voice });
+                  }}
+                />
+              </div>
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: SETTING_ROW_COLUMNS,
+                alignItems: "center",
+                gap: SETTING_ROW_GAP,
+              }}
+            >
+              <label
+                htmlFor="translation-live-volume"
+                style={{ fontSize: 13, fontWeight: 600, color: "var(--text-mid)" }}
+              >
+                {t("translation.live.volume")}
+              </label>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "minmax(0, 1fr) 56px",
+                  alignItems: "center",
+                  gap: 12,
+                }}
+              >
+                <input
+                  id="translation-live-volume"
+                  type="range"
+                  min={0.1}
+                  max={1}
+                  step={0.05}
+                  value={displayedLiveVoiceVolume}
+                  onChange={(event) => {
+                    previewLiveVoiceVolume(Number(event.currentTarget.value));
+                  }}
+                  onPointerUp={() => void commitLiveVoiceVolume()}
+                  onPointerCancel={() => void commitLiveVoiceVolume()}
+                  onKeyUp={() => void commitLiveVoiceVolume()}
+                  onBlur={() => void commitLiveVoiceVolume()}
+                  style={{
+                    width: "100%",
+                    accentColor: "var(--text-hi)",
+                    cursor: "pointer",
+                  }}
+                />
+                <div
+                  style={{
+                    height: CONTROL_HEIGHT,
+                    borderRadius: CONTROL_RADIUS,
+                    background: "var(--control-muted)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "var(--text-hi)",
+                    fontSize: CONTROL_FONT_SIZE,
+                    fontWeight: 700,
+                    fontVariantNumeric: "tabular-nums",
+                  }}
+                >
+                  {Math.round(displayedLiveVoiceVolume * 100)}%
+                </div>
+              </div>
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: SETTING_ROW_COLUMNS,
+                alignItems: "center",
+                gap: SETTING_ROW_GAP,
+              }}
+            >
+              <div
+                style={{ fontSize: 13, fontWeight: 600, color: "var(--text-mid)" }}
+              >
+                {t("translation.live.speed")}
+              </div>
+              <div style={{ width: "100%" }}>
+                <Dropdown
+                  value={String(settings.translation.liveVoiceSpeed)}
+                  options={LIVE_VOICE_SPEEDS.map((speed) => ({
+                    value: String(speed),
+                    label: `${speed.toFixed(2).replace(/0$/, "")}×`,
+                  }))}
+                  onChange={(speed) => {
+                    void updateTranslation({ liveVoiceSpeed: Number(speed) });
+                  }}
+                />
+              </div>
+            </div>
+          </>
+        )}
+        <div
+          id="translation-live-voice-help"
+          style={{ fontSize: 12, color: "var(--text-low)", lineHeight: 1.5 }}
+        >
+          {liveVoiceSupported
+            ? t("translation.live.voiceDesc")
+            : !isMacPlatform()
+              ? t("translation.live.voiceMacOnly")
+              : t("translation.live.voiceOpenAiOnly")}
+        </div>
+        <div
+          style={{ fontSize: 12, color: "var(--text-low)", lineHeight: 1.5 }}
+        >
+          {t("translation.live.desc")}
+        </div>
+      </div>
+
+      <div
+        style={{
           ...TRANSLATION_GROUP_LAST_SECTION_STYLE,
+          display: activeView === "other" ? "grid" : "none",
           position: "relative",
           zIndex: selectionTargetOpen ? 2 : 1,
         }}
@@ -1319,8 +1508,9 @@ export function TranslationTab(): ReactElement {
             onFocus={() => {
               if (selectionHotkeyCaptureActive || selectionHotkeySubmitting)
                 return;
-              setSelectionHotkeyTone("idle");
-              setSelectionHotkeyFeedback(t("translation.selection.hotkeyIdle"));
+              selectionHotkeyCapture.showIdleFeedback(
+                t("translation.selection.hotkeyIdle"),
+              );
             }}
             style={{
               width: "100%",
@@ -1397,6 +1587,7 @@ export function TranslationTab(): ReactElement {
             {selectionHotkeyFeedback}
           </div>
         )}
+      </div>
       </div>
     </div>
   );

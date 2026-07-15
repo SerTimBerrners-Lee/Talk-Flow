@@ -11,13 +11,15 @@ const TEXT_EVENT: &str = "widget-text:update";
 pub const NOTICE_WIDTH: f64 = 212.0;
 pub const NOTICE_HEIGHT: f64 = 52.0;
 pub const TEXT_OVERLAY_WIDTH: f64 = 324.0;
-pub const TEXT_OVERLAY_HEIGHT: f64 = 131.2;
+pub const TEXT_OVERLAY_STREAM_WIDTH: f64 = 480.0;
+pub const TEXT_OVERLAY_HEIGHT: f64 = 118.1;
 /// Must match NOTICE_WIDGET_GAP in src/windows/widget/widgetConstants.ts (logical pixels).
 pub const NOTICE_GAP: f64 = 2.0;
 const TEXT_OVERLAY_GAP: f64 = 8.0;
-/// Must match CALL_STACK_WIDGET_WIDTH/HEIGHT in src/windows/widget/widgetConstants.ts.
-pub const WIDGET_WIDTH: f64 = 109.0;
-pub const WIDGET_HEIGHT: f64 = 34.0;
+/// Must match widgetStackWidth(false)/widgetStackHeight(false) in
+/// src/windows/widget/widgetConstants.ts.
+pub const WIDGET_WIDTH: f64 = 129.0;
+pub const WIDGET_HEIGHT: f64 = 54.0;
 const WIDGET_EXPANDED_OFFSET_RATIO: f64 = 0.20;
 
 fn centered_resize_offset(current: f64, target: f64, expanded_offset_ratio: f64) -> f64 {
@@ -45,11 +47,27 @@ pub struct WidgetTextOverlayPayload {
     target_language: String,
     request_id: Option<String>,
     message: Option<String>,
+    live_segments: Option<Vec<serde_json::Value>>,
 }
 
 fn text_overlay_payload_store() -> &'static Mutex<Option<WidgetTextOverlayPayload>> {
     static STORE: OnceLock<Mutex<Option<WidgetTextOverlayPayload>>> = OnceLock::new();
     STORE.get_or_init(|| Mutex::new(None))
+}
+
+fn text_overlay_open_request_store() -> &'static Mutex<Option<String>> {
+    static STORE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+    STORE.get_or_init(|| Mutex::new(None))
+}
+
+fn is_new_text_overlay_request(current: Option<&str>, next: Option<&str>) -> bool {
+    let Some(next) = next
+        .map(str::trim)
+        .filter(|request_id| !request_id.is_empty())
+    else {
+        return true;
+    };
+    current != Some(next)
 }
 
 fn cached_text_overlay_payload() -> Result<Option<WidgetTextOverlayPayload>, String> {
@@ -81,7 +99,7 @@ fn should_ignore_text_overlay_payload(
         return false;
     }
 
-    if next.status == "dictating" {
+    if next.status == "copying" || next.status == "dictating" || next.status == "liveTranslation" {
         return false;
     }
 
@@ -199,22 +217,34 @@ fn position_widget_notice_window(
 fn position_widget_text_window(
     widget_window: &tauri::WebviewWindow,
     text_window: &tauri::WebviewWindow,
+    width: f64,
     height: f64,
 ) -> Result<(), String> {
     let widget_position = widget_window.outer_position().map_err(|e| e.to_string())?;
     let widget_size = widget_window.outer_size().map_err(|e| e.to_string())?;
     let scale_factor = widget_window.scale_factor().map_err(|e| e.to_string())?;
-    let text_width = TEXT_OVERLAY_WIDTH * scale_factor;
+    let text_width = width * scale_factor;
     let text_height = height * scale_factor;
     let gap = TEXT_OVERLAY_GAP * scale_factor;
-    let x = widget_position.x as f64 + (widget_size.width as f64 - text_width) / 2.0;
+    let centered_x = widget_position.x as f64 + (widget_size.width as f64 - text_width) / 2.0;
+    let x = match widget_window.current_monitor().map_err(|e| e.to_string())? {
+        Some(monitor) => {
+            let margin = 8.0 * scale_factor;
+            let minimum = monitor.position().x as f64 + margin;
+            let maximum =
+                monitor.position().x as f64 + monitor.size().width as f64 - text_width - margin;
+            if maximum >= minimum {
+                centered_x.clamp(minimum, maximum)
+            } else {
+                minimum
+            }
+        }
+        None => centered_x,
+    };
     let y = widget_position.y as f64 - gap - text_height;
 
     text_window
-        .set_size(tauri::Size::Logical(tauri::LogicalSize {
-            width: TEXT_OVERLAY_WIDTH,
-            height,
-        }))
+        .set_size(tauri::Size::Logical(tauri::LogicalSize { width, height }))
         .map_err(|e| e.to_string())?;
 
     text_window
@@ -229,6 +259,14 @@ fn position_widget_text_window(
 
 fn text_overlay_height(_payload: &WidgetTextOverlayPayload) -> f64 {
     TEXT_OVERLAY_HEIGHT
+}
+
+fn text_overlay_width(payload: &WidgetTextOverlayPayload) -> f64 {
+    if payload.status == "dictating" || payload.status == "liveTranslation" {
+        TEXT_OVERLAY_STREAM_WIDTH
+    } else {
+        TEXT_OVERLAY_WIDTH
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -435,6 +473,12 @@ pub async fn show_widget_text_overlay(
     app: AppHandle,
     payload: WidgetTextOverlayPayload,
 ) -> Result<(), String> {
+    let request_id = payload
+        .request_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|request_id| !request_id.is_empty())
+        .map(str::to_string);
     {
         let mut cached = text_overlay_payload_store()
             .lock()
@@ -444,19 +488,39 @@ pub async fn show_widget_text_overlay(
         }
         *cached = Some(payload.clone());
     }
+    let opens_new_request = {
+        let opened_request = text_overlay_open_request_store()
+            .lock()
+            .map_err(|e| format!("Text overlay request lock failed: {e}"))?;
+        is_new_text_overlay_request(opened_request.as_deref(), request_id.as_deref())
+    };
 
     let widget_window = app
         .get_webview_window("widget")
         .ok_or_else(|| "Widget window not found".to_string())?;
     let text_window = ensure_widget_text_window(&app)?;
+    let was_visible = text_window.is_visible().unwrap_or(false);
 
-    position_widget_text_window(&widget_window, &text_window, text_overlay_height(&payload))?;
+    if opens_new_request {
+        position_widget_text_window(
+            &widget_window,
+            &text_window,
+            text_overlay_width(&payload),
+            text_overlay_height(&payload),
+        )?;
+    }
     let _ = text_window.set_ignore_cursor_events(false);
 
     app.emit_to(TEXT_WINDOW_LABEL, TEXT_EVENT, payload)
         .map_err(|e| e.to_string())?;
-    text_window.show().map_err(|e| e.to_string())?;
-    let _ = emit_cached_text_overlay_payload(&app);
+    if opens_new_request && !was_visible {
+        text_window.show().map_err(|e| e.to_string())?;
+    }
+    if opens_new_request {
+        *text_overlay_open_request_store()
+            .lock()
+            .map_err(|e| format!("Text overlay request lock failed: {e}"))? = request_id;
+    }
     Ok(())
 }
 
@@ -477,6 +541,12 @@ pub async fn hide_widget_text_overlay(app: AppHandle) -> Result<(), String> {
             .lock()
             .map_err(|e| format!("Text overlay state lock failed: {e}"))?;
         *cached = None;
+    }
+    {
+        let mut opened_request = text_overlay_open_request_store()
+            .lock()
+            .map_err(|e| format!("Text overlay request lock failed: {e}"))?;
+        *opened_request = None;
     }
 
     if let Some(win) = app.get_webview_window(TEXT_WINDOW_LABEL) {
@@ -535,4 +605,70 @@ pub async fn activate_widget_for_hotkey(app: AppHandle) -> Result<(), String> {
     order_widget_window_front(&app)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        is_new_text_overlay_request, should_ignore_text_overlay_payload, text_overlay_width,
+        WidgetTextOverlayPayload, TEXT_OVERLAY_STREAM_WIDTH, TEXT_OVERLAY_WIDTH,
+    };
+
+    fn overlay_payload(status: &str, request_id: &str) -> WidgetTextOverlayPayload {
+        WidgetTextOverlayPayload {
+            status: status.to_string(),
+            source_text: String::new(),
+            translated_text: String::new(),
+            target_language: String::new(),
+            request_id: Some(request_id.to_string()),
+            message: None,
+            live_segments: None,
+        }
+    }
+
+    #[test]
+    fn text_overlay_opens_only_once_for_the_same_request() {
+        assert!(is_new_text_overlay_request(None, Some("request-1")));
+        assert!(!is_new_text_overlay_request(
+            Some("request-1"),
+            Some("request-1")
+        ));
+        assert!(is_new_text_overlay_request(
+            Some("request-1"),
+            Some("request-2")
+        ));
+        assert!(is_new_text_overlay_request(Some("request-1"), None));
+    }
+
+    #[test]
+    fn selection_copy_replaces_visible_request_but_stale_progress_does_not() {
+        let current = overlay_payload("done", "selection-1");
+        let replacement = overlay_payload("copying", "selection-2");
+        let stale_progress = overlay_payload("translating", "selection-1");
+
+        assert!(!should_ignore_text_overlay_payload(
+            Some(&current),
+            &replacement
+        ));
+        assert!(should_ignore_text_overlay_payload(
+            Some(&replacement),
+            &stale_progress
+        ));
+    }
+
+    #[test]
+    fn streaming_overlays_use_the_wider_window() {
+        assert_eq!(
+            text_overlay_width(&overlay_payload("dictating", "dictation-1")),
+            TEXT_OVERLAY_STREAM_WIDTH
+        );
+        assert_eq!(
+            text_overlay_width(&overlay_payload("liveTranslation", "live-1")),
+            TEXT_OVERLAY_STREAM_WIDTH
+        );
+        assert_eq!(
+            text_overlay_width(&overlay_payload("done", "selection-1")),
+            TEXT_OVERLAY_WIDTH
+        );
+    }
 }

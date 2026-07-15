@@ -46,6 +46,82 @@ Widget call mode
 -> file transcription pipeline
 ```
 
+Live translation:
+
+```text
+Widget live-translation button
+-> live_translation.rs
+-> call_capture.rs system-audio stream plus optional cpal microphone stream
+-> mono / 16 kHz / PCM16 / 100 ms chunks
+-> bounded channels
+-> Talkis Cloud (short-lived OpenAI secret) or configured OpenAI/Gemini API
+-> separate realtime sessions per enabled audio source
+-> normalized partial/final text events
+-> existing widget-text overlay and history
+```
+
+## Live Streaming And Translation
+
+Realtime audio stays in Rust. Never route PCM through React/Tauri events and do
+not use ffmpeg in this hot path. System audio is always translated; microphone
+audio is opt-in to avoid sending speaker echo as the user's voice. When enabled,
+microphone and system audio are independent channels with separate translation
+connections. Audio callbacks use bounded
+non-blocking queues and may drop old audio instead of blocking capture.
+
+Remote streaming STT is supported only for adapters whose exact key, model, and
+endpoint configuration passed a realtime handshake. A transport failure must not
+stop ordinary recording: the existing batch transcription remains the stop-time
+fallback. Local Whisper and WhisperX are not realtime translation adapters.
+In Cloud mode the desktop authenticates to `talkis-proxy` with its device token;
+the proxy checks the subscription and returns a short-lived OpenAI Realtime
+client secret. The primary cloud API key must never be returned to or stored by
+the desktop. API mode continues to use the user's verified adapter directly.
+
+Live translation reconnects after 0.5/1/2 seconds and replays no more than two
+seconds of recent PCM. Gemini `goAway` events rotate the session. Provider audio
+responses are ignored unless synchronous voice playback is explicitly enabled.
+OpenAI translation uses the official `gpt-realtime`/`gpt-realtime-mini` session
+models with text-only output by default. Voice playback switches the same session
+to audio output and uses `response.output_audio_transcript.*` for the visible
+translated text, so speech and overlay do not come from separate translation
+requests. PCM16/24 kHz audio deltas stay in Rust and feed a bounded native
+playback queue; stale queued speech is discarded instead of increasing live
+latency without limit. Voice playback is currently enabled only on macOS, where
+the global Core Audio tap excludes the Talkis process from capture. Other
+platforms must not enable playback until their system-audio path can provide
+equivalent self-process exclusion. When original-audio ducking is enabled, the
+macOS tap uses `MutedWhenTapped` so the source remains available to Talkis at
+full capture level without also playing at full volume. The captured 16 kHz
+monitor feed is replayed through the self-excluded Talkis playback stream at low
+gain and mixed with the translated voice, so the original remains quietly
+audible without entering the translation loop;
+legacy `gpt-realtime-translate` settings are resolved to `gpt-realtime` at the
+runtime boundary. Continuous video speech must not be treated as one unbounded
+turn. Talkis disables server-side turn detection for this path and commits voiced
+PCM in short, roughly two-second segments. Only one text response may be active
+at a time; audio received while a response is active stays in the next input
+buffer and is committed as soon as the
+previous response finishes. Session shutdown commits the final voiced fragment
+and waits briefly for its response instead of dropping it.
+Provider commit boundaries are transport details, not speaker boundaries. The
+frontend coalesces consecutive final and partial segments from the same channel
+into one visible turn; a new turn starts when the channel changes between the
+system audio and the optional microphone.
+OpenAI text deltas are accumulated by `response_id` without trimming or adding
+synthetic spaces. A final event promotes only that response's draft; late deltas
+for a finalized response are ignored. The frontend keeps finalized text stable,
+renders only the active draft with reduced emphasis, coalesces rapid partial
+updates to at most one render per 100 ms, and serializes overlay commands so an
+older render cannot overwrite a newer one.
+API keys stay in the Rust request path and must never appear in events or logs.
+
+When `saveRecordingAudio` is enabled, `system.wav` is written and `mic.wav` is
+added only when live microphone translation is enabled. When saving is disabled,
+no audio file is created and the
+whole session must not be retained in memory. Live translation, call capture, and
+ordinary dictation mutually exclude each other.
+
 ## Voice Dictation
 
 The primary voice path is native Rust capture:
@@ -181,7 +257,9 @@ Call capture has two different tracks:
 
 Current system-audio support:
 
-- macOS: implemented via Core Audio process tap / aggregate device in `call_capture.rs`;
+- macOS: implemented via a stereo global Core Audio tap / aggregate device in
+  `call_capture.rs`, so output is captured even when an app routes audio through
+  a non-default device stream;
 - Windows: implemented via `cpal` WASAPI loopback on the default output device in `call_capture.rs`;
 - Linux: implemented via PipeWire default output monitor capture in `call_capture.rs`.
 
@@ -196,6 +274,20 @@ System audio capture level: max=... dBFS, frames_above_noise_floor=...
 ```
 
 If `max=-120.0 dBFS` and `frames_above_noise_floor=0`, the system track is silent. The transcript should not treat that as usable remote-speaker audio.
+
+## macOS Development Permissions
+
+Run the macOS dev binary from `Talkis Dev.app` with a stable Apple Development
+code-signing identity. An ad-hoc signature uses a designated requirement tied
+to the binary's changing CDHash, so rebuilding makes TCC treat the next process
+as a different application even when the old checkbox remains visible.
+
+Microphone status should be read from AVFoundation without starting an audio
+session. System-audio access must first be confirmed with the existing short
+Core Audio capture probe. Only a successful probe may write the versioned
+verification marker used after relaunch with the stable signing identity;
+legacy or unversioned flags must be ignored, and a failed probe clears the
+current marker.
 
 ## Speaker Diarization
 

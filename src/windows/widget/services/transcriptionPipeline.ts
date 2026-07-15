@@ -9,6 +9,7 @@ import {
   readHistoryAudio,
   saveHistoryAudio,
 } from "../../../lib/store";
+import { batchFallbackModel } from "../../../lib/realtimeModels";
 import { logError, logInfo } from "../../../lib/logger";
 import { tn } from "../../../lib/i18n";
 import { formatErrorMessage } from "../../../lib/utils";
@@ -23,7 +24,7 @@ import { LANGUAGES } from "../../../config/languages";
 import {
   createDictationOverlayState,
   dictationOverlayStateFromStreamUpdate,
-  isLocalSttStreamingEnabled,
+  isSttStreamingEnabled,
   shouldApplyDictationStreamUpdate,
 } from "./dictationStreamOverlay";
 import type { LiveTranscriptionResult } from "./dictationStreamOverlay";
@@ -166,24 +167,13 @@ async function showWidgetTextOverlay(
 export async function startDictationStreamOverlaySession(
   settings: AppSettings,
 ): Promise<DictationStreamOverlaySession | null> {
-  if (!isLocalSttStreamingEnabled(settings)) {
+  if (!isSttStreamingEnabled(settings)) {
     return null;
   }
 
   const requestId = createRequestId();
   let latestText = "";
   let disposed = false;
-
-  await showWidgetTextOverlay({
-    requestId,
-    status: "dictating",
-    text: "",
-  }).catch((error) => {
-    logError(
-      "DICTATION_STREAM",
-      `Failed to show text overlay: ${formatErrorMessage(error)}`,
-    );
-  });
 
   let unlisten: () => void;
   try {
@@ -197,6 +187,12 @@ export async function startDictationStreamOverlaySession(
         const nextText = payload.text.trim() || latestText;
         if (nextText) {
           latestText = nextText;
+        }
+
+        // The empty listening state is shown once when the session starts.
+        // Ignore empty interim updates so they cannot replace recognized text.
+        if (!nextText && payload.status !== "error") {
+          return;
         }
 
         void invoke("show_widget_text_overlay", {
@@ -216,6 +212,12 @@ export async function startDictationStreamOverlaySession(
     await invoke("hide_widget_text_overlay").catch(() => {});
     throw error;
   }
+
+  await showWidgetTextOverlay({
+    requestId,
+    status: "dictating",
+    text: "",
+  });
 
   return {
     requestId,
@@ -453,6 +455,12 @@ async function transcribeViaBackend({
   settings: AppSettings;
   streamingRequestId?: string | null;
 }): Promise<TranscriptionResult> {
+  const configuredAdapterModel =
+    settings.apiAdapters[settings.selectedApiAdapter]?.model?.trim();
+  const whisperModel = batchFallbackModel(
+    settings.selectedApiAdapter,
+    configuredAdapterModel || settings.whisperModel || "",
+  );
   logInfo("API", `Sending to backend, audio_size: ${audioBase64.length} chars`);
 
   const result = await invoke<{ raw: string; cleaned: string }>("transcribe_and_clean", {
@@ -466,11 +474,11 @@ async function transcribeViaBackend({
       whisper_endpoint: settings.whisperEndpoint || null,
       local_models_dir: settings.localModelsDir || null,
       llm_endpoint: null,
-      whisper_model: settings.whisperModel || null,
+      whisper_model: whisperModel || null,
       llm_model: "none",
       file_name: audioFileName,
       mime_type: audioMimeType,
-      streaming_enabled: isLocalSttStreamingEnabled(settings),
+      streaming_enabled: isSttStreamingEnabled(settings),
       streaming_request_id: streamingRequestId ?? null,
     },
   });
@@ -510,6 +518,69 @@ async function transcribeAudio({
     settings,
     streamingRequestId,
   });
+}
+
+function shouldReconcileOpenAiRealtime(
+  settings: AppSettings,
+  liveTranscription: LiveTranscriptionResult | null,
+): boolean {
+  if (!liveTranscription || !settings.useOwnKey) return false;
+  if (settings.selectedApiAdapter !== "openai") return false;
+
+  const configuredModel =
+    settings.apiAdapters.openai?.model?.trim() || settings.whisperModel?.trim();
+  return configuredModel === "gpt-realtime-whisper";
+}
+
+async function resolveFinalTranscription({
+  liveTranscription,
+  audioBase64,
+  audioMimeType,
+  audioFileName,
+  settings,
+  signal,
+}: {
+  liveTranscription: LiveTranscriptionResult | null;
+  audioBase64: string;
+  audioMimeType: string;
+  audioFileName: string;
+  settings: AppSettings;
+  signal: AbortSignal;
+}): Promise<TranscriptionResult> {
+  const liveResult = liveTranscription
+    ? { raw: liveTranscription.text, cleaned: liveTranscription.text }
+    : null;
+
+  if (!shouldReconcileOpenAiRealtime(settings, liveTranscription)) {
+    return liveResult || transcribeAudio({
+      audioBase64,
+      audioMimeType,
+      audioFileName,
+      settings,
+      signal,
+    });
+  }
+
+  try {
+    logInfo(
+      "DICTATION_STREAM",
+      "Reconciling OpenAI realtime text with gpt-4o-transcribe batch result",
+    );
+    const batchResult = await transcribeAudio({
+      audioBase64,
+      audioMimeType,
+      audioFileName,
+      settings,
+      signal,
+    });
+    return hasRecognizedSpeech(batchResult) ? batchResult : liveResult!;
+  } catch (error) {
+    logError(
+      "DICTATION_STREAM",
+      `Batch reconciliation failed, keeping realtime text: ${formatErrorMessage(error)}`,
+    );
+    return liveResult!;
+  }
 }
 
 async function applyDictationTranslation(
@@ -619,18 +690,14 @@ export async function processRecordingBlob({
 
   try {
     const apiStart = Date.now();
-    const transcription = liveTranscription
-      ? {
-          raw: liveTranscription.text,
-          cleaned: liveTranscription.text,
-        }
-      : await transcribeAudio({
-          audioBase64: base64Audio,
-          audioMimeType,
-          audioFileName,
-          settings,
-          signal: handle.signal,
-        });
+    const transcription = await resolveFinalTranscription({
+      liveTranscription,
+      audioBase64: base64Audio,
+      audioMimeType,
+      audioFileName,
+      settings,
+      signal: handle.signal,
+    });
 
     if (handle.isCancelled()) {
       await dictationStream?.hide().catch(() => {});

@@ -1,5 +1,9 @@
 import type { DictationStreamUpdatePayload } from "../../../lib/hotkeyEvents";
 import type { AppSettings } from "../../../lib/store";
+import {
+  canUseConfiguredRealtimeModel,
+  STREAMING_STT_ADAPTERS,
+} from "../../../lib/realtimeModels";
 import type {
   WidgetTextOverlayState,
   WidgetTextOverlayStatus,
@@ -11,6 +15,8 @@ export interface NativeLiveDictationOptions {
   language: string;
   endpoint: string;
   streamingEnabled: boolean;
+  provider?: string;
+  apiKey?: string;
 }
 
 export interface LiveTranscriptionResult {
@@ -18,12 +24,12 @@ export interface LiveTranscriptionResult {
   text: string;
 }
 
-const STREAMING_LOCAL_STT_MODEL_IDS: Record<string, string> = {
-  "nvidia/nemotron-3.5-asr-streaming-0.6b": "nemotron-35-asr-streaming-06b",
-  "nvidia/nemotron-speech-streaming-en-0.6b": "nemotron-speech-streaming-en-06b",
-  "moonshine-streaming-tiny": "moonshine-streaming-tiny",
-  "moonshine-streaming-small": "moonshine-streaming-small",
-};
+const STREAMING_LOCAL_STT_MODELS = new Set([
+  "nvidia/nemotron-3.5-asr-streaming-0.6b",
+  "nvidia/nemotron-speech-streaming-en-0.6b",
+  "moonshine-streaming-tiny",
+  "moonshine-streaming-small",
+]);
 
 function isLocalSttSettings(settings: AppSettings): boolean {
   return (
@@ -33,27 +39,54 @@ function isLocalSttSettings(settings: AppSettings): boolean {
 }
 
 export function isLocalSttStreamingEnabled(settings: AppSettings): boolean {
+  if (!settings.realtimeTranscriptionEnabled) return false;
   if (!isLocalSttSettings(settings)) return false;
-  const modelId = STREAMING_LOCAL_STT_MODEL_IDS[settings.whisperModel || ""];
-  if (!modelId) return false;
-  const cachedValue = settings.localModels?.[modelId]?.streamingEnabled;
-  return typeof cachedValue === "boolean" ? cachedValue : true;
+  return STREAMING_LOCAL_STT_MODELS.has(settings.whisperModel || "");
+}
+
+export function isApiSttStreamingEnabled(settings: AppSettings): boolean {
+  if (!settings.realtimeTranscriptionEnabled || !settings.useOwnKey) return false;
+  const adapter = STREAMING_STT_ADAPTERS.find(
+    (candidate) => candidate.id === settings.selectedApiAdapter,
+  );
+  if (!adapter) return false;
+  return canUseConfiguredRealtimeModel(
+    adapter,
+    settings.apiAdapters[settings.selectedApiAdapter],
+  );
+}
+
+export function isSttStreamingEnabled(settings: AppSettings): boolean {
+  return isLocalSttStreamingEnabled(settings) || isApiSttStreamingEnabled(settings);
 }
 
 export function createNativeLiveDictationOptions(
   settings: AppSettings,
   requestId: string,
 ): NativeLiveDictationOptions | null {
-  if (!isLocalSttStreamingEnabled(settings)) {
+  if (!isSttStreamingEnabled(settings)) {
     return null;
   }
 
+  const isLocal = isLocalSttSettings(settings);
+  const adapter = isLocal
+    ? null
+    : settings.apiAdapters[settings.selectedApiAdapter];
+
   return {
     requestId,
-    model: settings.whisperModel || "",
+    model: isLocal ? settings.whisperModel || "" : adapter?.model || "",
     language: settings.language || "auto",
-    endpoint: settings.whisperEndpoint || "",
+    endpoint: isLocal
+      ? settings.whisperEndpoint || ""
+      : adapter?.endpoint ||
+        STREAMING_STT_ADAPTERS.find(
+          (candidate) => candidate.id === settings.selectedApiAdapter,
+        )?.defaultEndpoint ||
+        "",
     streamingEnabled: true,
+    provider: isLocal ? "local" : settings.selectedApiAdapter,
+    apiKey: isLocal ? "" : adapter?.apiKey || "",
   };
 }
 

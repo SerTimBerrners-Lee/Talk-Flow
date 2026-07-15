@@ -1,4 +1,5 @@
 use crate::logger;
+use crate::realtime::RealtimeAudioCommand;
 use base64::Engine;
 use chrono::{DateTime, Utc};
 #[cfg(target_os = "windows")]
@@ -15,9 +16,11 @@ use std::io::{Seek, Write};
 use std::path::PathBuf;
 #[cfg(target_os = "macos")]
 use std::ptr::NonNull;
+#[cfg(target_os = "macos")]
+use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 use std::sync::Arc;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{mpsc, Mutex, OnceLock};
 use tauri::{AppHandle, Manager};
 
 #[cfg(target_os = "macos")]
@@ -28,14 +31,15 @@ use objc2_core_audio::{
     kAudioAggregateDeviceMainSubDeviceKey, kAudioAggregateDeviceNameKey,
     kAudioAggregateDeviceSubDeviceListKey, kAudioAggregateDeviceTapAutoStartKey,
     kAudioAggregateDeviceTapListKey, kAudioAggregateDeviceUIDKey, kAudioDevicePropertyDeviceUID,
-    kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyElementMain,
-    kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject, kAudioSubDeviceUIDKey,
-    kAudioSubTapDriftCompensationKey, kAudioSubTapUIDKey, kAudioTapPropertyFormat,
-    AudioDeviceCreateIOProcID, AudioDeviceDestroyIOProcID, AudioDeviceIOProc, AudioDeviceIOProcID,
-    AudioDeviceStart, AudioDeviceStop, AudioHardwareCreateAggregateDevice,
-    AudioHardwareCreateProcessTap, AudioHardwareDestroyAggregateDevice,
-    AudioHardwareDestroyProcessTap, AudioObjectGetPropertyData, AudioObjectID,
-    AudioObjectPropertyAddress, AudioObjectPropertySelector, CATapDescription, CATapMuteBehavior,
+    kAudioHardwarePropertyDefaultOutputDevice, kAudioHardwarePropertyTranslatePIDToProcessObject,
+    kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject,
+    kAudioSubDeviceUIDKey, kAudioSubTapDriftCompensationKey, kAudioSubTapUIDKey,
+    kAudioTapPropertyFormat, AudioDeviceCreateIOProcID, AudioDeviceDestroyIOProcID,
+    AudioDeviceIOProc, AudioDeviceIOProcID, AudioDeviceStart, AudioDeviceStop,
+    AudioHardwareCreateAggregateDevice, AudioHardwareCreateProcessTap,
+    AudioHardwareDestroyAggregateDevice, AudioHardwareDestroyProcessTap,
+    AudioObjectGetPropertyData, AudioObjectID, AudioObjectPropertyAddress,
+    AudioObjectPropertySelector, CATapDescription, CATapMuteBehavior,
 };
 #[cfg(target_os = "macos")]
 use objc2_core_audio_types::{
@@ -52,12 +56,64 @@ use pipewire as pw;
 use pw::{properties::properties, spa};
 
 static SESSIONS: OnceLock<Mutex<HashMap<String, StoredCallCaptureSession>>> = OnceLock::new();
+static SYSTEM_AUDIO_SINK: OnceLock<Mutex<Option<tokio::sync::mpsc::Sender<RealtimeAudioCommand>>>> =
+    OnceLock::new();
+static SYSTEM_AUDIO_MONITOR_SINK: OnceLock<Mutex<Option<mpsc::SyncSender<Vec<u8>>>>> =
+    OnceLock::new();
+#[cfg(target_os = "macos")]
+static REQUIRE_SELF_AUDIO_EXCLUSION: AtomicBool = AtomicBool::new(false);
+#[cfg(target_os = "macos")]
+static MUTE_CAPTURED_SYSTEM_AUDIO: AtomicBool = AtomicBool::new(false);
 const CALL_SYSTEM_CAPTURE_SAMPLE_RATE: u32 = 16_000;
 const CALL_SYSTEM_CAPTURE_CHANNELS: u16 = 1;
 const CALL_SYSTEM_CAPTURE_BITS_PER_SAMPLE: u16 = 16;
+const LIVE_PCM_CHUNK_BYTES: usize = (CALL_SYSTEM_CAPTURE_SAMPLE_RATE as usize / 10) * 2;
+
+fn system_audio_sink() -> &'static Mutex<Option<tokio::sync::mpsc::Sender<RealtimeAudioCommand>>> {
+    SYSTEM_AUDIO_SINK.get_or_init(|| Mutex::new(None))
+}
+
+pub fn set_system_audio_sink(sender: Option<tokio::sync::mpsc::Sender<RealtimeAudioCommand>>) {
+    if let Ok(mut sink) = system_audio_sink().lock() {
+        *sink = sender;
+    }
+}
+
+fn system_audio_monitor_sink() -> &'static Mutex<Option<mpsc::SyncSender<Vec<u8>>>> {
+    SYSTEM_AUDIO_MONITOR_SINK.get_or_init(|| Mutex::new(None))
+}
+
+pub fn set_system_audio_monitor_sink(sender: Option<mpsc::SyncSender<Vec<u8>>>) {
+    if let Ok(mut sink) = system_audio_monitor_sink().lock() {
+        *sink = sender;
+    }
+}
+
+pub fn set_require_self_audio_exclusion(required: bool) {
+    #[cfg(target_os = "macos")]
+    REQUIRE_SELF_AUDIO_EXCLUSION.store(required, Ordering::SeqCst);
+
+    #[cfg(not(target_os = "macos"))]
+    let _ = required;
+}
+
+pub fn set_mute_captured_system_audio(muted: bool) {
+    #[cfg(target_os = "macos")]
+    MUTE_CAPTURED_SYSTEM_AUDIO.store(muted, Ordering::SeqCst);
+
+    #[cfg(not(target_os = "macos"))]
+    let _ = muted;
+}
 
 fn sessions() -> &'static Mutex<HashMap<String, StoredCallCaptureSession>> {
     SESSIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub fn has_active_sessions() -> bool {
+    sessions()
+        .lock()
+        .map(|guard| !guard.is_empty())
+        .unwrap_or(false)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -88,6 +144,8 @@ pub struct StartCallCaptureRequest {
     pub mic_device_id: Option<String>,
     pub sample_rate: Option<u32>,
     pub storage_dir: Option<String>,
+    #[serde(default = "default_true")]
+    pub save_audio: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -110,6 +168,14 @@ pub struct CallCaptureTrack {
     pub path: String,
     pub channels: u16,
     pub sample_rate: u32,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemAudioLevel {
+    pub max_dbfs: f32,
+    pub frames_above_noise_floor: u64,
+    pub output_frames_written: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -281,7 +347,6 @@ impl SystemAudioResampler {
         }
     }
 
-    #[cfg(test)]
     fn output_frames_written(&self) -> u64 {
         self.output_frames_written
     }
@@ -305,6 +370,7 @@ where
 {
     writer: hound::WavWriter<W>,
     resampler: SystemAudioResampler,
+    live_pcm: Vec<u8>,
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux", test))]
@@ -316,23 +382,46 @@ where
         Self {
             writer,
             resampler: SystemAudioResampler::new(source_sample_rate),
+            live_pcm: Vec::with_capacity(LIVE_PCM_CHUNK_BYTES * 2),
+        }
+    }
+
+    fn write_output_sample(&mut self, sample: i16) {
+        let _ = self.writer.write_sample(sample);
+        self.live_pcm.extend_from_slice(&sample.to_le_bytes());
+        if self.live_pcm.len() < LIVE_PCM_CHUNK_BYTES {
+            return;
+        }
+        let chunk: Vec<u8> = self.live_pcm.drain(..LIVE_PCM_CHUNK_BYTES).collect();
+        if let Ok(sink) = system_audio_monitor_sink().lock() {
+            if let Some(sender) = sink.as_ref() {
+                let _ = sender.try_send(chunk.clone());
+            }
+        }
+        if let Ok(sink) = system_audio_sink().lock() {
+            if let Some(sender) = sink.as_ref() {
+                let _ = sender.try_send(RealtimeAudioCommand::Pcm(chunk));
+            }
         }
     }
 
     fn write_source_frame(&mut self, sample: f32) {
-        let writer = &mut self.writer;
-        self.resampler.push_source_frame(sample, |sample| {
-            let _ = writer.write_sample(sample);
-        });
+        let mut output = Vec::new();
+        self.resampler
+            .push_source_frame(sample, |sample| output.push(sample));
+        for sample in output {
+            self.write_output_sample(sample);
+        }
     }
 
     #[cfg(any(target_os = "windows", target_os = "linux"))]
     fn write_interleaved_f32(&mut self, samples: &[f32], channels: usize) {
-        let writer = &mut self.writer;
+        let mut output = Vec::new();
         self.resampler
-            .push_interleaved_f32(samples, channels, |sample| {
-                let _ = writer.write_sample(sample);
-            });
+            .push_interleaved_f32(samples, channels, |sample| output.push(sample));
+        for sample in output {
+            self.write_output_sample(sample);
+        }
     }
 
     #[cfg(target_os = "linux")]
@@ -340,7 +429,21 @@ where
         self.resampler.reset_source_sample_rate(source_sample_rate);
     }
 
-    fn finalize(self) -> Result<(), hound::Error> {
+    fn finalize(mut self) -> Result<(), hound::Error> {
+        if !self.live_pcm.is_empty() {
+            if let Ok(sink) = system_audio_monitor_sink().lock() {
+                if let Some(sender) = sink.as_ref() {
+                    let _ = sender.try_send(self.live_pcm.clone());
+                }
+            }
+            if let Ok(sink) = system_audio_sink().lock() {
+                if let Some(sender) = sink.as_ref() {
+                    let _ = sender.try_send(RealtimeAudioCommand::Pcm(std::mem::take(
+                        &mut self.live_pcm,
+                    )));
+                }
+            }
+        }
         self.writer.finalize()
     }
 
@@ -350,6 +453,10 @@ where
 
     fn frames_above_noise_floor(&self) -> u64 {
         self.resampler.frames_above_noise_floor()
+    }
+
+    fn output_frames_written(&self) -> u64 {
+        self.resampler.output_frames_written()
     }
 }
 
@@ -414,7 +521,7 @@ fn build_session(
     let sample_rate = req.sample_rate.unwrap_or(48_000);
     let mut tracks = Vec::new();
 
-    if req.include_mic {
+    if req.include_mic && req.save_audio {
         tracks.push(CallCaptureTrack {
             kind: CallCaptureTrackKind::Mic,
             label: "Вы".to_string(),
@@ -424,7 +531,7 @@ fn build_session(
         });
     }
 
-    if req.include_system {
+    if req.include_system && req.save_audio {
         tracks.push(CallCaptureTrack {
             kind: CallCaptureTrackKind::System,
             label: "Созвон".to_string(),
@@ -468,6 +575,9 @@ pub async fn start_call_capture(
     app: AppHandle,
     req: StartCallCaptureRequest,
 ) -> Result<CallCaptureSession, String> {
+    if crate::live_translation::is_active() {
+        return Err("Сначала остановите синхронный перевод.".to_string());
+    }
     let mut session = build_session(&app, &req)?;
     logger::log_info(
         "CALL_CAPTURE",
@@ -587,6 +697,82 @@ pub async fn get_call_capture_duration_ms(session_id: String) -> Result<u64, Str
     Ok((Utc::now() - started_at).num_milliseconds().max(0) as u64)
 }
 
+pub fn get_system_audio_level(session_id: &str) -> Result<SystemAudioLevel, String> {
+    let guard = sessions()
+        .lock()
+        .map_err(|_| "Не удалось заблокировать менеджер записи созвона.".to_string())?;
+    let stored = guard
+        .get(session_id)
+        .ok_or_else(|| "Активная запись созвона не найдена.".to_string())?;
+
+    #[cfg(target_os = "macos")]
+    {
+        let state = stored
+            .macos
+            .as_ref()
+            .ok_or_else(|| "Системная аудиодорожка macOS не запущена.".to_string())?;
+        if state.callback_state_ptr == 0 {
+            return Err("Системная аудиодорожка macOS недоступна.".to_string());
+        }
+        // SAFETY: the callback state is owned by the stored session and is freed
+        // only by stop_platform_capture while the sessions mutex is held.
+        let callback_state =
+            unsafe { &*(state.callback_state_ptr as *const MacosAudioWriterState) };
+        let writer = callback_state
+            .writer
+            .lock()
+            .map_err(|_| "Не удалось прочитать уровень системного звука macOS.".to_string())?;
+        return Ok(SystemAudioLevel {
+            max_dbfs: writer.max_dbfs(),
+            frames_above_noise_floor: writer.frames_above_noise_floor(),
+            output_frames_written: writer.output_frames_written(),
+        });
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let state = stored
+            .windows
+            .as_ref()
+            .ok_or_else(|| "Системная аудиодорожка Windows не запущена.".to_string())?;
+        let guard = state
+            .writer
+            .lock()
+            .map_err(|_| "Не удалось прочитать уровень системного звука Windows.".to_string())?;
+        let writer = guard
+            .as_ref()
+            .ok_or_else(|| "Системная аудиодорожка Windows недоступна.".to_string())?;
+        return Ok(SystemAudioLevel {
+            max_dbfs: writer.max_dbfs(),
+            frames_above_noise_floor: writer.frames_above_noise_floor(),
+            output_frames_written: writer.output_frames_written(),
+        });
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let state = stored
+            .linux
+            .as_ref()
+            .ok_or_else(|| "Системная аудиодорожка Linux не запущена.".to_string())?;
+        let guard = state
+            .writer
+            .lock()
+            .map_err(|_| "Не удалось прочитать уровень системного звука Linux.".to_string())?;
+        let writer = guard
+            .as_ref()
+            .ok_or_else(|| "Системная аудиодорожка Linux недоступна.".to_string())?;
+        return Ok(SystemAudioLevel {
+            max_dbfs: writer.max_dbfs(),
+            frames_above_noise_floor: writer.frames_above_noise_floor(),
+            output_frames_written: writer.output_frames_written(),
+        });
+    }
+
+    #[allow(unreachable_code)]
+    Err("Захват системного звука не поддерживается на этой платформе.".to_string())
+}
+
 #[cfg(target_os = "macos")]
 fn platform_targets() -> Vec<CaptureTarget> {
     vec![CaptureTarget {
@@ -638,7 +824,7 @@ fn start_platform_capture(
         return Ok(None);
     }
 
-    start_macos_system_audio_capture(session)
+    start_macos_system_audio_capture(session, req.save_audio)
 }
 
 #[cfg(target_os = "windows")]
@@ -657,7 +843,7 @@ fn start_platform_capture(
         return Ok(None);
     }
 
-    start_windows_system_audio_capture(session)
+    start_windows_system_audio_capture(session, req.save_audio)
 }
 
 #[cfg(target_os = "linux")]
@@ -676,7 +862,7 @@ fn start_platform_capture(
         return Ok(None);
     }
 
-    start_linux_system_audio_capture(session)
+    start_linux_system_audio_capture(session, req.save_audio)
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
@@ -960,6 +1146,48 @@ fn read_default_output_device() -> Result<AudioObjectID, String> {
 }
 
 #[cfg(target_os = "macos")]
+fn current_audio_process_object() -> Result<AudioObjectID, String> {
+    let mut address = audio_property_address(kAudioHardwarePropertyTranslatePIDToProcessObject);
+    let pid = std::process::id() as i32;
+    let mut process_object = 0 as AudioObjectID;
+    let mut size = std::mem::size_of::<AudioObjectID>() as u32;
+    let status = unsafe {
+        AudioObjectGetPropertyData(
+            kAudioObjectSystemObject as AudioObjectID,
+            NonNull::from(&mut address),
+            std::mem::size_of_val(&pid) as u32,
+            (&pid as *const i32).cast(),
+            NonNull::from(&mut size),
+            NonNull::new((&mut process_object as *mut AudioObjectID).cast())
+                .ok_or_else(|| "CoreAudio process output pointer is null.".to_string())?,
+        )
+    };
+    status_result(status, "Translate Talkis PID to CoreAudio process")?;
+    if process_object == 0 {
+        return Err("CoreAudio did not return an audio process for Talkis.".to_string());
+    }
+    Ok(process_object)
+}
+
+#[cfg(target_os = "macos")]
+fn current_audio_process_object_for_tap() -> Result<AudioObjectID, String> {
+    let required = REQUIRE_SELF_AUDIO_EXCLUSION.load(Ordering::SeqCst);
+    let attempts = if required { 20 } else { 1 };
+    let mut last_error = None;
+    for attempt in 0..attempts {
+        match current_audio_process_object() {
+            Ok(process_object) => return Ok(process_object),
+            Err(error) => last_error = Some(error),
+        }
+        if attempt + 1 < attempts {
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+    }
+    Err(last_error
+        .unwrap_or_else(|| "CoreAudio did not return an audio process for Talkis.".to_string()))
+}
+
+#[cfg(target_os = "macos")]
 fn read_tap_stream_description(
     tap_id: AudioObjectID,
 ) -> Result<AudioStreamBasicDescription, String> {
@@ -1209,7 +1437,13 @@ fn system_wav_spec() -> hound::WavSpec {
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-fn system_track_path(session: &CallCaptureSession) -> Result<PathBuf, String> {
+fn system_track_path(session: &CallCaptureSession, save_audio: bool) -> Result<PathBuf, String> {
+    if !save_audio {
+        #[cfg(windows)]
+        return Ok(PathBuf::from("NUL"));
+        #[cfg(not(windows))]
+        return Ok(PathBuf::from("/dev/null"));
+    }
     session
         .tracks
         .iter()
@@ -1499,8 +1733,9 @@ fn run_linux_pipewire_capture(
 #[cfg(target_os = "linux")]
 fn start_linux_system_audio_capture(
     session: &CallCaptureSession,
+    save_audio: bool,
 ) -> Result<Option<LinuxCallCaptureState>, String> {
-    let path = system_track_path(session)?;
+    let path = system_track_path(session, save_audio)?;
     let wav_writer = hound::WavWriter::create(&path, system_wav_spec())
         .map_err(|err| format!("Не удалось открыть system.wav для записи: {}", err))?;
     let writer = Arc::new(Mutex::new(Some(SystemAudioWriter::new(
@@ -1728,6 +1963,7 @@ fn build_windows_loopback_stream(
 #[cfg(target_os = "windows")]
 fn start_windows_system_audio_capture(
     session: &CallCaptureSession,
+    save_audio: bool,
 ) -> Result<Option<WindowsCallCaptureState>, String> {
     let host = cpal::default_host();
     let device = host.default_output_device().ok_or_else(|| {
@@ -1743,7 +1979,7 @@ fn start_windows_system_audio_capture(
     let config: cpal::StreamConfig = supported_config.into();
     let source_sample_rate = config.sample_rate.0;
     let source_channels = config.channels;
-    let path = system_track_path(session)?;
+    let path = system_track_path(session, save_audio)?;
     let wav_writer = hound::WavWriter::create(&path, system_wav_spec())
         .map_err(|err| format!("Не удалось открыть system.wav для записи: {}", err))?;
     let writer = Arc::new(Mutex::new(Some(SystemAudioWriter::new(
@@ -1784,17 +2020,34 @@ fn start_windows_system_audio_capture(
 #[cfg(target_os = "macos")]
 fn start_macos_system_audio_capture(
     session: &CallCaptureSession,
+    save_audio: bool,
 ) -> Result<Option<MacosCallCaptureState>, String> {
     let output_device = read_default_output_device()?;
     let output_uid = read_audio_cf_string(output_device, kAudioDevicePropertyDeviceUID)?;
-    let empty_processes = NSArray::<NSNumber>::from_slice(&[]);
-    let output_uid_ns = NSString::from_str(&output_uid);
+    let talkis_process = current_audio_process_object_for_tap();
+    let excluded_processes = match &talkis_process {
+        Ok(process_object) => {
+            let excluded_process = NSNumber::numberWithUnsignedInt(*process_object);
+            NSArray::from_retained_slice(&[excluded_process])
+        }
+        Err(error) if REQUIRE_SELF_AUDIO_EXCLUSION.load(Ordering::SeqCst) => {
+            return Err(format!(
+                "Не удалось исключить озвучку Talkis из системного звука: {}",
+                error
+            ));
+        }
+        Err(error) => {
+            logger::log_error(
+                "CALL_CAPTURE",
+                &format!("Talkis audio process exclusion unavailable: {}", error),
+            );
+            NSArray::<NSNumber>::from_slice(&[])
+        }
+    };
     let tap_description = unsafe {
-        CATapDescription::initExcludingProcesses_andDeviceUID_withStream(
+        CATapDescription::initStereoGlobalTapButExcludeProcesses(
             CATapDescription::alloc(),
-            &empty_processes,
-            &output_uid_ns,
-            0,
+            &excluded_processes,
         )
     };
     let tap_name = NSString::from_str("Talkis Call Capture");
@@ -1805,8 +2058,28 @@ fn start_macos_system_audio_capture(
         tap_description.setUUID(&tap_uuid);
         tap_description.setPrivate(true);
         tap_description.setMixdown(true);
-        tap_description.setMuteBehavior(CATapMuteBehavior::Unmuted);
+        tap_description.setMuteBehavior(if MUTE_CAPTURED_SYSTEM_AUDIO.load(Ordering::SeqCst) {
+            CATapMuteBehavior::MutedWhenTapped
+        } else {
+            CATapMuteBehavior::Unmuted
+        });
     }
+    if let Ok(process_object) = talkis_process {
+        logger::log_info(
+            "CALL_CAPTURE",
+            &format!(
+                "Core Audio tap excludes Talkis process object={}",
+                process_object
+            ),
+        );
+    }
+    logger::log_info(
+        "CALL_CAPTURE",
+        &format!(
+            "Core Audio source playback muted_while_tapped={}",
+            MUTE_CAPTURED_SYSTEM_AUDIO.load(Ordering::SeqCst)
+        ),
+    );
 
     let mut tap_id: AudioObjectID = 0;
     status_result(
@@ -1843,7 +2116,7 @@ fn start_macos_system_audio_capture(
         return Err(err);
     }
 
-    let path = system_track_path(session)?;
+    let path = system_track_path(session, save_audio)?;
     let source_channels = stream_description
         .mChannelsPerFrame
         .max(1)
@@ -1906,7 +2179,7 @@ fn start_macos_system_audio_capture(
     logger::log_info(
         "CALL_CAPTURE",
         &format!(
-            "Started macOS system audio capture session={}, tap={}, aggregate={}, source={}Hz/{}ch/{}bit, stored={}Hz/{}ch/{}bit",
+            "Started macOS global system audio capture session={}, tap={}, aggregate={}, source={}Hz/{}ch/{}bit, stored={}Hz/{}ch/{}bit",
             session.id,
             tap_id,
             aggregate_device_id,

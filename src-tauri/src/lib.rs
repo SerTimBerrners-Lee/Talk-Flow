@@ -6,6 +6,7 @@ mod history_storage;
 mod hotkey_capture;
 mod hotkey_manager;
 mod live_dictation;
+mod live_translation;
 mod llm_runtime;
 mod local_stt;
 mod local_translator;
@@ -15,6 +16,7 @@ mod media_permissions;
 mod native_voice_recorder;
 mod paste;
 mod prompt_config;
+pub mod realtime;
 
 use commands::{
     accessibility, runtime_info, settings_window,
@@ -170,12 +172,16 @@ pub fn run() {
             call_capture::save_call_capture_mic_track,
             call_capture::get_call_capture_status,
             call_capture::get_call_capture_duration_ms,
+            live_translation::start_live_translation,
+            live_translation::get_live_translation_audio_level,
+            live_translation::stop_live_translation,
             media::prepare_media_for_transcription,
             native_voice_recorder::start_native_voice_recording,
             native_voice_recorder::pause_native_voice_recording,
             native_voice_recorder::resume_native_voice_recording,
             native_voice_recorder::stop_native_voice_recording,
             ai::test_api_connection,
+            realtime::test_realtime_connection,
             ai::list_stt_models,
             ai::install_stt_model,
             ai::delete_stt_model,
@@ -198,6 +204,7 @@ pub fn run() {
             accessibility::open_accessibility_settings,
             accessibility::reset_accessibility_permission,
             accessibility::check_accessibility_permission,
+            accessibility::check_microphone_permission,
             runtime_info::get_app_runtime_info,
             get_cleanup_prompt_preview,
             start_native_hotkey_capture,
@@ -218,13 +225,21 @@ fn get_cleanup_prompt_preview(
 }
 
 #[tauri::command]
-fn start_native_hotkey_capture(window: tauri::WebviewWindow) -> Result<(), String> {
-    hotkey_capture::start_capture(&window)
+fn start_native_hotkey_capture(
+    window: tauri::WebviewWindow,
+    request_id: String,
+    target: String,
+) -> Result<(), String> {
+    hotkey_capture::start_capture(&window, request_id, target)
 }
 
 #[tauri::command]
-fn stop_native_hotkey_capture(window: tauri::WebviewWindow) -> Result<(), String> {
-    hotkey_capture::stop_capture(&window)
+fn stop_native_hotkey_capture(
+    window: tauri::WebviewWindow,
+    request_id: String,
+    target: String,
+) -> Result<(), String> {
+    hotkey_capture::stop_capture(&window, request_id, target)
 }
 
 /// Extract token from `talkis://auth?token=<jwt>` URLs.

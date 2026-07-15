@@ -77,6 +77,13 @@ fn recorder_slot() -> &'static Mutex<Option<NativeVoiceRecorder>> {
     RECORDER.get_or_init(|| Mutex::new(None))
 }
 
+pub fn is_active() -> bool {
+    recorder_slot()
+        .lock()
+        .map(|guard| guard.is_some())
+        .unwrap_or(false)
+}
+
 fn unique_temp_path(prefix: &str, extension: &str) -> PathBuf {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -593,6 +600,9 @@ pub fn start_native_voice_recording(
     app: AppHandle,
     req: StartNativeVoiceRecordingRequest,
 ) -> Result<(), String> {
+    if crate::live_translation::is_active() {
+        return Err("Сначала остановите синхронный перевод.".to_string());
+    }
     let mut guard = recorder_slot()
         .lock()
         .map_err(|_| "Не удалось заблокировать нативную запись.".to_string())?;

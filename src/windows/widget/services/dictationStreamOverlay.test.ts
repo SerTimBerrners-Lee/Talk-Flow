@@ -8,6 +8,10 @@ import {
   shouldApplyDictationStreamUpdate,
 } from "./dictationStreamOverlay";
 import type { AppSettings } from "../../../lib/store";
+import {
+  realtimeConfigurationFingerprint,
+  STREAMING_STT_ADAPTERS,
+} from "../../../lib/realtimeModels";
 
 describe("dictation stream overlay state", () => {
   test("maps partial, final and inserting states without losing request id", () => {
@@ -64,12 +68,15 @@ describe("dictation stream overlay state", () => {
       whisperEndpoint: "http://127.0.0.1:15223/v1/audio/transcriptions",
       whisperModel: "nvidia/nemotron-3.5-asr-streaming-0.6b",
       language: "ru",
+      realtimeTranscriptionEnabled: true,
       localModels: {},
     } as AppSettings;
 
     expect(isLocalSttStreamingEnabled(settings)).toBe(true);
     expect(createNativeLiveDictationOptions(settings, "req-1")).toEqual({
       requestId: "req-1",
+      provider: "local",
+      apiKey: "",
       model: "nvidia/nemotron-3.5-asr-streaming-0.6b",
       language: "ru",
       endpoint: "http://127.0.0.1:15223/v1/audio/transcriptions",
@@ -80,9 +87,7 @@ describe("dictation stream overlay state", () => {
       createNativeLiveDictationOptions(
         {
           ...settings,
-          localModels: {
-            "nemotron-35-asr-streaming-06b": { streamingEnabled: false },
-          },
+          realtimeTranscriptionEnabled: false,
         } as AppSettings,
         "req-2",
       ),
@@ -98,5 +103,54 @@ describe("dictation stream overlay state", () => {
         "req-3",
       ),
     ).toBeNull();
+  });
+
+  test("enables an API streaming model after its exact configuration was verified", () => {
+    const adapter = STREAMING_STT_ADAPTERS.find((item) => item.id === "openai")!;
+    const values = {
+      apiKey: "secret",
+      model: "gpt-realtime-whisper",
+      endpoint: "",
+    };
+    const fingerprint = realtimeConfigurationFingerprint({
+      provider: "openai",
+      ...values,
+      defaultEndpoint: adapter.defaultEndpoint,
+    });
+    expect(
+      createNativeLiveDictationOptions(
+        {
+          useOwnKey: true,
+          selectedApiAdapter: "openai",
+          realtimeTranscriptionEnabled: true,
+          language: "ru",
+          apiAdapters: { openai: values },
+        } as AppSettings,
+        "req-unverified",
+      ),
+    ).toBeNull();
+
+    const settings = {
+      useOwnKey: true,
+      selectedApiAdapter: "openai",
+      realtimeTranscriptionEnabled: true,
+      language: "ru",
+      apiAdapters: {
+        openai: {
+          ...values,
+          connectionStatus: "verified",
+          streamingCapability: "supported",
+          streamingCapabilityFingerprint: fingerprint,
+        },
+      },
+    } as AppSettings;
+
+    expect(createNativeLiveDictationOptions(settings, "req-api")).toMatchObject({
+      requestId: "req-api",
+      provider: "openai",
+      model: "gpt-realtime-whisper",
+      endpoint: "https://api.openai.com",
+      streamingEnabled: true,
+    });
   });
 });

@@ -17,15 +17,15 @@ describe("validateHotkey", () => {
     expect(validateHotkey("Alt+Z").valid).toBe(true);
   });
 
-  test("accepts F-key without modifier", () => {
-    expect(validateHotkey("F1").valid).toBe(true);
-    expect(validateHotkey("F12").valid).toBe(true);
+  test("accepts F-key with a modifier", () => {
+    expect(validateHotkey("Shift+F1").valid).toBe(true);
+    expect(validateHotkey("Alt+F12").valid).toBe(true);
   });
 
   test("rejects letter without modifier", () => {
     const result = validateHotkey("A");
     expect(result.valid).toBe(false);
-    expect(result.error).toContain("F-клавиш");
+    expect(result.error).toContain("модификатор");
   });
 
   test("rejects modifier-only", () => {
@@ -143,9 +143,9 @@ describe("normalizeHotkey", () => {
   });
 
   test("preserves F-key format", () => {
-    const result = normalizeHotkey("f5");
+    const result = normalizeHotkey("shift+f5");
     expect(result.valid).toBe(true);
-    expect(result.normalized).toBe("F5");
+    expect(result.normalized).toBe("Shift+F5");
   });
 
   test("returns error for invalid input", () => {
@@ -291,7 +291,12 @@ describe("translation selection hotkey settings", () => {
   });
 
   test("persists migration for legacy selected-text translation hotkeys", () => {
-    for (const selectionHotkey of ["cmd+alt+y", "Control+Command+T"]) {
+    for (const selectionHotkey of [
+      "cmd+alt+y",
+      "Control+Command+T",
+      "Alt+T",
+      "Control+Alt+Y",
+    ]) {
       const saved = {
         translation: {
           widgetEnabled: false,
@@ -312,6 +317,21 @@ describe("translation selection hotkey settings", () => {
         }),
       ).toBe(true);
     }
+  });
+
+  test("uses one cross-platform selected-text translation hotkey", () => {
+    expect(DEFAULT_SELECTION_TRANSLATION_HOTKEY).toBe("Control+Shift+Y");
+  });
+
+  test("preserves a custom selected-text translation hotkey", () => {
+    const normalized = normalizeSavedSettings({
+      translation: {
+        selectionEnabled: true,
+        selectionHotkey: "Control+Shift+K",
+      },
+    });
+
+    expect(normalized.translation?.selectionHotkey).toBe("Control+Shift+K");
   });
 
   test("repairs saved selected-text hotkey when it conflicts with voice hotkey", () => {

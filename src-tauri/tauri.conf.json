@@ -2,10 +2,10 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Talkis",
   "mainBinaryName": "Talkis",
-  "version": "0.3.12",
+  "version": "0.3.13",
   "identifier": "com.trixter.talkis",
   "build": {
-    "beforeDevCommand": "bun scripts/run-vite.mjs --talkis-check-dev-port && bun run prepare:sidecars && bun run dev",
+    "beforeDevCommand": "bun scripts/run-vite.mjs --talkis-check-dev-port && bun run dev",
     "devUrl": "http://localhost:14320",
     "beforeBuildCommand": "bun scripts/before-tauri-build.mjs",
     "frontendDist": "../dist"
@@ -16,8 +16,8 @@
         "label": "widget",
         "title": "Talkis",
         "url": "index.html?window=widget",
-        "width": 78,
-        "height": 32,
+        "width": 129,
+        "height": 54,
         "minWidth": 18,
         "minHeight": 18,
         "resizable": false,

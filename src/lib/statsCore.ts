@@ -8,7 +8,7 @@ export const STATS_VERSION = 2 as const;
 /** How many recent transcription ids we remember to de-duplicate re-counts. */
 export const COUNTED_IDS_LIMIT = 600;
 
-export type StatSource = "voice" | "file" | "call" | undefined;
+export type StatSource = "voice" | "file" | "call" | "liveTranslation" | undefined;
 export type StatStatus = "processing" | "completed" | "failed" | "interrupted" | undefined;
 
 export interface TranscriptionStats {
@@ -119,8 +119,10 @@ export function dayKeyOf(value: string | Date): string {
   ).padStart(2, "0")}`;
 }
 
-function normalizeSource(source: StatSource): "voice" | "file" | "call" {
-  return source === "file" || source === "call" ? source : "voice";
+function normalizeSource(source: StatSource): "voice" | "file" | "call" | "liveTranslation" {
+  return source === "file" || source === "call" || source === "liveTranslation"
+    ? source
+    : "voice";
 }
 
 /**

@@ -73,8 +73,8 @@ export const settingsModels = {
 
   // ── Cloud mode ──
   "models.cloud.descActive": {
-    ru: "Запросы на распознавание и обработку текста идут через облако Talkis. Все данные шифруются при передаче, а аудио и текст не сохраняются на сервере после обработки.",
-    en: "Recognition and text-processing requests go through the Talkis cloud. All data is encrypted in transit, and audio and text are not stored on the server after processing.",
+    ru: "Распознавание, обработка текста и синхронный перевод идут через облако Talkis. Все данные шифруются при передаче, а основной API-ключ остаётся на сервере.",
+    en: "Recognition, text processing, and live translation run through Talkis Cloud. Data is encrypted in transit, and the primary API key remains on the server.",
   },
   "models.cloud.descGuest": {
     ru: "Для облачного режима нужна авторизация и активная подписка. После входа плашка и статус подписки обновятся автоматически.",
@@ -129,8 +129,8 @@ export const settingsModels = {
     en: "Adapter for Volcengine speech services.",
   },
   "models.adapter.xai.description": {
-    ru: "Адаптер под API xAI для будущих voice/STT сценариев.",
-    en: "Adapter for the xAI API for future voice/STT use cases.",
+    ru: "Адаптер для batch- и streaming-транскрибации через xAI.",
+    en: "Adapter for batch and streaming transcription via xAI.",
   },
 
   // ── Adapter status badges ──
@@ -150,15 +150,15 @@ export const settingsModels = {
   "models.connection.error": { ru: "Ошибка соединения", en: "Connection error" },
   "models.connection.testing": { ru: "Проверяем соединение...", en: "Testing connection..." },
   "models.connection.notTested": { ru: "Соединение не проверено", en: "Connection not tested" },
-  "models.connection.verifiedSaved": { ru: "Соединение проверено и сохранено.", en: "Connection verified and saved." },
   "models.connection.keyModelSaved": { ru: "Ключ и модель сохранены", en: "Key and model saved" },
-  "models.connection.keyModelSavedNamed": { ru: "{name}: ключ и модель сохранены.", en: "{name}: key and model saved." },
   "models.connection.readyToSelect": { ru: "Готов к выбору", en: "Ready to select" },
   "models.connection.fillKeyModel": { ru: "Заполните ключ и модель", en: "Fill in the key and model" },
 
   // ── Adapter form fields ──
   "models.field.apiKey": { ru: "API-ключ", en: "API key" },
   "models.field.model": { ru: "Модель", en: "Model" },
+  "models.field.customModel": { ru: "Своя модель...", en: "Custom model..." },
+  "models.field.customModelPlaceholder": { ru: "Введите ID модели", en: "Enter model ID" },
   "models.field.recommended": { ru: "Рекомендуем: {model}", en: "Recommended: {model}" },
   "models.field.host": { ru: "Хост", en: "Host" },
   "models.field.hostDefaultPlaceholder": { ru: "По умолчанию: {endpoint}", en: "Default: {endpoint}" },
@@ -213,18 +213,22 @@ export const settingsModels = {
   // ── Local models section ──
   "models.local.tabTranscription": { ru: "Транскрибация", en: "Transcription" },
   "models.local.tabText": { ru: "Текстовая", en: "Text" },
-  "models.local.tabOther": { ru: "Другие", en: "Other" },
+  "models.local.tabOther": { ru: "Перевод", en: "Translation" },
+  "models.local.tabTranslation": { ru: "Перевод", en: "Translation" },
+  "models.translation.title": {
+    ru: "Realtime-перевод",
+    en: "Realtime translation",
+  },
+  "models.translation.desc": {
+    ru: "Отдельное подключение для синхронного перевода микрофона и системного звука.",
+    en: "A separate connection for synchronous microphone and system-audio translation.",
+  },
   "models.local.sectionTitle": { ru: "Локальные модели", en: "Local models" },
   "models.local.sectionDesc": {
     ru: "Выберите модель, скачайте ее через локальный STT runtime и используйте без облака.",
     en: "Pick a model, download it through the local STT runtime, and use it without the cloud.",
   },
   "models.local.recommendedBadge": { ru: "Рекомендуем", en: "Recommended" },
-  "models.local.streamingToggle": { ru: "Стриминг", en: "Streaming" },
-  "models.local.streamingToggleTitle": {
-    ru: "Включает streaming-режим для голосовой диктовки. При транскрибации файлов он всегда отключен.",
-    en: "Enables streaming mode for voice dictation. It is always disabled for file transcription.",
-  },
 
   // Per-model descriptions (ru = the original constant text)
   "models.local.whisper-large-v3-turbo.description": {

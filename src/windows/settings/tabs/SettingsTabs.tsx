@@ -22,7 +22,6 @@ import {
   IconPencil,
   IconPlus,
   IconServer,
-  IconSparkles,
   IconTargetArrow,
   IconTrash,
   IconTypography,
@@ -62,6 +61,14 @@ import { TRANSCRIPTION_STYLE_OPTIONS } from "../../../lib/transcriptionPrompts";
 import { isSummaryAvailable, generatePromptText } from "../../../lib/summarize";
 import { SETTINGS_UPDATED_EVENT } from "../../../lib/hotkeyEvents";
 import { useI18n, type MsgKey } from "../../../lib/i18n";
+import { Dropdown } from "../../../components/Dropdown";
+import { ModelCardDisclosureButton } from "../../../components/ModelCardDisclosureButton";
+import { RealtimeTranslationModels } from "./RealtimeTranslationModels";
+import {
+  hasVerifiedRealtimeCapability,
+  realtimeConfigurationFingerprint,
+  STREAMING_STT_ADAPTERS,
+} from "../../../lib/realtimeModels";
 
 const LocalLlmModels = lazy(() =>
   import("../../../components/LocalLlmModels").then((module) => ({
@@ -154,11 +161,20 @@ interface ApiAdapterOption {
   name: string;
   description: string;
   recommendedModel: string;
+  models: ApiAdapterModelOption[];
   defaultEndpoint: string;
   initials: string;
   accent: string;
   testable: boolean;
 }
+
+interface ApiAdapterModelOption {
+  id: string;
+  supportsStreaming?: boolean;
+}
+
+const CUSTOM_API_MODEL_VALUE = "__custom_model__";
+const TEXT_MODEL_OPTIONS = ["gpt-4o-mini", "gpt-4.1-mini", "gpt-4.1"];
 
 const API_ADAPTERS: ApiAdapterOption[] = [
   {
@@ -166,6 +182,12 @@ const API_ADAPTERS: ApiAdapterOption[] = [
     name: "OpenAI API",
     description: "Подключение через OpenAI API для распознавания речи.",
     recommendedModel: "gpt-4o-transcribe",
+    models: [
+      { id: "gpt-4o-transcribe", supportsStreaming: true },
+      { id: "gpt-4o-mini-transcribe", supportsStreaming: true },
+      { id: "gpt-realtime-whisper", supportsStreaming: true },
+      { id: "whisper-1" },
+    ],
     defaultEndpoint: "https://api.openai.com",
     initials: "AI",
     accent: "#0f172a",
@@ -176,7 +198,11 @@ const API_ADAPTERS: ApiAdapterOption[] = [
     name: "Deepgram API",
     description: "Адаптер для облачного распознавания речи через Deepgram.",
     recommendedModel: "nova-3",
-    defaultEndpoint: "",
+    models: [
+      { id: "nova-3", supportsStreaming: true },
+      { id: "nova-2", supportsStreaming: true },
+    ],
+    defaultEndpoint: "https://api.deepgram.com",
     initials: "DG",
     accent: "#13ef93",
     testable: false,
@@ -186,6 +212,7 @@ const API_ADAPTERS: ApiAdapterOption[] = [
     name: "Cartesia API",
     description: "Адаптер под речевые модели Cartesia.",
     recommendedModel: "sonic",
+    models: [{ id: "sonic" }],
     defaultEndpoint: "",
     initials: "CA",
     accent: "#6d5dfc",
@@ -196,7 +223,11 @@ const API_ADAPTERS: ApiAdapterOption[] = [
     name: "Mistral AI",
     description: "Адаптер под модели распознавания и обработки Mistral AI.",
     recommendedModel: "voxtral-mini-latest",
-    defaultEndpoint: "",
+    models: [
+      { id: "voxtral-mini-latest" },
+      { id: "voxtral-mini-transcribe-realtime-2602", supportsStreaming: true },
+    ],
+    defaultEndpoint: "https://api.mistral.ai",
     initials: "MI",
     accent: "#ff7000",
     testable: false,
@@ -205,8 +236,13 @@ const API_ADAPTERS: ApiAdapterOption[] = [
     id: "elevenlabs",
     name: "ElevenLabs API",
     description: "Адаптер для speech-to-text сценариев через ElevenLabs.",
-    recommendedModel: "scribe_v1",
-    defaultEndpoint: "",
+    recommendedModel: "scribe_v2",
+    models: [
+      { id: "scribe_v2" },
+      { id: "scribe_v1" },
+      { id: "scribe_v2_realtime", supportsStreaming: true },
+    ],
+    defaultEndpoint: "https://api.elevenlabs.io",
     initials: "EL",
     accent: "#111827",
     testable: false,
@@ -216,6 +252,10 @@ const API_ADAPTERS: ApiAdapterOption[] = [
     name: "Fireworks AI API",
     description: "Адаптер под hosted speech-модели Fireworks AI.",
     recommendedModel: "whisper-v3",
+    models: [
+      { id: "whisper-v3" },
+      { id: "whisper-v3-turbo" },
+    ],
     defaultEndpoint: "",
     initials: "FW",
     accent: "#f97316",
@@ -226,6 +266,10 @@ const API_ADAPTERS: ApiAdapterOption[] = [
     name: "Groq API",
     description: "Адаптер под быстрые hosted Whisper-модели Groq.",
     recommendedModel: "whisper-large-v3-turbo",
+    models: [
+      { id: "whisper-large-v3-turbo" },
+      { id: "whisper-large-v3" },
+    ],
     defaultEndpoint: "",
     initials: "GQ",
     accent: "#f55036",
@@ -236,7 +280,12 @@ const API_ADAPTERS: ApiAdapterOption[] = [
     name: "AssemblyAI",
     description: "Адаптер для распознавания речи через AssemblyAI.",
     recommendedModel: "universal",
-    defaultEndpoint: "",
+    models: [
+      { id: "universal" },
+      { id: "u3-rt-pro", supportsStreaming: true },
+      { id: "whisper-rt", supportsStreaming: true },
+    ],
+    defaultEndpoint: "https://streaming.assemblyai.com",
     initials: "AA",
     accent: "#2563eb",
     testable: false,
@@ -246,6 +295,7 @@ const API_ADAPTERS: ApiAdapterOption[] = [
     name: "Volcengine API",
     description: "Адаптер под речевые сервисы Volcengine.",
     recommendedModel: "seed-asr",
+    models: [{ id: "seed-asr" }],
     defaultEndpoint: "",
     initials: "VE",
     accent: "#7c3aed",
@@ -255,8 +305,9 @@ const API_ADAPTERS: ApiAdapterOption[] = [
     id: "xai",
     name: "xAI API",
     description: "Адаптер под API xAI для будущих voice/STT сценариев.",
-    recommendedModel: "grok-voice",
-    defaultEndpoint: "",
+    recommendedModel: "grok-transcribe",
+    models: [{ id: "grok-transcribe", supportsStreaming: true }],
+    defaultEndpoint: "https://api.x.ai",
     initials: "xAI",
     accent: "#000000",
     testable: false,
@@ -283,7 +334,6 @@ interface LocalModelOption {
   downloadBytes?: number;
   purpose?: "stt" | "diarization";
   supportsStreaming?: boolean;
-  streamingDefaultEnabled?: boolean;
 }
 
 interface LocalOtherComponent {
@@ -322,7 +372,6 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
     runtimeReady: true,
     downloadBytes: 716_000_000,
     supportsStreaming: true,
-    streamingDefaultEnabled: true,
   },
   {
     id: "whisper-large-v3-turbo",
@@ -477,7 +526,6 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
     runtimeReady: true,
     downloadBytes: 696_000_000,
     supportsStreaming: true,
-    streamingDefaultEnabled: true,
   },
   {
     id: "moonshine-streaming-tiny",
@@ -496,7 +544,6 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
     runtimeReady: true,
     downloadBytes: 48_000_000,
     supportsStreaming: true,
-    streamingDefaultEnabled: true,
   },
   {
     id: "moonshine-streaming-small",
@@ -515,7 +562,6 @@ const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
     runtimeReady: true,
     downloadBytes: 189_000_000,
     supportsStreaming: true,
-    streamingDefaultEnabled: true,
   },
   {
     id: "qwen3-asr-06b",
@@ -1242,6 +1288,10 @@ function TextModelCard({
   const isLocalEndpoint = /127\.0\.0\.1|localhost/i.test(endpoint);
   const hasSelectedModel = Boolean(model) && model.toLowerCase() !== "none";
   const configured = hasSelectedModel && (isLocalEndpoint || Boolean(apiKey));
+  const isKnownModel = TEXT_MODEL_OPTIONS.includes(settings.llmModel);
+  const modelSelectValue = isKnownModel
+    ? settings.llmModel
+    : CUSTOM_API_MODEL_VALUE;
   const statusLabel = testState.status === "testing"
     ? t("models.textModel.statusTesting")
     : testState.status === "error"
@@ -1300,27 +1350,30 @@ function TextModelCard({
     }
   };
   return (
-    <div className="card" style={{ padding: 0, overflow: "hidden", background: "var(--surface)" }}>
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        style={{ width: "100%", border: "none", background: "transparent", padding: "12px 14px", display: "flex", alignItems: "center", gap: 12, cursor: "pointer", textAlign: "left", fontFamily: "var(--font-main)" }}
+    <div className="card" style={{ padding: 0, overflow: expanded ? "visible" : "hidden", position: "relative", zIndex: expanded ? 10 : 0, background: "var(--surface)" }}>
+      <div
+        style={{ position: "relative", padding: "12px 14px", display: "flex", alignItems: "center", gap: 12, textAlign: "left", fontFamily: "var(--font-main)" }}
       >
-        <div style={{ width: 36, height: 36, borderRadius: 999, background: "var(--icon-soft-bg)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-          <IconSparkles size={18} stroke={1.9} color="var(--text-hi)" />
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 3 }}>
             <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)" }}>{t("models.textModel.title")}</div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: statusColor, padding: "5px 9px", borderRadius: 999, background: "var(--control-muted)", whiteSpace: "nowrap" }}>
+            <div
+              title={testState.message || undefined}
+              style={{ fontSize: 11, fontWeight: 700, color: statusColor, padding: "5px 9px", borderRadius: 999, background: "var(--control-muted)", whiteSpace: "nowrap" }}
+            >
               {statusLabel}
             </div>
           </div>
-          <div style={{ fontSize: 12, lineHeight: 1.45, color: "var(--text-mid)" }}>
+          <div style={{ paddingRight: 34, fontSize: 12, lineHeight: 1.45, color: "var(--text-mid)" }}>
             {t("models.textModel.desc")}
           </div>
+          <ModelCardDisclosureButton
+            expanded={expanded}
+            onToggle={() => setExpanded((value) => !value)}
+            label={t(expanded ? "mainTab.collapse" : "mainTab.expand")}
+          />
         </div>
-      </button>
+      </div>
 
       {expanded && (
         <div style={{ borderTop: "1px solid var(--border-subtle)", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
@@ -1338,15 +1391,39 @@ function TextModelCard({
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div className="label" style={{ width: 76, flexShrink: 0 }}>{t("models.field.model")}</div>
-            <input
-              type="text"
-              value={settings.llmModel}
-              onChange={(e) => editField({ llmModel: e.target.value })}
-              className="input"
-              placeholder="gpt-4o-mini"
-              spellCheck={false}
-              style={FIELD_STYLE}
-            />
+            <div style={{ flex: 1, minWidth: 0, display: "grid", gap: 6 }}>
+              <Dropdown
+                value={modelSelectValue}
+                options={[
+                  ...TEXT_MODEL_OPTIONS.map((modelOption) => ({
+                    value: modelOption,
+                    label: modelOption,
+                  })),
+                  {
+                    value: CUSTOM_API_MODEL_VALUE,
+                    label: t("models.field.customModel"),
+                  },
+                ]}
+                onChange={(value) => editField({
+                  llmModel: value === CUSTOM_API_MODEL_VALUE ? "" : value,
+                })}
+              />
+              {modelSelectValue === CUSTOM_API_MODEL_VALUE && (
+                <input
+                  type="text"
+                  value={settings.llmModel}
+                  onChange={(event) => editField({ llmModel: event.currentTarget.value })}
+                  className="input"
+                  placeholder={t("models.field.customModelPlaceholder")}
+                  aria-label={t("models.field.customModelPlaceholder")}
+                  spellCheck={false}
+                  style={{ ...FIELD_STYLE, width: "100%" }}
+                />
+              )}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--text-low)", whiteSpace: "nowrap", flexShrink: 0 }}>
+              {t("models.field.recommended", { model: "gpt-4o-mini" })}
+            </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div className="label" style={{ width: 76, flexShrink: 0 }}>{t("models.field.host")}</div>
@@ -1359,20 +1436,20 @@ function TextModelCard({
               spellCheck={false}
               style={FIELD_STYLE}
             />
+            {settings.llmEndpoint.trim() ? (
+              <button
+                type="button"
+                onClick={() => editField({ llmEndpoint: "" })}
+                style={{ border: "1px solid var(--border-dashed)", background: "var(--control-muted)", color: "var(--text-hi)", borderRadius: 8, padding: "7px 9px", fontSize: 11, fontWeight: 700, fontFamily: "var(--font-main)", whiteSpace: "nowrap", flexShrink: 0, cursor: "pointer" }}
+              >
+                {t("models.common.reset")}
+              </button>
+            ) : (
+              <div style={{ fontSize: 11, color: "var(--text-low)", whiteSpace: "nowrap", flexShrink: 0 }}>
+                {t("models.common.optional")}
+              </div>
+            )}
           </div>
-          {testState.message && (
-            <div style={{
-              fontSize: 12,
-              lineHeight: 1.6,
-              padding: "8px 10px",
-              borderRadius: 8,
-              background: testState.status === "success" ? "var(--success-soft)" : testState.status === "error" ? "var(--danger-soft)" : "var(--control-muted)",
-              color: testState.status === "success" ? "var(--success-bright)" : testState.status === "error" ? "var(--error-bright)" : "var(--text-mid)",
-              border: `1px solid ${testState.status === "success" ? "var(--success-border)" : testState.status === "error" ? "var(--danger-border)" : "var(--border-subtle)"}`,
-            }}>
-              {testState.message}
-            </div>
-          )}
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
             <button
               type="button"
@@ -1427,7 +1504,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
   const [localModelKind, setLocalModelKind] = useState<LocalModelKind>(
     "transcription",
   );
-  const [apiModelKind, setApiModelKind] = useState<"transcription" | "text">(
+  const [apiModelKind, setApiModelKind] = useState<"transcription" | "text" | "translation">(
     "transcription",
   );
   const [expandedApiAdapter, setExpandedApiAdapter] = useState<ApiAdapterId | null>(null);
@@ -1437,6 +1514,8 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
   const [localInstalledModels, setLocalInstalledModels] = useState<string[]>([]);
   const [localTranslators, setLocalTranslators] = useState<Record<string, LocalTranslatorInfo>>({});
   const [apiAdapterTestStates, setApiAdapterTestStates] = useState<Partial<Record<ApiAdapterId, { status: AdapterTestStatus; message: string }>>>({});
+  const [dirtyApiAdapters, setDirtyApiAdapters] = useState<Partial<Record<ApiAdapterId, boolean>>>({});
+  const apiAdapterEditRevisionsRef = useRef<Partial<Record<ApiAdapterId, number>>>({});
   const [localModelActionStates, setLocalModelActionStates] = useState<Partial<Record<string, LocalModelActionState>>>({});
   const authPollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const exchangeCodeRef = useRef<string | null>(null);
@@ -1953,6 +2032,10 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
       };
     };
 
+    const getApiAdapterModelOption = (adapter: ApiAdapterOption, model: string) => (
+      adapter.models.find((option) => option.id === model.trim())
+    );
+
     const getPersistedAdapterStatus = (adapter: ApiAdapterOption, apiKey: string, model: string, endpoint: string) => {
       const savedAdapter = settings.apiAdapters?.[adapter.id];
       const normalizedApiKey = apiKey.trim();
@@ -1975,6 +2058,8 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
     };
 
     const updateApiAdapterValues = (adapter: ApiAdapterOption, patch: Partial<{ apiKey: string; model: string; endpoint: string }>) => {
+      apiAdapterEditRevisionsRef.current[adapter.id] =
+        (apiAdapterEditRevisionsRef.current[adapter.id] || 0) + 1;
       const currentValues = getApiAdapterValues(adapter);
       const nextValues = {
         ...currentValues,
@@ -2000,6 +2085,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
         ...prev,
         [adapter.id]: { status: "idle", message: "" },
       }));
+      setDirtyApiAdapters((prev) => ({ ...prev, [adapter.id]: true }));
       if (adapter.id === "openai") {
         setTestStatus("idle");
         setTestMessage(null);
@@ -2008,10 +2094,12 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
 
     const getAdapterStatus = (adapter: ApiAdapterOption, apiKey: string, model: string, endpoint: string) => {
       const persistedStatus = getPersistedAdapterStatus(adapter, apiKey, model, endpoint);
-      const isSelected = isApiAdapterSelected(adapter);
+      const isSelected =
+        isApiAdapterSelected(adapter) &&
+        Boolean(persistedStatus) &&
+        !dirtyApiAdapters[adapter.id];
 
       if (adapter.id === "openai") {
-        const hasCredentials = Boolean(apiKey.trim()) && Boolean(model.trim());
         const adapterState = apiAdapterTestStates[adapter.id];
         const effectiveStatus = adapterState?.status === "testing" || adapterState?.status === "error" || adapterState?.status === "success"
           ? adapterState.status
@@ -2029,17 +2117,6 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
               : effectiveStatus === "testing"
                 ? t("models.adapterStatus.testing")
                 : t("models.adapterStatus.readyToTest");
-        const connectionLabel = !hasCredentials
-          ? t("models.connection.noApiKey")
-          : isSelected
-            ? t("models.connection.usedForRecognition")
-          : effectiveStatus === "success"
-            ? t("models.connection.working")
-            : effectiveStatus === "error"
-              ? t("models.connection.error")
-              : effectiveStatus === "testing"
-                ? t("models.connection.testing")
-                : t("models.connection.notTested");
         const color = isSelected || effectiveStatus === "success"
           ? "var(--success-bright)"
           : effectiveStatus === "error"
@@ -2048,10 +2125,9 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
 
         return {
           label,
-          message: adapterState?.message || testMessage || (persistedStatus === "verified" ? t("models.connection.verifiedSaved") : null),
+          message: effectiveStatus === "error" ? adapterState?.message || testMessage : null,
           status: isSelected ? "success" as AdapterTestStatus : effectiveStatus,
           color,
-          connectionLabel,
           isSelected,
         };
       }
@@ -2075,10 +2151,9 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
 
       return {
         label,
-        message: adapterState?.message || (persistedStatus ? t("models.connection.keyModelSavedNamed", { name: adapter.name }) : null),
+        message: effectiveStatus === "error" ? adapterState?.message : null,
         status: effectiveStatus,
         color: isSelected || effectiveStatus === "success" ? "var(--success-bright)" : effectiveStatus === "error" ? "var(--error-bright)" : hasCredentials ? "var(--text-hi)" : "var(--text-low)",
-        connectionLabel: isSelected ? t("models.connection.usedForRecognition") : effectiveStatus === "success" ? t("models.connection.keyModelSaved") : hasCredentials ? t("models.connection.readyToSelect") : t("models.connection.fillKeyModel"),
         isSelected,
       };
     };
@@ -2092,21 +2167,83 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
         }));
         return;
       }
+      const testedRevision = apiAdapterEditRevisionsRef.current[adapter.id] || 0;
+      const configurationChanged = () =>
+        (apiAdapterEditRevisionsRef.current[adapter.id] || 0) !== testedRevision;
 
-      if (adapter.testable) {
+      const modelOption = getApiAdapterModelOption(adapter, values.model);
+      const realtimeCatalogAdapter = STREAMING_STT_ADAPTERS.find(
+        (candidate) => candidate.id === adapter.id,
+      );
+      const shouldTestRealtime = Boolean(
+        realtimeCatalogAdapter && (modelOption?.supportsStreaming || !modelOption),
+      );
+      let streamingCapability: "supported" | "unsupported" | undefined;
+      let streamingCapabilityFingerprint: string | undefined;
+
+      if (shouldTestRealtime && realtimeCatalogAdapter) {
         setApiAdapterTestStates((prev) => ({
           ...prev,
           [adapter.id]: { status: "testing", message: t("models.connection.testing") },
         }));
 
         try {
-          const result = await invoke<{ success: boolean; message: string; latency_ms: number }>("test_api_connection", {
+          const result = await invoke<{ success: boolean; message: string }>("test_realtime_connection", {
             req: {
-              api_key: values.apiKey || "",
+              provider: adapter.id,
+              apiKey: values.apiKey,
+              model: values.model,
+              endpoint: values.endpoint || realtimeCatalogAdapter.defaultEndpoint,
+              purpose: "stt",
+            },
+          });
+          if (configurationChanged()) {
+            setApiAdapterTestStates((prev) => ({
+              ...prev,
+              [adapter.id]: { status: "idle", message: "" },
+            }));
+            return;
+          }
+          setApiAdapterTestStates((prev) => ({
+            ...prev,
+            [adapter.id]: { status: result.success ? "success" : "error", message: result.success ? "" : result.message },
+          }));
+          if (!result.success) return;
+          streamingCapability = "supported";
+          streamingCapabilityFingerprint = realtimeConfigurationFingerprint({
+            provider: adapter.id,
+            apiKey: values.apiKey,
+            model: values.model,
+            endpoint: values.endpoint,
+            defaultEndpoint: realtimeCatalogAdapter.defaultEndpoint,
+          });
+        } catch (err) {
+          if (configurationChanged()) {
+            setApiAdapterTestStates((prev) => ({
+              ...prev,
+              [adapter.id]: { status: "idle", message: "" },
+            }));
+            return;
+          }
+          setApiAdapterTestStates((prev) => ({
+            ...prev,
+            [adapter.id]: { status: "error", message: err instanceof Error ? err.message : String(err) },
+          }));
+          return;
+        }
+      } else if (adapter.testable) {
+        setApiAdapterTestStates((prev) => ({
+          ...prev,
+          [adapter.id]: { status: "testing", message: "" },
+        }));
+        try {
+          const result = await invoke<{ success: boolean; message: string }>("test_api_connection", {
+            req: {
+              api_key: values.apiKey,
               whisper_api_key: null,
               whisper_endpoint: values.endpoint || null,
               local_models_dir: null,
-              whisper_model: values.model || "whisper-1",
+              whisper_model: values.model,
               llm_api_key: null,
               llm_endpoint: null,
               llm_model: "none",
@@ -2114,12 +2251,22 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
               test_llm: false,
             },
           });
-          setApiAdapterTestStates((prev) => ({
-            ...prev,
-            [adapter.id]: { status: result.success ? "success" : "error", message: result.message },
-          }));
-          if (!result.success) return;
+          if (configurationChanged()) {
+            setApiAdapterTestStates((prev) => ({
+              ...prev,
+              [adapter.id]: { status: "idle", message: "" },
+            }));
+            return;
+          }
+          if (!result.success) throw new Error(result.message);
         } catch (err) {
+          if (configurationChanged()) {
+            setApiAdapterTestStates((prev) => ({
+              ...prev,
+              [adapter.id]: { status: "idle", message: "" },
+            }));
+            return;
+          }
           setApiAdapterTestStates((prev) => ({
             ...prev,
             [adapter.id]: { status: "error", message: err instanceof Error ? err.message : String(err) },
@@ -2131,18 +2278,22 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
           ...prev,
           [adapter.id]: {
             status: "success",
-            message: t("models.test.savedPendingBackend", { name: adapter.name }),
+            message: "",
           },
         }));
       }
 
+      if (configurationChanged()) {
+        return;
+      }
       setApiAdapterTestStates((prev) => ({
         ...prev,
         [adapter.id]: {
           status: "success",
-          message: adapter.testable ? t("models.connection.verifiedSaved") : t("models.test.savedPendingBackend", { name: adapter.name }),
+          message: "",
         },
       }));
+      setDirtyApiAdapters((prev) => ({ ...prev, [adapter.id]: false }));
       update({
         apiAdapters: {
           ...(settings.apiAdapters || {}),
@@ -2150,11 +2301,13 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
             apiKey: values.apiKey,
             model: values.model,
             endpoint: values.endpoint,
-            connectionStatus: adapter.testable ? "verified" : "saved",
+            connectionStatus: shouldTestRealtime || adapter.testable ? "verified" : "saved",
             lastConnectedAt: new Date().toISOString(),
             lastTestedApiKey: values.apiKey.trim(),
             lastTestedModel: values.model.trim(),
             lastTestedEndpoint: values.endpoint.trim(),
+            streamingCapability,
+            streamingCapabilityFingerprint,
           },
         },
       });
@@ -2490,18 +2643,6 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
       return formatLocalDownloadBytes(model.downloadBytes) || (model.runtimeReady ? t("models.size.unknown") : t("models.size.notConnected"));
     };
 
-    const isLocalModelStreamingEnabled = (model: LocalModelOption) => {
-      if (!model.supportsStreaming) return false;
-      const cachedValue = settings.localModels?.[model.id]?.streamingEnabled;
-      return typeof cachedValue === "boolean" ? cachedValue : model.streamingDefaultEnabled !== false;
-    };
-
-    const handleToggleLocalModelStreaming = (model: LocalModelOption, enabled: boolean) => {
-      updateLocalModelCache(model.id, {
-        streamingEnabled: enabled,
-      });
-    };
-
     const translateSpeedValue = (value: string) => {
       switch (value) {
         case "очень быстро": return t("models.speedValue.veryFast");
@@ -2618,7 +2759,6 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
           downloadedAt: settings.localModels?.[model.id]?.downloadedAt || new Date().toISOString(),
           lastCheckedAt: new Date().toISOString(),
           message: undefined,
-          streamingEnabled: model.supportsStreaming ? isLocalModelStreamingEnabled(model) : undefined,
         });
       }
     };
@@ -2951,6 +3091,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                 {([
                   { id: "transcription", label: t("models.local.tabTranscription"), Icon: IconMicrophone },
                   { id: "text", label: t("models.local.tabText"), Icon: IconMessage },
+                  { id: "translation", label: t("models.local.tabTranslation"), Icon: IconLanguage },
                 ] as const).map(({ id, label, Icon }) => {
                   const active = apiModelKind === id;
 
@@ -3006,41 +3147,78 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                   const isExpanded = expandedApiAdapter === adapter.id;
                   const adapterValues = getApiAdapterValues(adapter);
                   const adapterStatus = getAdapterStatus(adapter, adapterValues.apiKey, adapterValues.model, adapterValues.endpoint);
+                  const selectedModelOption = getApiAdapterModelOption(adapter, adapterValues.model);
+                  const realtimeCatalogAdapter = STREAMING_STT_ADAPTERS.find(
+                    (candidate) => candidate.id === adapter.id,
+                  );
+                  const streamingVerified = Boolean(
+                    !dirtyApiAdapters[adapter.id] &&
+                    realtimeCatalogAdapter &&
+                      hasVerifiedRealtimeCapability(
+                        realtimeCatalogAdapter,
+                        settings.apiAdapters?.[adapter.id],
+                      ),
+                  );
+                  const modelSelectValue = selectedModelOption?.id || CUSTOM_API_MODEL_VALUE;
                   const isAdapterSelected = adapterStatus.isSelected;
                   const isAdapterReady = adapterStatus.status === "success";
                   const canSelectApiAdapter = Boolean(adapterValues.apiKey.trim()) && Boolean(adapterValues.model.trim());
                   const isAdapterTestDisabled = adapterStatus.status === "testing" || !canSelectApiAdapter;
 
                   return (
-                    <div key={adapter.id} className="card" style={{ padding: 0, overflow: "hidden", background: "var(--surface)" }}>
-                      <button
-                        type="button"
-                        onClick={() => setExpandedApiAdapter(isExpanded ? null : adapter.id)}
+                    <div
+                      key={adapter.id}
+                      className="card"
+                      style={{
+                        padding: 0,
+                        overflow: isExpanded ? "visible" : "hidden",
+                        position: "relative",
+                        zIndex: isExpanded ? 10 : 0,
+                        background: "var(--surface)",
+                      }}
+                    >
+                      <div
                         style={{
-                          width: "100%",
-                          border: "none",
-                          background: "transparent",
+                          position: "relative",
                           padding: "12px 14px",
                           display: "flex",
                           alignItems: "center",
                           gap: 12,
-                          cursor: "pointer",
                           textAlign: "left",
                           fontFamily: "var(--font-main)",
                         }}
                       >
-                        <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 3 }}>
                             <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)" }}>{adapter.name}</div>
-                            <div style={{ fontSize: 11, fontWeight: 700, color: adapterStatus.color, padding: "5px 9px", borderRadius: 999, background: "var(--control-muted)", whiteSpace: "nowrap" }}>
+                            <div title={adapterStatus.message || undefined} style={{ fontSize: 11, fontWeight: 700, color: adapterStatus.color, padding: "5px 9px", borderRadius: 999, background: "var(--control-muted)", whiteSpace: "nowrap" }}>
                               {adapterStatus.label}
                             </div>
                           </div>
-                          <div style={{ fontSize: 12, lineHeight: 1.45, color: "var(--text-mid)" }}>
-                            {t(API_ADAPTER_DESCRIPTION_KEYS[adapter.id])} {t("models.adapter.recommendedModel", { model: adapter.recommendedModel })}
+                          <div style={{ paddingRight: 34 }}>
+                            <div style={{ fontSize: 12, lineHeight: 1.45, color: "var(--text-mid)" }}>
+                              {t(API_ADAPTER_DESCRIPTION_KEYS[adapter.id])} {t("models.adapter.recommendedModel", { model: adapter.recommendedModel })}
+                            </div>
+                            {streamingVerified && (selectedModelOption?.supportsStreaming || !selectedModelOption) && (
+                              <div
+                                title={t("models.stat.streaming")}
+                                aria-label={t("models.stat.streaming")}
+                                style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 9 }}
+                              >
+                                <IconBroadcast size={14} stroke={1.9} color="var(--text-hi)" />
+                                <span style={{ fontSize: 12, fontWeight: 650, color: "var(--text-hi)", lineHeight: 1, whiteSpace: "nowrap" }}>
+                                  {t("models.stat.streaming")}
+                                </span>
+                              </div>
+                            )}
                           </div>
+                          <ModelCardDisclosureButton
+                            expanded={isExpanded}
+                            onToggle={() => setExpandedApiAdapter(isExpanded ? null : adapter.id)}
+                            label={t(isExpanded ? "mainTab.collapse" : "mainTab.expand")}
+                          />
                         </div>
-                      </button>
+                      </div>
 
                       {isExpanded && (
                         <div style={{ borderTop: "1px solid var(--border-subtle)", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
@@ -3058,14 +3236,43 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
 
                           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                             <div className="label" style={{ width: 76, flexShrink: 0 }}>{t("models.field.model")}</div>
-                            <input
-                              type="text"
-                              value={adapterValues.model}
-                              onChange={(e) => updateApiAdapterValues(adapter, { model: e.target.value })}
-                              className="input"
-                              placeholder={adapter.recommendedModel}
-                              style={{ flex: 1, minWidth: 0, height: 36, padding: "8px 10px", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize: 12 }}
-                            />
+                            <div style={{ flex: 1, minWidth: 0, display: "grid", gap: 6 }}>
+                              <Dropdown
+                                value={modelSelectValue}
+                                options={[
+                                  ...adapter.models.map((modelOption) => ({
+                                    value: modelOption.id,
+                                    label: `${modelOption.id}${modelOption.supportsStreaming ? ` · ${t("models.stat.streaming")}` : ""}`,
+                                  })),
+                                  {
+                                    value: CUSTOM_API_MODEL_VALUE,
+                                    label: t("models.field.customModel"),
+                                  },
+                                ]}
+                                onChange={(value) => {
+                                  updateApiAdapterValues(adapter, {
+                                    model: value === CUSTOM_API_MODEL_VALUE ? "" : value,
+                                  });
+                                }}
+                              />
+                              {modelSelectValue === CUSTOM_API_MODEL_VALUE && (
+                                <input
+                                  type="text"
+                                  value={adapterValues.model}
+                                  onChange={(event) => updateApiAdapterValues(adapter, { model: event.currentTarget.value })}
+                                  className="input"
+                                  placeholder={t("models.field.customModelPlaceholder")}
+                                  aria-label={t("models.field.customModelPlaceholder")}
+                                  style={{
+                                    width: "100%",
+                                    height: 36,
+                                    padding: "8px 10px",
+                                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                                    fontSize: 12,
+                                  }}
+                                />
+                              )}
+                            </div>
                             <div style={{ fontSize: 11, color: "var(--text-low)", whiteSpace: "nowrap", flexShrink: 0 }}>{t("models.field.recommended", { model: adapter.recommendedModel })}</div>
                           </div>
 
@@ -3104,25 +3311,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                             )}
                           </div>
 
-                          {adapterStatus.message && (
-                            <div style={{
-                              fontSize: 12,
-                              lineHeight: 1.6,
-                              padding: "8px 10px",
-                              borderRadius: 8,
-                              background: adapterStatus.status === "success" ? "var(--success-soft)" : adapterStatus.status === "error" ? "var(--danger-soft)" : "var(--control-muted)",
-                              color: adapterStatus.status === "success" ? "var(--success-bright)" : adapterStatus.status === "error" ? "var(--error-bright)" : "var(--text-mid)",
-                              border: `1px solid ${adapterStatus.status === "success" ? "var(--success-border)" : adapterStatus.status === "error" ? "var(--danger-border)" : "var(--border-subtle)"}`,
-                            }}>
-                              {adapterStatus.message}
-                            </div>
-                          )}
-
-                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 8, color: adapterStatus.color, fontSize: 12, fontWeight: 600 }}>
-                              {adapterStatus.status === "success" && <IconCheck size={15} stroke={2.5} />}
-                              {adapterStatus.connectionLabel}
-                            </div>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10, flexWrap: "wrap" }}>
                             {isAdapterSelected ? (
                               <div style={{
                                 padding: "9px 12px",
@@ -3208,6 +3397,9 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
               )}
 
               {apiModelKind === "text" && <TextModelCard settings={settings} update={update} />}
+              {apiModelKind === "translation" && (
+                <RealtimeTranslationModels settings={settings} update={update} />
+              )}
             </div>
           )}
 
@@ -3282,27 +3474,21 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                   const downloadProgress = modelStatus.status === "installing" ? modelActionState?.progress : undefined;
                   const downloadedLabel = formatLocalDownloadBytes(modelActionState?.downloadedBytes, { showZero: Boolean(modelActionState?.totalBytes) });
                   const totalLabel = formatLocalDownloadBytes(modelActionState?.totalBytes);
-                  const streamingEnabled = isLocalModelStreamingEnabled(model);
 
                   return (
                     <div key={model.id} className="card" style={{ padding: 0, overflow: "hidden", background: "var(--surface)" }}>
-                      <button
-                        type="button"
-                        onClick={() => setExpandedLocalModel(isExpanded ? null : model.id)}
+                      <div
                         style={{
-                          width: "100%",
-                          border: "none",
-                          background: "transparent",
+                          position: "relative",
                           padding: "12px 14px",
                           display: "flex",
                           alignItems: "center",
                           gap: 12,
-                          cursor: "pointer",
                           textAlign: "left",
                           fontFamily: "var(--font-main)",
                         }}
                       >
-                        <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 3 }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
                               <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{model.name}</div>
@@ -3316,12 +3502,19 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                               {modelStatus.label}
                             </div>
                           </div>
-                          <div style={{ fontSize: 12, lineHeight: 1.45, color: "var(--text-mid)" }}>
-                            {t(LOCAL_MODEL_DESCRIPTION_KEYS[model.id])}
+                          <div style={{ paddingRight: 34 }}>
+                            <div style={{ fontSize: 12, lineHeight: 1.45, color: "var(--text-mid)" }}>
+                              {t(LOCAL_MODEL_DESCRIPTION_KEYS[model.id])}
+                            </div>
+                            {renderLocalModelStats(model)}
                           </div>
-                          {renderLocalModelStats(model)}
+                          <ModelCardDisclosureButton
+                            expanded={isExpanded}
+                            onToggle={() => setExpandedLocalModel(isExpanded ? null : model.id)}
+                            label={t(isExpanded ? "mainTab.collapse" : "mainTab.expand")}
+                          />
                         </div>
-                      </button>
+                      </div>
 
                       {isExpanded && (
                         <div style={{ borderTop: "1px solid var(--border-subtle)", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
@@ -3368,67 +3561,6 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                           )}
 
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                            {model.supportsStreaming && (
-                              <label
-                                title={t("models.local.streamingToggleTitle")}
-                                onClick={(event) => event.stopPropagation()}
-                                style={{
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: 9,
-                                  padding: "7px 10px",
-                                  borderRadius: 999,
-                                  background: "var(--control-muted)",
-                                  border: "1px solid var(--border-subtle)",
-                                  cursor: "pointer",
-                                  userSelect: "none",
-                                }}
-                              >
-                                <input
-                                  type="checkbox"
-                                  role="switch"
-                                  aria-label={t("models.local.streamingToggle")}
-                                  checked={streamingEnabled}
-                                  onChange={(event) => handleToggleLocalModelStreaming(model, event.currentTarget.checked)}
-                                  style={{
-                                    position: "absolute",
-                                    opacity: 0,
-                                    pointerEvents: "none",
-                                    width: 1,
-                                    height: 1,
-                                  }}
-                                />
-                                <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-hi)", lineHeight: 1 }}>
-                                  {t("models.local.streamingToggle")}
-                                </span>
-                                <span
-                                  aria-hidden="true"
-                                  style={{
-                                    width: 34,
-                                    height: 20,
-                                    borderRadius: 999,
-                                    background: streamingEnabled ? "var(--accent)" : "var(--border-strong)",
-                                    display: "inline-flex",
-                                    alignItems: "center",
-                                    padding: 2,
-                                    transition: "background 0.18s ease",
-                                  }}
-                                >
-                                  <span
-                                    style={{
-                                      width: 16,
-                                      height: 16,
-                                      borderRadius: 999,
-                                      background: "var(--surface)",
-                                      boxShadow: "0 1px 3px rgba(0,0,0,0.22)",
-                                      transform: streamingEnabled ? "translateX(14px)" : "translateX(0)",
-                                      transition: "transform 0.18s ease",
-                                    }}
-                                  />
-                                </span>
-                              </label>
-                            )}
-
                             {modelStatus.connectionLabel && (
                               <div style={{ display: "flex", alignItems: "center", gap: 8, color: modelStatus.color, fontSize: 12, fontWeight: 600 }}>
                                 {(modelStatus.status === "installed" || modelStatus.status === "selected") && <IconCheck size={15} stroke={2.5} />}
@@ -3640,23 +3772,18 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                           className="card"
                           style={{ padding: 0, overflow: "hidden", background: "var(--surface)" }}
                         >
-                          <button
-                            type="button"
-                            onClick={() => setExpandedLocalOtherComponent(isExpanded ? null : component.id)}
+                          <div
                             style={{
-                              width: "100%",
-                              border: "none",
-                              background: "transparent",
+                              position: "relative",
                               padding: "12px 14px",
                               display: "flex",
                               alignItems: "center",
                               gap: 12,
-                              cursor: "pointer",
                               textAlign: "left",
                               fontFamily: "var(--font-main)",
                             }}
                           >
-                            <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
                               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 3 }}>
                                 <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                                   {component.name}
@@ -3665,12 +3792,19 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                                   {componentStatus.label}
                                 </div>
                               </div>
-                              <div style={{ fontSize: 12, lineHeight: 1.45, color: "var(--text-mid)" }}>
-                                {t(component.descriptionKey)}
+                              <div style={{ paddingRight: 34 }}>
+                                <div style={{ fontSize: 12, lineHeight: 1.45, color: "var(--text-mid)" }}>
+                                  {t(component.descriptionKey)}
+                                </div>
+                                {renderLocalModelStats(component)}
                               </div>
-                              {renderLocalModelStats(component)}
+                              <ModelCardDisclosureButton
+                                expanded={isExpanded}
+                                onToggle={() => setExpandedLocalOtherComponent(isExpanded ? null : component.id)}
+                                label={t(isExpanded ? "mainTab.collapse" : "mainTab.expand")}
+                              />
                             </div>
-                          </button>
+                          </div>
 
                           {isExpanded && (
                             <div style={{ borderTop: "1px solid var(--border-subtle)", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10 }}>

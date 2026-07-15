@@ -96,15 +96,6 @@ export const widget = {
     ru: "Запись разговора",
     en: "Record the conversation",
   },
-  "widget.translationBubble.active": {
-    ru: "Перевод диктовки включен",
-    en: "Dictation translation is on",
-  },
-  "widget.translationBubble.inactive": {
-    ru: "Перевод диктовки выключен",
-    en: "Dictation translation is off",
-  },
-
   // ── Widget.tsx: IdlePill / RecordingPill buttons ────────────────────────
   "widget.idle.startRecording": {
     ru: "Начать запись",

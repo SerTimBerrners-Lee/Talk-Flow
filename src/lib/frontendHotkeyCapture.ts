@@ -13,17 +13,8 @@ export type FrontendHotkeyCaptureEvent = Pick<
 
 const CODE_MAIN_KEYS: Record<string, string> = {
   Space: "Space",
-  Escape: "Escape",
   Enter: "Enter",
   NumpadEnter: "Enter",
-  Tab: "Tab",
-  Backspace: "Backspace",
-  Delete: "Delete",
-  Insert: "Insert",
-  Home: "Home",
-  End: "End",
-  PageUp: "PageUp",
-  PageDown: "PageDown",
   ArrowUp: "Up",
   ArrowDown: "Down",
   ArrowLeft: "Left",
@@ -67,21 +58,18 @@ function mainKeyFromKey(rawKey: string): string | null {
   const key = rawKey.trim();
   const lower = key.toLowerCase();
 
-  if (!key || lower === "control" || lower === "alt" || lower === "shift" || lower === "meta") {
+  if (
+    !key ||
+    lower === "control" ||
+    lower === "alt" ||
+    lower === "shift" ||
+    lower === "meta"
+  ) {
     return null;
   }
 
   const named: Record<string, string> = {
-    escape: "Escape",
     enter: "Enter",
-    tab: "Tab",
-    backspace: "Backspace",
-    delete: "Delete",
-    insert: "Insert",
-    home: "Home",
-    end: "End",
-    pageup: "PageUp",
-    pagedown: "PageDown",
     arrowup: "Up",
     arrowdown: "Down",
     arrowleft: "Left",

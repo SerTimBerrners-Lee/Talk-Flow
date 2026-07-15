@@ -17,6 +17,8 @@ mod macos {
     #[derive(Clone, Serialize)]
     #[serde(rename_all = "camelCase")]
     struct NativeHotkeyCapturePayload {
+        request_id: String,
+        target: String,
         status: String,
         hotkey: Option<String>,
         message: Option<String>,
@@ -25,8 +27,14 @@ mod macos {
     struct CaptureRuntime {
         app: AppHandle,
         window_label: String,
+        request_id: String,
+        target: String,
         active: bool,
         candidate: Option<String>,
+        main_key: Option<String>,
+        main_key_code: Option<u16>,
+        main_released: bool,
+        captured_flags: NSEventModifierFlags,
         last_preview: Option<String>,
     }
 
@@ -43,6 +51,8 @@ mod macos {
     fn emit_capture_event(
         app: &AppHandle,
         window_label: &str,
+        request_id: &str,
+        target: &str,
         status: &str,
         hotkey: Option<String>,
         message: Option<String>,
@@ -51,6 +61,8 @@ mod macos {
             window_label,
             HOTKEY_CAPTURE_EVENT,
             NativeHotkeyCapturePayload {
+                request_id: request_id.to_string(),
+                target: target.to_string(),
                 status: status.to_string(),
                 hotkey,
                 message,
@@ -58,9 +70,16 @@ mod macos {
         );
     }
 
-    fn with_runtime_context(runtime: &Rc<RefCell<CaptureRuntime>>) -> (AppHandle, String) {
+    fn with_runtime_context(
+        runtime: &Rc<RefCell<CaptureRuntime>>,
+    ) -> (AppHandle, String, String, String) {
         let runtime_ref = runtime.borrow();
-        (runtime_ref.app.clone(), runtime_ref.window_label.clone())
+        (
+            runtime_ref.app.clone(),
+            runtime_ref.window_label.clone(),
+            runtime_ref.request_id.clone(),
+            runtime_ref.target.clone(),
+        )
     }
 
     fn build_hotkey_string(flags: NSEventModifierFlags, main_key: Option<&str>) -> String {
@@ -86,14 +105,42 @@ mod macos {
         parts.join("+")
     }
 
+    fn supported_modifier_flags(flags: NSEventModifierFlags) -> NSEventModifierFlags {
+        (flags & NSEventModifierFlags::DeviceIndependentFlagsMask)
+            & (NSEventModifierFlags::Control
+                | NSEventModifierFlags::Option
+                | NSEventModifierFlags::Shift
+                | NSEventModifierFlags::Command)
+    }
+
     fn has_any_supported_modifier(flags: NSEventModifierFlags) -> bool {
-        let normalized_flags = flags & NSEventModifierFlags::DeviceIndependentFlagsMask;
-        normalized_flags.intersects(
+        supported_modifier_flags(flags).intersects(
             NSEventModifierFlags::Control
                 | NSEventModifierFlags::Option
                 | NSEventModifierFlags::Shift
                 | NSEventModifierFlags::Command,
         )
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum ChordCompletion {
+        Wait,
+        Reject,
+        Complete,
+    }
+
+    fn chord_completion(
+        main_released: bool,
+        active_flags: NSEventModifierFlags,
+        captured_flags: NSEventModifierFlags,
+    ) -> ChordCompletion {
+        if !main_released || !supported_modifier_flags(active_flags).is_empty() {
+            ChordCompletion::Wait
+        } else if supported_modifier_flags(captured_flags).is_empty() {
+            ChordCompletion::Reject
+        } else {
+            ChordCompletion::Complete
+        }
     }
 
     fn main_key_from_key_code(key_code: u16) -> Option<&'static str> {
@@ -135,10 +182,7 @@ mod macos {
             0x1c => Some("8"),
             0x19 => Some("9"),
             0x24 => Some("Enter"),
-            0x30 => Some("Tab"),
             0x31 => Some("Space"),
-            0x33 => Some("Backspace"),
-            0x35 => Some("Escape"),
             0x60 => Some("F5"),
             0x61 => Some("F6"),
             0x62 => Some("F7"),
@@ -148,14 +192,8 @@ mod macos {
             0x67 => Some("F11"),
             0x6d => Some("F10"),
             0x6f => Some("F12"),
-            0x72 => Some("Insert"),
-            0x73 => Some("Home"),
-            0x74 => Some("PageUp"),
-            0x75 => Some("Delete"),
             0x76 => Some("F4"),
-            0x77 => Some("End"),
             0x78 => Some("F2"),
-            0x79 => Some("PageDown"),
             0x7a => Some("F1"),
             0x7b => Some("Left"),
             0x7c => Some("Right"),
@@ -185,13 +223,14 @@ mod macos {
         let key_code = event.keyCode();
         let main_key = main_key_from_key_code(key_code);
 
-        let (app, window_label, active, candidate, last_preview) = {
+        let (app, window_label, request_id, target, active, last_preview) = {
             let runtime_ref = runtime.borrow();
             (
                 runtime_ref.app.clone(),
                 runtime_ref.window_label.clone(),
+                runtime_ref.request_id.clone(),
+                runtime_ref.target.clone(),
                 runtime_ref.active,
-                runtime_ref.candidate.clone(),
                 runtime_ref.last_preview.clone(),
             )
         };
@@ -206,11 +245,17 @@ mod macos {
                     let mut runtime_ref = runtime.borrow_mut();
                     runtime_ref.active = false;
                     runtime_ref.candidate = None;
+                    runtime_ref.main_key = None;
+                    runtime_ref.main_key_code = None;
+                    runtime_ref.main_released = false;
+                    runtime_ref.captured_flags = NSEventModifierFlags::empty();
                     runtime_ref.last_preview = None;
                 }
                 emit_capture_event(
                     &app,
                     &window_label,
+                    &request_id,
+                    &target,
                     "cancelled",
                     None,
                     Some("Ввод отменен.".to_string()),
@@ -218,17 +263,41 @@ mod macos {
                 return ptr::null_mut();
             }
 
+            if event.isARepeat() {
+                return ptr::null_mut();
+            }
+
             if let Some(main_key) = main_key {
-                let candidate = build_hotkey_string(flags, Some(main_key));
-                {
+                let candidate = {
                     let mut runtime_ref = runtime.borrow_mut();
-                    // Apply immediately on key press for parity with Windows/Linux —
-                    // no "hold then release" step, which users found confusing.
-                    runtime_ref.active = false;
+                    if runtime_ref.main_key_code.is_some()
+                        && runtime_ref.main_key_code != Some(key_code)
+                    {
+                        return ptr::null_mut();
+                    }
+
+                    runtime_ref.main_key = Some(main_key.to_string());
+                    runtime_ref.main_key_code = Some(key_code);
+                    runtime_ref.main_released = false;
+                    runtime_ref.captured_flags =
+                        runtime_ref.captured_flags | supported_modifier_flags(flags);
+                    let candidate = build_hotkey_string(
+                        runtime_ref.captured_flags,
+                        runtime_ref.main_key.as_deref(),
+                    );
                     runtime_ref.candidate = Some(candidate.clone());
                     runtime_ref.last_preview = Some(candidate.clone());
-                }
-                emit_capture_event(&app, &window_label, "completed", Some(candidate), None);
+                    candidate
+                };
+                emit_capture_event(
+                    &app,
+                    &window_label,
+                    &request_id,
+                    &target,
+                    "preview",
+                    Some(candidate),
+                    Some("Отпустите все клавиши, чтобы применить сочетание.".to_string()),
+                );
                 return ptr::null_mut();
             }
 
@@ -236,59 +305,143 @@ mod macos {
         }
 
         if event_type == NSEventType::FlagsChanged {
-            if has_any_supported_modifier(flags) {
-                let preview = build_hotkey_string(flags, None);
+            let normalized_flags = supported_modifier_flags(flags);
+            let preview = {
+                let mut runtime_ref = runtime.borrow_mut();
+                if runtime_ref.main_key.is_some() && !normalized_flags.is_empty() {
+                    runtime_ref.captured_flags = runtime_ref.captured_flags | normalized_flags;
+                    let candidate = build_hotkey_string(
+                        runtime_ref.captured_flags,
+                        runtime_ref.main_key.as_deref(),
+                    );
+                    runtime_ref.candidate = Some(candidate.clone());
+                    Some((candidate, true))
+                } else if runtime_ref.main_key.is_none() && !normalized_flags.is_empty() {
+                    Some((build_hotkey_string(normalized_flags, None), false))
+                } else {
+                    None
+                }
+            };
+
+            if let Some((preview, has_main_key)) = preview {
                 if Some(preview.clone()) != last_preview {
-                    {
-                        let mut runtime_ref = runtime.borrow_mut();
-                        runtime_ref.last_preview = Some(preview.clone());
-                    }
+                    runtime.borrow_mut().last_preview = Some(preview.clone());
                     emit_capture_event(
                         &app,
                         &window_label,
+                        &request_id,
+                        &target,
                         "preview",
                         Some(preview),
-                        Some("Добавьте основную клавишу.".to_string()),
+                        Some(
+                            if has_main_key {
+                                "Отпустите все клавиши, чтобы применить сочетание."
+                            } else {
+                                "Добавьте основную клавишу."
+                            }
+                            .to_string(),
+                        ),
                     );
                 }
                 return ptr::null_mut();
             }
 
-            if let Some(candidate) = candidate {
-                {
-                    let mut runtime_ref = runtime.borrow_mut();
-                    runtime_ref.active = false;
-                    runtime_ref.last_preview = Some(candidate.clone());
-                }
-                emit_capture_event(&app, &window_label, "completed", Some(candidate), None);
-                return ptr::null_mut();
-            }
-
-            {
+            let completion = {
                 let mut runtime_ref = runtime.borrow_mut();
-                runtime_ref.last_preview = None;
+                if chord_completion(
+                    runtime_ref.main_released,
+                    normalized_flags,
+                    runtime_ref.captured_flags,
+                ) != ChordCompletion::Wait
+                {
+                    let candidate = runtime_ref.candidate.clone();
+                    if chord_completion(
+                        runtime_ref.main_released,
+                        normalized_flags,
+                        runtime_ref.captured_flags,
+                    ) == ChordCompletion::Reject
+                    {
+                        runtime_ref.candidate = None;
+                        runtime_ref.main_key = None;
+                        runtime_ref.main_key_code = None;
+                        runtime_ref.main_released = false;
+                        runtime_ref.last_preview = None;
+                        Some((candidate, false))
+                    } else {
+                        runtime_ref.active = false;
+                        Some((candidate, true))
+                    }
+                } else {
+                    None
+                }
+            };
+            if let Some((candidate, valid)) = completion {
+                emit_capture_event(
+                    &app,
+                    &window_label,
+                    &request_id,
+                    &target,
+                    if valid { "completed" } else { "preview" },
+                    candidate,
+                    if valid {
+                        None
+                    } else {
+                        Some("Добавьте хотя бы один модификатор.".to_string())
+                    },
+                );
             }
             return ptr::null_mut();
         }
 
         if event_type == NSEventType::KeyUp {
-            if !has_any_supported_modifier(flags) {
-                if let Some(main_key) = main_key {
-                    let fallback_candidate = build_hotkey_string(flags, Some(main_key));
-                    let completed_candidate = candidate.unwrap_or(fallback_candidate);
+            let completion = {
+                let mut runtime_ref = runtime.borrow_mut();
+                if runtime_ref.main_key_code != Some(key_code) {
+                    None
+                } else {
+                    runtime_ref.main_released = true;
+                    if chord_completion(
+                        runtime_ref.main_released,
+                        flags,
+                        runtime_ref.captured_flags,
+                    ) == ChordCompletion::Wait
                     {
-                        let mut runtime_ref = runtime.borrow_mut();
-                        runtime_ref.active = false;
-                        runtime_ref.last_preview = Some(completed_candidate.clone());
+                        None
+                    } else {
+                        let candidate = runtime_ref.candidate.clone();
+                        if chord_completion(
+                            runtime_ref.main_released,
+                            flags,
+                            runtime_ref.captured_flags,
+                        ) == ChordCompletion::Reject
+                        {
+                            runtime_ref.candidate = None;
+                            runtime_ref.main_key = None;
+                            runtime_ref.main_key_code = None;
+                            runtime_ref.main_released = false;
+                            runtime_ref.last_preview = None;
+                            Some((candidate, false))
+                        } else {
+                            runtime_ref.active = false;
+                            Some((candidate, true))
+                        }
                     }
-                    emit_capture_event(
-                        &app,
-                        &window_label,
-                        "completed",
-                        Some(completed_candidate),
-                        None,
-                    );
                 }
+            };
+            if let Some((candidate, valid)) = completion {
+                emit_capture_event(
+                    &app,
+                    &window_label,
+                    &request_id,
+                    &target,
+                    if valid { "completed" } else { "preview" },
+                    candidate,
+                    if valid {
+                        None
+                    } else {
+                        Some("Добавьте хотя бы один модификатор.".to_string())
+                    },
+                );
             }
 
             return ptr::null_mut();
@@ -297,7 +450,62 @@ mod macos {
         event_ptr.as_ptr()
     }
 
-    pub fn start_capture(window: &WebviewWindow) -> Result<(), String> {
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn waits_until_main_key_and_all_modifiers_are_released() {
+            let command = NSEventModifierFlags::Command;
+            assert_eq!(
+                chord_completion(false, NSEventModifierFlags::empty(), command),
+                ChordCompletion::Wait
+            );
+            assert_eq!(
+                chord_completion(true, command, command),
+                ChordCompletion::Wait
+            );
+            assert_eq!(
+                chord_completion(true, NSEventModifierFlags::empty(), command),
+                ChordCompletion::Complete
+            );
+        }
+
+        #[test]
+        fn rejects_a_main_key_without_modifiers() {
+            assert_eq!(
+                chord_completion(
+                    true,
+                    NSEventModifierFlags::empty(),
+                    NSEventModifierFlags::empty(),
+                ),
+                ChordCompletion::Reject
+            );
+        }
+
+        #[test]
+        fn supports_only_documented_main_keys() {
+            assert_eq!(main_key_from_key_code(0x00), Some("A"));
+            assert_eq!(main_key_from_key_code(0x24), Some("Enter"));
+            assert_eq!(main_key_from_key_code(0x31), Some("Space"));
+            assert_eq!(main_key_from_key_code(0x7b), Some("Left"));
+            assert_eq!(main_key_from_key_code(0x7a), Some("F1"));
+            assert_eq!(main_key_from_key_code(0x30), None);
+            assert_eq!(main_key_from_key_code(0x35), None);
+        }
+    }
+
+    pub fn start_capture(
+        window: &WebviewWindow,
+        request_id: String,
+        target: String,
+    ) -> Result<(), String> {
+        if request_id.trim().is_empty() {
+            return Err("Hotkey capture requestId is required".to_string());
+        }
+        if target != "dictation" && target != "selection" {
+            return Err(format!("Unsupported hotkey target: {}", target));
+        }
         let app = window.app_handle().clone();
         let window_label = window.label().to_string();
         let (tx, rx) = mpsc::channel();
@@ -311,8 +519,14 @@ mod macos {
                     let runtime = Rc::new(RefCell::new(CaptureRuntime {
                         app: app.clone(),
                         window_label: window_label.clone(),
+                        request_id: request_id.clone(),
+                        target: target.clone(),
                         active: true,
                         candidate: None,
+                        main_key: None,
+                        main_key_code: None,
+                        main_released: false,
+                        captured_flags: NSEventModifierFlags::empty(),
                         last_preview: None,
                     }));
                     let runtime_for_block = runtime.clone();
@@ -334,7 +548,7 @@ mod macos {
                         });
                     });
 
-                    let (app, window_label) =
+                    let (app, window_label, request_id, target) =
                         with_runtime_context(&HOTKEY_CAPTURE_MONITOR.with(|slot| {
                             slot.borrow()
                                 .as_ref()
@@ -345,6 +559,8 @@ mod macos {
                     emit_capture_event(
                         &app,
                         &window_label,
+                        &request_id,
+                        &target,
                         "listening",
                         None,
                         Some("Нажмите новую комбинацию.".to_string()),
@@ -361,7 +577,11 @@ mod macos {
             .map_err(|e| format!("Failed to receive hotkey capture start result: {}", e))?
     }
 
-    pub fn stop_capture(window: &WebviewWindow) -> Result<(), String> {
+    pub fn stop_capture(
+        window: &WebviewWindow,
+        request_id: String,
+        target: String,
+    ) -> Result<(), String> {
         let app = window.app_handle().clone();
         let window_label = window.label().to_string();
         let (tx, rx) = mpsc::channel();
@@ -370,7 +590,15 @@ mod macos {
         app_for_main_thread
             .run_on_main_thread(move || {
                 stop_capture_on_main_thread();
-                emit_capture_event(&app, &window_label, "stopped", None, None);
+                emit_capture_event(
+                    &app,
+                    &window_label,
+                    &request_id,
+                    &target,
+                    "stopped",
+                    None,
+                    None,
+                );
                 let _ = tx.send(Ok(()));
             })
             .map_err(|e| e.to_string())?;
@@ -384,11 +612,19 @@ mod macos {
 pub use macos::{start_capture, stop_capture};
 
 #[cfg(not(target_os = "macos"))]
-pub fn start_capture(_window: &tauri::WebviewWindow) -> Result<(), String> {
+pub fn start_capture(
+    _window: &tauri::WebviewWindow,
+    _request_id: String,
+    _target: String,
+) -> Result<(), String> {
     Err("Native hotkey capture is only available on macOS".to_string())
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn stop_capture(_window: &tauri::WebviewWindow) -> Result<(), String> {
+pub fn stop_capture(
+    _window: &tauri::WebviewWindow,
+    _request_id: String,
+    _target: String,
+) -> Result<(), String> {
     Ok(())
 }

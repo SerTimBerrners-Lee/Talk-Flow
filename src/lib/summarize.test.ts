@@ -144,7 +144,7 @@ describe("stored settings migration for local STT", () => {
     expect(normalized.whisperEndpoint).toBe("http://127.0.0.1:8000");
   });
 
-  it("preserves local STT streaming toggle state", () => {
+  it("migrates the legacy local STT streaming toggle state", () => {
     const normalized = normalizeSavedSettings({
       localModels: {
         "nemotron-35-asr-streaming-06b": {
@@ -154,7 +154,7 @@ describe("stored settings migration for local STT", () => {
       },
     });
 
-    expect(normalized.localModels?.["nemotron-35-asr-streaming-06b"]?.streamingEnabled).toBe(false);
+    expect(normalized.realtimeTranscriptionEnabled).toBe(false);
   });
 });
 

@@ -20,7 +20,7 @@ import {
   HandyHotkeyEventPayload,
   HotkeyCaptureStatePayload,
   HotkeyChangeRequestPayload,
-  HotkeyRegistrationResultPayload,
+  HotkeyTarget,
   SETTINGS_UPDATED_EVENT,
 } from "../../../lib/hotkeyEvents";
 import { logError, logInfo } from "../../../lib/logger";
@@ -29,6 +29,7 @@ import type {
   WidgetAction,
   WidgetMachineState,
 } from "../services/widgetMachine";
+import { applyHotkeyTransaction } from "../services/hotkeyTransaction";
 
 interface UseWidgetHotkeyParams {
   settingsLoaded: boolean;
@@ -44,12 +45,12 @@ interface UseWidgetHotkeyParams {
 
 type HandyHotkeyIntent = "selection" | "voice" | "ignore";
 type SelectionHotkeyAction = "arm" | "trigger" | "consume";
-type AttemptHotkeyRegistration = (
-  rawHotkey: string,
-  activeHotkeyRef?: MutableRefObject<string | null>,
-  fallbackHotkey?: string,
-) => Promise<HotkeyRegistrationResultPayload>;
-
+interface RegistrationAttemptResult {
+  success: boolean;
+  requestedHotkey: string;
+  activeHotkey: string;
+  message?: string;
+}
 export function resolveHandyHotkeyIntent({
   eventHotkey,
   voiceHotkey,
@@ -108,15 +109,19 @@ export function useWidgetHotkey({
   onSelectionTranslationHotkey,
 }: UseWidgetHotkeyParams): void {
   const { t } = useI18n();
-  const attemptHotkeyRegistrationRef = useRef<AttemptHotkeyRegistration>(
-    attemptHotkeyRegistrationPlaceholder,
-  );
   const isHotkeyCaptureActiveRef = useRef(false);
+  const activeCaptureRequestIdRef = useRef<string | null>(null);
   const selectionRegisteredHotkeyRef = useRef<string | null>(null);
+  const latestRequestIdsRef = useRef<Record<HotkeyTarget, string | null>>({
+    dictation: null,
+    selection: null,
+  });
+  const transactionQueueRef = useRef<Promise<void>>(Promise.resolve());
   const selectionHotkeyArmedRef = useRef(false);
   const handleHotkeyPressRef = useRef<(event: HandyHotkeyEventPayload) => void>(
     () => {},
   );
+  const retryRegistrationsRef = useRef<() => Promise<void>>(async () => {});
 
   const hotkeyForComparison = useCallback(
     (hotkey: string | null | undefined): string | null => {
@@ -139,10 +144,6 @@ export function useWidgetHotkey({
     },
     [],
   );
-
-  const unregisterCurrentHotkey = useCallback(async () => {
-    await unregisterHotkeyRef(registeredHotkeyRef);
-  }, [registeredHotkeyRef, unregisterHotkeyRef]);
 
   const activateWidgetForHotkey = useCallback(() => {
     invoke("activate_widget_for_hotkey").catch((error) => {
@@ -263,7 +264,7 @@ export function useWidgetHotkey({
       rawHotkey: string,
       activeHotkeyRef: MutableRefObject<string | null> = registeredHotkeyRef,
       fallbackHotkey: string = DEFAULT_HOTKEY,
-    ): Promise<HotkeyRegistrationResultPayload> => {
+    ): Promise<RegistrationAttemptResult> => {
       const normalized = normalizeHotkey(rawHotkey);
       if (!normalized.valid || !normalized.normalized) {
         return {
@@ -404,8 +405,11 @@ export function useWidgetHotkey({
   ]);
 
   useEffect(() => {
-    attemptHotkeyRegistrationRef.current = attemptHotkeyRegistration;
-  }, [attemptHotkeyRegistration]);
+    retryRegistrationsRef.current = async () => {
+      await registerCurrentHotkey();
+      await registerSelectionHotkey();
+    };
+  }, [registerCurrentHotkey, registerSelectionHotkey]);
 
   useEffect(() => {
     const unlistenSettings = listen(SETTINGS_UPDATED_EVENT, async () => {
@@ -416,11 +420,23 @@ export function useWidgetHotkey({
         "SETTINGS",
         `Applied settings update: mic=${latestSettings.micId || "[default]"}, hotkey=${latestSettings.hotkey}`,
       );
+      await retryRegistrationsRef.current();
     });
 
     const unlistenCaptureState = listen<HotkeyCaptureStatePayload>(
       HOTKEY_CAPTURE_STATE_EVENT,
       ({ payload }) => {
+        if (payload.active) {
+          activeCaptureRequestIdRef.current = payload.requestId;
+        } else if (activeCaptureRequestIdRef.current !== payload.requestId) {
+          logInfo(
+            "HOTKEY_CAPTURE",
+            `Ignored stale capture state requestId=${payload.requestId} target=${payload.target}`,
+          );
+          return;
+        } else {
+          activeCaptureRequestIdRef.current = null;
+        }
         isHotkeyCaptureActiveRef.current = payload.active;
 
         if (!payload.active) return;
@@ -438,35 +454,90 @@ export function useWidgetHotkey({
 
     const unlistenHotkeyRequests = listen<HotkeyChangeRequestPayload>(
       HOTKEY_CHANGE_REQUEST_EVENT,
-      async ({ payload }) => {
-        const result = await attemptHotkeyRegistrationRef.current(
-          payload.hotkey,
-        );
+      ({ payload }) => {
+        latestRequestIdsRef.current[payload.target] = payload.requestId;
 
-        if (result.success) {
-          const updatedSettings = {
-            ...(settingsRef.current ?? (await getSettings())),
-            hotkey: result.activeHotkey,
-          };
-
-          await saveSettings({ hotkey: result.activeHotkey });
-          settingsRef.current = updatedSettings;
-          setSettings(updatedSettings);
-
-          emit(SETTINGS_UPDATED_EVENT).catch((error) => {
+        const runTransaction = async (): Promise<void> => {
+          let result;
+          try {
+            result = await applyHotkeyTransaction(payload, {
+              loadSettings: () => getSettings({ reload: true }),
+              saveSettings,
+              registerHotkey: (hotkey) =>
+                invoke("register_handy_hotkey", { hotkey }),
+              unregisterHotkey: (hotkey) =>
+                invoke("unregister_handy_hotkey", { hotkey }),
+              getActiveHotkey: (target) =>
+                target === "dictation"
+                  ? registeredHotkeyRef.current
+                  : selectionRegisteredHotkeyRef.current,
+              setActiveHotkey: (target, hotkey) => {
+                if (target === "dictation") {
+                  registeredHotkeyRef.current = hotkey;
+                } else {
+                  selectionRegisteredHotkeyRef.current = hotkey;
+                }
+              },
+              isCurrentRequest: (target, requestId) =>
+                latestRequestIdsRef.current[target] === requestId,
+              log: (stage, request, message) => {
+                const details = `requestId=${request.requestId} target=${request.target} stage=${stage} ${message}`;
+                if (stage === "rollback" || stage === "conflict") {
+                  logError("HOTKEY_TRANSACTION", details);
+                } else {
+                  logInfo("HOTKEY_TRANSACTION", details);
+                }
+              },
+              messages: {
+                conflict: t("widget.hotkey.conflict"),
+                registerFailed: (hotkey) =>
+                  t("widget.hotkey.registerFailed", { hotkey }),
+                saveFailed: t("settingsGeneralExtra.hotkey.applyFailed"),
+                stale: t("settingsGeneralExtra.hotkey.applyFailed"),
+              },
+            });
+          } catch (error) {
             logError(
-              "HOTKEY",
-              `Failed to emit settings update event: ${error}`,
+              "HOTKEY_TRANSACTION",
+              `requestId=${payload.requestId} target=${payload.target} stage=load failed=${error}`,
+            );
+            result = {
+              requestId: payload.requestId,
+              target: payload.target,
+              success: false,
+              requestedHotkey: payload.hotkey,
+              activeHotkey:
+                (payload.target === "dictation"
+                  ? registeredHotkeyRef.current
+                  : selectionRegisteredHotkeyRef.current) ?? payload.hotkey,
+              message: t("settingsGeneralExtra.hotkey.applyFailed"),
+            };
+          }
+
+          if (result.success) {
+            const latestSettings = await getSettings({ reload: true });
+            settingsRef.current = latestSettings;
+            setSettings(latestSettings);
+            emit(SETTINGS_UPDATED_EVENT).catch((error) => {
+              logError(
+                "HOTKEY_TRANSACTION",
+                `requestId=${payload.requestId} target=${payload.target} stage=notify failed=${error}`,
+              );
+            });
+          }
+
+          emit(HOTKEY_REGISTRATION_RESULT_EVENT, result).catch((error) => {
+            logError(
+              "HOTKEY_TRANSACTION",
+              `requestId=${payload.requestId} target=${payload.target} stage=result failed=${error}`,
             );
           });
-        }
+        };
 
-        emit(HOTKEY_REGISTRATION_RESULT_EVENT, result).catch((error) => {
-          logError(
-            "HOTKEY",
-            `Failed to emit hotkey registration result: ${error}`,
-          );
-        });
+        transactionQueueRef.current = transactionQueueRef.current.then(
+          runTransaction,
+          runTransaction,
+        );
       },
     );
 
@@ -476,13 +547,9 @@ export function useWidgetHotkey({
       unlistenCaptureState.then((unlisten) => unlisten());
       unlistenHandyHotkey.then((unlisten) => unlisten());
       unlistenHotkeyRequests.then((unlisten) => unlisten());
-      void unregisterCurrentHotkey();
-      void unregisterHotkeyRef(selectionRegisteredHotkeyRef);
+      // The native manager owns registrations for the process lifetime and
+      // drops them on shutdown. Unregistering here breaks shortcuts during
+      // React Fast Refresh, because effect cleanup is also run for HMR.
     };
   }, []);
 }
-
-const attemptHotkeyRegistrationPlaceholder: AttemptHotkeyRegistration =
-  async () => {
-    throw new Error("attemptHotkeyRegistration called before initialization");
-  };

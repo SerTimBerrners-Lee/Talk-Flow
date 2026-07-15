@@ -21,8 +21,9 @@ import {
   DEFAULT_SELECTION_TRANSLATION_HOTKEY,
   getHistory,
   getSettings,
+  isMacPlatform,
+  addHistoryEntry,
   reconcileInterruptedProcessing,
-  saveSettings,
   type HistoryEntry,
   type TranslationSettings,
 } from "../../lib/store";
@@ -59,26 +60,33 @@ import {
 import { useWidgetController } from "./hooks/useWidgetController";
 import { createRecordingRuntimeController } from "./services/recordingRuntime";
 import {
+  applyLiveTranslationEvent,
+  buildLiveTranslationHistoryEntry,
+  createLiveTranslationOverlayState,
+  liveTranslationVisibleSegments,
+  resolveLiveTranslationConnection,
+  type LiveTranslationEventPayload,
+  type LiveTranslationOverlayState,
+} from "./services/liveTranslation";
+import {
+  createLiveTranslationOverlayRenderer,
+  type LiveTranslationOverlayRenderer,
+} from "./services/liveTranslationOverlayRenderer";
+import {
   ACTIVE_WIDGET_SHELL_HEIGHT,
   ACTIVE_WIDGET_SHELL_WIDTH,
   CALL_BUBBLE_GAP,
   CALL_BUBBLE_SIZE,
-  CALL_STACK_WIDGET_HEIGHT,
-  CALL_STACK_WIDGET_WIDTH,
-  FILE_DROP_STACK_WIDGET_HEIGHT,
-  FILE_DROP_STACK_WIDGET_WIDTH,
-  FILE_DROP_TRANSLATION_STACK_WIDGET_HEIGHT,
-  FILE_DROP_TRANSLATION_STACK_WIDGET_WIDTH,
   FILE_DROP_WIDGET_HEIGHT,
   FILE_DROP_WIDGET_WIDTH,
   IDLE_HOVER_WIDGET_HEIGHT,
   IDLE_HOVER_WIDGET_WIDTH,
   IDLE_HOVER_SCALE,
   NOTICE_TIMEOUT_MS,
-  TRANSLATION_STACK_WIDGET_HEIGHT,
-  TRANSLATION_STACK_WIDGET_WIDTH,
   WIDGET_SHELL_HEIGHT,
   WIDGET_SHELL_WIDTH,
+  widgetStackHeight,
+  widgetStackWidth,
 } from "./widgetConstants";
 
 const WIDGET_RECORD_BUTTON_LEFT = 10;
@@ -98,6 +106,12 @@ type WidgetCallState =
   | "processing"
   | "success"
   | "error";
+type WidgetLiveTranslationState =
+  | "idle"
+  | "starting"
+  | "recording"
+  | "stopping"
+  | "error";
 type WidgetRetryProcessingSource = WidgetRetryProcessingPayload["source"];
 
 const DEFAULT_TRANSLATION_SETTINGS: TranslationSettings = {
@@ -110,33 +124,15 @@ const DEFAULT_TRANSLATION_SETTINGS: TranslationSettings = {
   selectionHotkey: DEFAULT_SELECTION_TRANSLATION_HOTKEY,
   selectionLocalTranslatorProvider: "",
   selectionEnableMigrationVersion: 1,
+  liveWidgetEnabled: false,
+  liveMicrophoneEnabled: false,
+  liveTargetLanguage: "en",
+  liveVoiceEnabled: false,
+  liveVoice: "marin",
+  liveVoiceVolume: 0.8,
+  liveVoiceSpeed: 1.05,
+  liveMuteOriginalEnabled: true,
 };
-const WIDGET_STACK_EDGE_PADDING = 10;
-
-function stackWidthFor(fileDropActive: boolean, translationVisible: boolean): number {
-  const contentWidth = fileDropActive
-    ? translationVisible
-      ? FILE_DROP_TRANSLATION_STACK_WIDGET_WIDTH
-      : FILE_DROP_STACK_WIDGET_WIDTH
-    : translationVisible
-      ? TRANSLATION_STACK_WIDGET_WIDTH
-      : CALL_STACK_WIDGET_WIDTH;
-
-  return contentWidth + WIDGET_STACK_EDGE_PADDING * 2;
-}
-
-function stackHeightFor(fileDropActive: boolean, translationVisible: boolean): number {
-  if (fileDropActive) {
-    return translationVisible
-      ? FILE_DROP_TRANSLATION_STACK_WIDGET_HEIGHT
-      : FILE_DROP_STACK_WIDGET_HEIGHT;
-  }
-
-  return translationVisible
-    ? TRANSLATION_STACK_WIDGET_HEIGHT
-    : CALL_STACK_WIDGET_HEIGHT;
-}
-
 class CallCaptureStartError extends Error {
   readonly permissionRelated: boolean;
   readonly rawCause: unknown;
@@ -365,6 +361,15 @@ export function Widget() {
   const callSystemAudioPermissionReadyRef = useRef(false);
   const callNoticeTimerRef = useRef<number | null>(null);
   const callStateRef = useRef<WidgetCallState>("idle");
+  const liveTranslationStateRef = useRef<WidgetLiveTranslationState>("idle");
+  const liveOverlayRef = useRef<LiveTranslationOverlayState | null>(null);
+  const pendingLiveEventsRef = useRef<LiveTranslationEventPayload[]>([]);
+  const liveOverlayRendererRef =
+    useRef<LiveTranslationOverlayRenderer | null>(null);
+  const liveStartedAtRef = useRef(0);
+  const liveAdapterIdRef = useRef("unknown");
+  const liveAudioWatchdogTimerRef = useRef<number | null>(null);
+  const stopLiveTranslationRef = useRef<() => Promise<void>>(async () => {});
   const pauseCallMicForVoice = useCallback(() => {
     if (callStateRef.current !== "recording") {
       return;
@@ -404,6 +409,29 @@ export function Widget() {
   const translationSettingsRef = useRef<TranslationSettings>(
     DEFAULT_TRANSLATION_SETTINGS,
   );
+  if (!liveOverlayRendererRef.current) {
+    liveOverlayRendererRef.current = createLiveTranslationOverlayRenderer({
+      isActive: (sessionId) =>
+        liveOverlayRef.current?.sessionId === sessionId,
+      render: async (next) => {
+        await invoke("show_widget_text_overlay", {
+          payload: {
+            status: "liveTranslation",
+            sourceText: "",
+            translatedText: "",
+            targetLanguage:
+              translationSettingsRef.current.liveTargetLanguage,
+            requestId: next.sessionId,
+            message: next.error,
+            liveSegments: liveTranslationVisibleSegments(next),
+          },
+        });
+      },
+      onError: (error) => {
+        logError("LIVE_TRANSLATION", `Failed to update overlay: ${error}`);
+      },
+    });
+  }
   const fileProcessRef = useRef<(filePath: string) => Promise<void>>(
     async () => {},
   );
@@ -430,12 +458,65 @@ export function Widget() {
   > | null>(null);
   const [translationSettings, setTranslationSettings] =
     useState<TranslationSettings>(DEFAULT_TRANSLATION_SETTINGS);
+  const [liveTranslationState, setLiveTranslationState] =
+    useState<WidgetLiveTranslationState>("idle");
+  const updateLiveTranslationState = (
+    nextState: WidgetLiveTranslationState,
+  ): void => {
+    liveTranslationStateRef.current = nextState;
+    setLiveTranslationState(nextState);
+  };
   const [retryProcessingSource, setRetryProcessingSource] =
     useState<WidgetRetryProcessingSource | null>(null);
+
+  const clearLiveAudioWatchdog = (): void => {
+    if (liveAudioWatchdogTimerRef.current === null) return;
+    window.clearTimeout(liveAudioWatchdogTimerRef.current);
+    liveAudioWatchdogTimerRef.current = null;
+  };
+
+  useEffect(() => {
+    return () => {
+      if (liveAudioWatchdogTimerRef.current !== null) {
+        window.clearTimeout(liveAudioWatchdogTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  useEffect(() => {
+    liveTranslationStateRef.current = liveTranslationState;
+  }, [liveTranslationState]);
+
+  useEffect(() => {
+    const unlistenPromise = listen<LiveTranslationEventPayload>(
+      "live-translation:update",
+      ({ payload }) => {
+        const current = liveOverlayRef.current;
+        if (!current) {
+          pendingLiveEventsRef.current = [
+            ...pendingLiveEventsRef.current.slice(-15),
+            payload,
+          ];
+          return;
+        }
+        const next = applyLiveTranslationEvent(current, payload);
+        if (next === current) return;
+        liveOverlayRef.current = next;
+        liveOverlayRendererRef.current?.schedule(
+          next,
+          payload.status === "final" || payload.status === "error",
+        );
+      },
+    );
+    return () => {
+      liveOverlayRendererRef.current?.cancel();
+      void unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, []);
 
   useEffect(() => {
     fileDropStateRef.current = fileDropState;
@@ -456,6 +537,12 @@ export function Widget() {
       try {
         const settings = await getSettings({ reload: true });
         if (!mounted) return;
+        if (
+          !settings.translation.liveWidgetEnabled &&
+          liveTranslationStateRef.current === "recording"
+        ) {
+          void stopLiveTranslationRef.current();
+        }
         setTranslationSettings(settings.translation);
       } catch (error) {
         logError(
@@ -587,8 +674,11 @@ export function Widget() {
 
     fileDropExpandedRef.current = active;
     await resizeWidget(
-      stackWidthFor(active, translationSettingsRef.current.widgetEnabled),
-      stackHeightFor(active, translationSettingsRef.current.widgetEnabled),
+      widgetStackWidth(
+        active,
+        translationSettingsRef.current.liveWidgetEnabled,
+      ),
+      widgetStackHeight(active),
     ).catch((error) => {
       logError(
         "WIDGET_FILE",
@@ -693,14 +783,7 @@ export function Widget() {
         requiresSystemAudioPermission() &&
         !callSystemAudioPermissionReadyRef.current
       ) {
-        const granted = await requestSystemAudioPermission();
-
-        if (!granted) {
-          throw new CallCaptureStartError(
-            t("widget.call.systemAudioPermission"),
-            true,
-          );
-        }
+        await requestSystemAudioPermission();
 
         callSystemAudioPermissionReadyRef.current = true;
       }
@@ -1148,9 +1231,9 @@ export function Widget() {
   };
 
   const fileDropActive = fileDropState !== "idle";
-  const translationVisible = translationSettings.widgetEnabled;
-  const stackWidth = stackWidthFor(fileDropActive, translationVisible);
-  const stackHeight = stackHeightFor(fileDropActive, translationVisible);
+  const liveTranslationVisible = translationSettings.liveWidgetEnabled;
+  const stackWidth = widgetStackWidth(fileDropActive, liveTranslationVisible);
+  const stackHeight = widgetStackHeight(fileDropActive);
   const scaledStackWidth = scaleWidgetDimension(stackWidth, widgetScale);
   const scaledStackHeight = scaleWidgetDimension(stackHeight, widgetScale);
   const displayCallState: WidgetCallState =
@@ -1163,45 +1246,194 @@ export function Widget() {
       : state;
   const callBubbleDisabled =
     displayCallState === "idle" &&
-    (displayWidgetState !== "idle" || fileDropActive);
-  const translationBubbleDisabled =
-    displayWidgetState !== "idle" || fileDropActive || displayCallState !== "idle";
+    (displayWidgetState !== "idle" || fileDropActive || liveTranslationState !== "idle");
+  const liveTranslationBubbleDisabled =
+    liveTranslationState === "starting" ||
+    liveTranslationState === "stopping" ||
+    (liveTranslationState === "idle" &&
+      (displayWidgetState !== "idle" || fileDropActive || displayCallState !== "idle"));
 
   useEffect(() => {
     void resizeWidget(
-      stackWidthFor(fileDropStateRef.current !== "idle", translationSettings.widgetEnabled),
-      stackHeightFor(fileDropStateRef.current !== "idle", translationSettings.widgetEnabled),
+      widgetStackWidth(
+        fileDropStateRef.current !== "idle",
+        translationSettings.liveWidgetEnabled,
+      ),
+      widgetStackHeight(fileDropStateRef.current !== "idle"),
     ).catch((error) => {
       logError(
         "TRANSLATION",
         `Resize after translation visibility change failed: ${error instanceof Error ? error.message : String(error)}`,
       );
     });
-  }, [resizeWidget, translationSettings.widgetEnabled]);
+  }, [resizeWidget, translationSettings.liveWidgetEnabled]);
 
-  const handleTranslationBubbleClick = async (): Promise<void> => {
-    if (dragTriggeredRef.current || translationBubbleDisabled) {
+  const startLiveTranslation = async (): Promise<void> => {
+    if (
+      stateRef.current !== "idle" ||
+      callStateRef.current !== "idle" ||
+      fileDropStateRef.current !== "idle" ||
+      liveTranslationStateRef.current !== "idle"
+    ) {
       return;
     }
-
+    clearLiveAudioWatchdog();
+    updateLiveTranslationState("starting");
     try {
-      const latestSettings = await getSettings({ reload: true });
-      const nextTranslation: TranslationSettings = {
-        ...latestSettings.translation,
-        active: !latestSettings.translation.active,
-      };
-      setTranslationSettings(nextTranslation);
-      await saveSettings({ translation: nextTranslation });
-      await emit(SETTINGS_UPDATED_EVENT);
-    } catch (error) {
-      logError(
-        "TRANSLATION",
-        `Failed to toggle widget translation: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      const restored = await getSettings({ reload: true }).catch(() => null);
-      if (restored) {
-        setTranslationSettings(restored.translation);
+      const settings = await getSettings({ reload: true });
+      const connection = resolveLiveTranslationConnection(settings);
+      if (
+        requiresSystemAudioPermission() &&
+        !callSystemAudioPermissionReadyRef.current
+      ) {
+        await requestSystemAudioPermission();
+        callSystemAudioPermissionReadyRef.current = true;
       }
+      let micLabel: string | null = null;
+      if (settings.translation.liveMicrophoneEnabled) {
+        const devices = await navigator.mediaDevices.enumerateDevices().catch(() => []);
+        micLabel =
+          devices.find(
+            (device) =>
+              device.kind === "audioinput" && device.deviceId === settings.micId,
+          )?.label || null;
+      }
+      const session = await invoke<{ sessionId: string; startedAt: string }>(
+        "start_live_translation",
+        {
+          req: {
+            provider: connection.provider,
+            apiKey: connection.apiKey,
+            model: connection.model,
+            endpoint: connection.endpoint,
+            targetLanguage: settings.translation.liveTargetLanguage,
+            voiceEnabled:
+              isMacPlatform() &&
+              settings.translation.liveVoiceEnabled &&
+              connection.supportsVoice,
+            voice: settings.translation.liveVoice,
+            voiceVolume: settings.translation.liveVoiceVolume,
+            voiceSpeed: settings.translation.liveVoiceSpeed,
+            muteOriginal:
+              isMacPlatform() &&
+              settings.translation.liveVoiceEnabled &&
+              settings.translation.liveMuteOriginalEnabled,
+            includeMicrophone: settings.translation.liveMicrophoneEnabled,
+            micDeviceLabel: micLabel,
+            saveAudio: settings.saveRecordingAudio,
+            storageDir: settings.transcriptionStorageDir || null,
+          },
+        },
+      );
+      liveAdapterIdRef.current = connection.adapterId;
+      liveStartedAtRef.current = Date.now();
+      let overlay = createLiveTranslationOverlayState(session.sessionId);
+      for (const event of pendingLiveEventsRef.current) {
+        overlay = applyLiveTranslationEvent(overlay, event);
+      }
+      pendingLiveEventsRef.current = [];
+      liveOverlayRef.current = overlay;
+      updateLiveTranslationState("recording");
+      await liveOverlayRendererRef.current?.renderNow(overlay);
+      liveAudioWatchdogTimerRef.current = window.setTimeout(() => {
+        liveAudioWatchdogTimerRef.current = null;
+        if (liveTranslationStateRef.current !== "recording") return;
+
+        void invoke<{
+          maxDbfs: number;
+          framesAboveNoiseFloor: number;
+          outputFramesWritten: number;
+        }>("get_live_translation_audio_level")
+          .then((level) => {
+            if (liveTranslationStateRef.current !== "recording") return;
+            logInfo(
+              "LIVE_TRANSLATION",
+              `System audio watchdog: max=${level.maxDbfs.toFixed(1)} dBFS, frames_above_noise_floor=${level.framesAboveNoiseFloor}, output_frames=${level.outputFramesWritten}`,
+            );
+            if (level.framesAboveNoiseFloor > 0) return;
+
+            const message =
+              "Системный звук не поступает. Проверьте воспроизведение видео и разрешение Talkis на запись системного звука.";
+            logError("LIVE_TRANSLATION", message);
+            liveOverlayRef.current = null;
+            pendingLiveEventsRef.current = [];
+            showCallNotice(message);
+            void stopLiveTranslationRef.current();
+          })
+          .catch((error) => {
+            logError(
+              "LIVE_TRANSLATION",
+              `System audio watchdog failed: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          });
+      }, 8_000);
+    } catch (error) {
+      clearLiveAudioWatchdog();
+      const message = error instanceof Error ? error.message : String(error);
+      pendingLiveEventsRef.current = [];
+      logError("LIVE_TRANSLATION", `Failed to start: ${message}`);
+      updateLiveTranslationState("error");
+      showCallNotice(message);
+      window.setTimeout(() => updateLiveTranslationState("idle"), 2200);
+    }
+  };
+
+  const stopLiveTranslation = async (): Promise<void> => {
+    if (liveTranslationStateRef.current !== "recording") return;
+    clearLiveAudioWatchdog();
+    updateLiveTranslationState("stopping");
+    try {
+      const settings = await getSettings({ reload: true });
+      const result = await invoke<{
+        sessionId: string;
+        callCapture: CallCaptureSession;
+      }>("stop_live_translation");
+      const overlay = liveOverlayRef.current;
+      if (overlay && overlay.sessionId === result.sessionId) {
+        const entry = buildLiveTranslationHistoryEntry({
+          state: overlay,
+          adapterId: liveAdapterIdRef.current,
+          targetLanguage: settings.translation.liveTargetLanguage,
+          startedAt: liveStartedAtRef.current || Date.now(),
+          callTracks: settings.saveRecordingAudio
+            ? result.callCapture.tracks.map((track) => ({
+                kind: track.kind,
+                label: track.label,
+                path: track.path,
+              }))
+            : undefined,
+        });
+        await addHistoryEntry(entry);
+        await emit(HISTORY_UPDATED_EVENT, entry);
+        setLatestCopyText(entry.cleaned || entry.raw || null);
+      }
+      liveOverlayRef.current = null;
+      liveAdapterIdRef.current = "unknown";
+      pendingLiveEventsRef.current = [];
+      liveOverlayRendererRef.current?.cancel();
+      await liveOverlayRendererRef.current
+        ?.runAfterPending(() => invoke("hide_widget_text_overlay"))
+        .catch(() => {});
+      updateLiveTranslationState("idle");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logError("LIVE_TRANSLATION", `Failed to stop: ${message}`);
+      if (liveOverlayRef.current) {
+        liveOverlayRef.current = { ...liveOverlayRef.current, error: message };
+      }
+      updateLiveTranslationState("error");
+      showCallNotice(message);
+      window.setTimeout(() => updateLiveTranslationState("idle"), 2200);
+    }
+  };
+  stopLiveTranslationRef.current = stopLiveTranslation;
+
+  const handleLiveTranslationBubbleClick = (): void => {
+    if (dragTriggeredRef.current) return;
+    if (liveTranslationState === "recording") {
+      void stopLiveTranslation();
+    } else if (liveTranslationState === "idle") {
+      void startLiveTranslation();
     }
   };
   const handleCallBubbleClick = () => {
@@ -1324,18 +1556,12 @@ export function Widget() {
               onPointerCancel={handleDragPointerUp}
             />
           </div>
-          {translationVisible && (
-            <div
-              style={{
-                pointerEvents: "none",
-              }}
-            >
-              <TranslationBubble
-                active={translationSettings.active}
-                disabled={translationBubbleDisabled}
-                onClick={() => {
-                  void handleTranslationBubbleClick();
-                }}
+          {liveTranslationVisible && (
+            <div style={{ pointerEvents: "none" }}>
+              <LiveTranslationBubble
+                state={liveTranslationState}
+                disabled={liveTranslationBubbleDisabled}
+                onClick={handleLiveTranslationBubbleClick}
                 onPointerDown={handleDragPointerDown}
                 onPointerMove={handleDragPointerMove}
                 onPointerUp={handleDragPointerUp}
@@ -1562,8 +1788,8 @@ function CallBubble({
   );
 }
 
-function TranslationBubble({
-  active,
+function LiveTranslationBubble({
+  state,
   disabled,
   onClick,
   onPointerDown,
@@ -1571,19 +1797,17 @@ function TranslationBubble({
   onPointerUp,
   onPointerCancel,
 }: DragHandlers & {
-  active: boolean;
+  state: WidgetLiveTranslationState;
   disabled: boolean;
   onClick: () => void;
 }) {
-  const { t } = useI18n();
-  const title = active
-    ? t("widget.translationBubble.active")
-    : t("widget.translationBubble.inactive");
-  const iconColor = disabled
-    ? "rgba(255,255,255,0.28)"
-    : active
-      ? "#ff4d4d"
-      : "rgba(255,255,255,0.72)";
+  const isActive = state === "recording";
+  const isBusy = state === "starting" || state === "stopping";
+  const title = isActive
+    ? "Остановить синхронный перевод"
+    : isBusy
+      ? "Подключаем синхронный перевод"
+      : "Начать синхронный перевод";
 
   return (
     <ActiveWidgetShell
@@ -1597,28 +1821,31 @@ function TranslationBubble({
       height={CALL_BUBBLE_SIZE}
     >
       <div
-        aria-label={title}
-        aria-pressed={active}
-        title={title}
         role="button"
+        aria-label={title}
+        aria-pressed={isActive}
+        aria-disabled={disabled}
+        title={title}
         style={{
           width: CALL_BUBBLE_SIZE,
           height: CALL_BUBBLE_SIZE,
           borderRadius: 999,
           background: "#050505",
-          border: "none",
-          color: iconColor,
+          color: disabled
+            ? "rgba(255,255,255,0.28)"
+            : isActive
+              ? "#ff4d4d"
+              : "rgba(255,255,255,0.72)",
           display: "grid",
           placeItems: "center",
-          boxShadow: "none",
           opacity: disabled ? 0.72 : 1,
-          transform: active ? "scale(1.02)" : "scale(1)",
-          transition:
-            "background 0.16s ease, border-color 0.16s ease, color 0.16s ease, opacity 0.16s ease, transform 0.16s ease",
-          WebkitFontSmoothing: "antialiased",
         }}
       >
-        <IconLanguage size={12} stroke={active ? 2.5 : 2} />
+        {isBusy ? (
+          <IconLoader2 className="loading-soft-icon" size={12} stroke={2.2} />
+        ) : (
+          <IconLanguage size={12} stroke={isActive ? 2.5 : 2} />
+        )}
       </div>
     </ActiveWidgetShell>
   );

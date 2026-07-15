@@ -16,6 +16,7 @@ import {
 
 import { AppSettings } from "../lib/store";
 import { useI18n } from "../lib/i18n";
+import { ModelCardDisclosureButton } from "./ModelCardDisclosureButton";
 import {
   isLocalLlmEndpoint,
   localLlmDeleteSettingsPatch,
@@ -355,14 +356,12 @@ export function LocalLlmModels({
             <div
               key={model.id}
               className="card"
-              style={{ padding: 0, overflow: "hidden", background: "var(--surface)" }}
+              style={{ padding: 0, overflow: "hidden", position: "relative", background: "var(--surface)" }}
             >
-              <button
-                type="button"
-                onClick={() => setExpandedId(expandedId === model.id ? null : model.id)}
-                style={{ width: "100%", border: "none", background: "transparent", padding: "12px 14px", display: "flex", alignItems: "center", gap: 12, cursor: "pointer", textAlign: "left", fontFamily: "var(--font-main)" }}
+              <div
+                style={{ position: "relative", padding: "12px 14px", display: "flex", alignItems: "center", gap: 12, textAlign: "left", fontFamily: "var(--font-main)" }}
               >
-                <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
                   <div
                     style={{
                       display: "flex",
@@ -405,12 +404,19 @@ export function LocalLlmModels({
                       {statusLabel}
                     </div>
                   </div>
-                  <div style={{ fontSize: 12, lineHeight: 1.45, color: "var(--text-mid)" }}>
-                    {model.description}
+                  <div style={{ paddingRight: 34 }}>
+                    <div style={{ fontSize: 12, lineHeight: 1.45, color: "var(--text-mid)" }}>
+                      {model.description}
+                    </div>
+                    {renderLocalLlmStats(model)}
                   </div>
-                  {renderLocalLlmStats(model)}
+                  <ModelCardDisclosureButton
+                    expanded={open}
+                    onToggle={() => setExpandedId(expandedId === model.id ? null : model.id)}
+                    label={t(open ? "mainTab.collapse" : "mainTab.expand")}
+                  />
                 </div>
-              </button>
+              </div>
 
               {open && (
               <div

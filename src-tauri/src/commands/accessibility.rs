@@ -2,6 +2,20 @@
 const APP_BUNDLE_ID: &str = "com.trixter.talkis";
 
 #[cfg(target_os = "macos")]
+#[link(name = "AVFoundation", kind = "framework")]
+unsafe extern "C" {
+    static AVMediaTypeAudio: *const objc2::runtime::AnyObject;
+}
+
+fn microphone_permission_status(status: isize) -> &'static str {
+    match status {
+        3 => "granted",
+        1 | 2 => "denied",
+        _ => "unknown",
+    }
+}
+
+#[cfg(target_os = "macos")]
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
     fn AXIsProcessTrusted() -> u8;
@@ -101,5 +115,42 @@ pub async fn check_accessibility_permission() -> Result<bool, String> {
     #[cfg(not(target_os = "macos"))]
     {
         Ok(true)
+    }
+}
+
+#[tauri::command]
+pub async fn check_microphone_permission() -> Result<String, String> {
+    #[cfg(target_os = "macos")]
+    {
+        // AVAuthorizationStatus: notDetermined=0, restricted=1, denied=2,
+        // authorized=3. This is a read-only TCC check and does not start an
+        // audio session or trigger the native permission prompt.
+        let status: isize = unsafe {
+            objc2::msg_send![
+                objc2::class!(AVCaptureDevice),
+                authorizationStatusForMediaType: AVMediaTypeAudio
+            ]
+        };
+
+        return Ok(microphone_permission_status(status).to_string());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok("unknown".to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::microphone_permission_status;
+
+    #[test]
+    fn maps_avfoundation_microphone_permission_statuses() {
+        assert_eq!(microphone_permission_status(0), "unknown");
+        assert_eq!(microphone_permission_status(1), "denied");
+        assert_eq!(microphone_permission_status(2), "denied");
+        assert_eq!(microphone_permission_status(3), "granted");
+        assert_eq!(microphone_permission_status(99), "unknown");
     }
 }

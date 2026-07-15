@@ -22,6 +22,14 @@ import {
   embedHistoryQuery,
   ensureHistorySearchEmbeddings,
 } from "../../../lib/historyEmbeddings";
+import {
+  DEV_CHAT_LONG_TEXT_PROMPT,
+  DEV_CHAT_SYSTEM_PROMPT,
+  devChatCapabilitiesAnswer,
+  devChatCodeRefusal,
+  isDevChatCapabilitiesQuestion,
+  isDevChatCodeGenerationRequest,
+} from "../../../lib/devChatScope";
 import { getHistory, getSettings, type AppSettings } from "../../../lib/store";
 import { LOCAL_TEXT_PROCESSING_LIMITS, processLongTextWithPrompt } from "../../../lib/summarize";
 import { useI18n } from "../../../lib/i18n";
@@ -47,15 +55,6 @@ interface ChatTranslationRequest {
   text: string;
   targetLanguage?: string;
 }
-
-const DEV_CHAT_SYSTEM_PROMPT =
-  "Ты — локальная текстовая модель в тестовом чате Talkis. Ниже дана история диалога. Ответь только на последнее сообщение пользователя: прямо, кратко и на языке пользователя.";
-
-const DEV_CHAT_LONG_TEXT_PROMPT =
-  "Ты — локальная текстовая модель в тестовом чате Talkis. Ниже дана история диалога. " +
-  "Ответь на последнее сообщение пользователя на его языке. Если последнее сообщение содержит большой текст, " +
-  "расшифровку или документ и отдельную инструкцию к обработке, следуй этой инструкции и сохрани требуемую структуру. " +
-  "Если явной инструкции нет, дай краткое структурированное саммари. Не выдумывай факты, которых нет в тексте.";
 
 const DEV_CHAT_DB_NAME = "talkis-dev-chat";
 const DEV_CHAT_DB_VERSION = 1;
@@ -484,6 +483,24 @@ export function DevChatTab({
     latestUserText: string,
     startedAt: number,
   ): Promise<ChatMessage> => {
+    if (isDevChatCapabilitiesQuestion(latestUserText)) {
+      return {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        text: devChatCapabilitiesAnswer(lang),
+        durationMs: Date.now() - startedAt,
+      };
+    }
+
+    if (isDevChatCodeGenerationRequest(latestUserText)) {
+      return {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        text: devChatCodeRefusal(lang),
+        durationMs: Date.now() - startedAt,
+      };
+    }
+
     const translationRequest = detectChatTranslationRequest(
       latestUserText,
       contextMessages.slice(0, -1),

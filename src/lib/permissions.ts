@@ -1,8 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import {
-  getSystemAudioPermissionPassed,
-  setSystemAudioPermissionPassed,
+  getSystemAudioPermissionVerifiedV2,
+  setSystemAudioPermissionVerifiedV2,
 } from "./store";
 
 export type PermissionStatus = "unknown" | "granted" | "denied" | "prompting";
@@ -14,6 +14,20 @@ export interface PermissionsState {
 }
 
 export async function checkMicrophonePermission(): Promise<PermissionStatus> {
+  // On macOS, query AVFoundation directly. WKWebView's Permissions API can
+  // lag behind TCC after the app is relaunched and may report the old process
+  // state even though the checkbox is already enabled in System Settings.
+  try {
+    const nativeStatus = await invoke<PermissionStatus>(
+      "check_microphone_permission",
+    );
+    if (nativeStatus !== "unknown") {
+      return nativeStatus;
+    }
+  } catch {
+    // Fall through to the cross-platform Web Permissions API.
+  }
+
   // Prefer the Permissions API: unlike getUserMedia it does NOT open an audio
   // session, so it can't duck/silence other apps' sound (music, YouTube …) — a
   // known macOS side effect that fired every time we probed the mic at startup.
@@ -21,9 +35,9 @@ export async function checkMicrophonePermission(): Promise<PermissionStatus> {
   // WebView cannot report a definitive state, leave the explicit request to
   // requestMicrophonePermission().
   try {
-    const status = await navigator.permissions.query(
-      { name: "microphone" } as unknown as PermissionDescriptor,
-    );
+    const status = await navigator.permissions.query({
+      name: "microphone",
+    } as unknown as PermissionDescriptor);
     if (status.state === "granted") {
       return "granted";
     }
@@ -61,7 +75,10 @@ export async function checkSystemAudioPermission(): Promise<PermissionStatus> {
     return "granted";
   }
 
-  return (await getSystemAudioPermissionPassed()) ? "granted" : "unknown";
+  // macOS does not expose the Core Audio tap permission through the Web
+  // Permissions API. Trust only the versioned marker written after a real
+  // start/stop capture probe; legacy markers are intentionally ignored.
+  return (await getSystemAudioPermissionVerifiedV2()) ? "granted" : "unknown";
 }
 
 export function requiresSystemAudioPermission(): boolean {
@@ -73,9 +90,9 @@ export function requiresSystemAudioPermission(): boolean {
   return value.includes("mac");
 }
 
-export async function requestSystemAudioPermission(): Promise<boolean> {
+export async function requestSystemAudioPermission(): Promise<void> {
   if (!requiresSystemAudioPermission()) {
-    return true;
+    return;
   }
 
   let session: { id: string } | null = null;
@@ -88,11 +105,10 @@ export async function requestSystemAudioPermission(): Promise<boolean> {
         includeSystem: true,
       },
     });
-    await setSystemAudioPermissionPassed(true).catch(() => undefined);
-    return true;
-  } catch {
-    await setSystemAudioPermissionPassed(false).catch(() => undefined);
-    return false;
+    await setSystemAudioPermissionVerifiedV2(true);
+  } catch (error) {
+    await setSystemAudioPermissionVerifiedV2(false).catch(() => undefined);
+    throw error;
   } finally {
     if (session) {
       await invoke("stop_call_capture", { sessionId: session.id }).catch(

@@ -37,7 +37,6 @@ import {
   IconLoader2,
   IconListCheck,
   IconPencil,
-  IconPlayerPlay,
   IconRotate2,
   IconSquare,
   IconTrash,
@@ -60,7 +59,10 @@ import { formatDurationMs } from "../../../lib/utils";
 import { logError, logInfo } from "../../../lib/logger";
 import { TranscriptionStatsPanel } from "../../../components/TranscriptionStatsPanel";
 import { RowActionsMenu, type RowActionItem } from "../../../components/RowActionsMenu";
-import { HistoryAudioTrack } from "../../../components/HistoryAudioTrack";
+import {
+  HistoryAudioTrack,
+  HistoryAudioTrackPlaceholder,
+} from "../../../components/HistoryAudioTrack";
 import { retryHistoryEntry } from "../../widget/services/transcriptionPipeline";
 import { useI18n, type TFunc, type UiLanguage, type MsgKey } from "../../../lib/i18n";
 
@@ -82,7 +84,7 @@ interface HistoryGroup {
   items: HistoryListEntry[];
 }
 
-type HistorySource = "voice" | "file" | "call";
+type HistorySource = "voice" | "file" | "call" | "liveTranslation";
 type HistoryFilter = "all" | HistorySource;
 
 const HISTORY_TEXT_PREVIEW_LIMIT = 250;
@@ -97,6 +99,7 @@ const HISTORY_FILTER_OPTIONS: { id: HistoryFilter; labelKey: MsgKey }[] = [
   { id: "voice", labelKey: "mainTab.filter.voice" },
   { id: "file", labelKey: "mainTab.filter.file" },
   { id: "call", labelKey: "mainTab.filter.call" },
+  { id: "liveTranslation", labelKey: "mainTab.filter.liveTranslation" },
 ];
 const MAIN_HERO_SLIDES = [
   {
@@ -116,7 +119,11 @@ const MAIN_HERO_SLIDES = [
 }[];
 
 function getHistorySource(entry: { source?: HistoryEntry["source"] }): HistorySource {
-  if (entry.source === "file" || entry.source === "call") {
+  if (
+    entry.source === "file" ||
+    entry.source === "call" ||
+    entry.source === "liveTranslation"
+  ) {
     return entry.source;
   }
 
@@ -155,6 +162,7 @@ function addFullEntryToCache(
 function sourceLabelKey(source: HistorySource): MsgKey {
   if (source === "file") return "mainTab.source.file";
   if (source === "call") return "mainTab.source.call";
+  if (source === "liveTranslation") return "mainTab.source.liveTranslation";
   return "mainTab.source.voice";
 }
 
@@ -1284,7 +1292,7 @@ export function MainTab({
                   >
                     <thead>
                       <tr>
-                        <th style={{ width: 92 }}>{t("mainTab.colTime")}</th>
+                        <th style={{ width: 108 }}>{t("mainTab.colTime")}</th>
                         <th style={{ paddingLeft: 8 }}>{t("mainTab.colText")}</th>
                       </tr>
                     </thead>
@@ -1332,7 +1340,6 @@ export function MainTab({
                           >
                             <td
                               style={{
-                                whiteSpace: "nowrap",
                                 verticalAlign: "top",
                                 color: "var(--text-low)",
                               }}
@@ -1344,7 +1351,7 @@ export function MainTab({
                                   gap: 3,
                                 }}
                               >
-                                <span>
+                                <span style={{ whiteSpace: "nowrap" }}>
                                   {new Date(item.timestamp).toLocaleTimeString(
                                     "ru-RU",
                                     {
@@ -1359,6 +1366,7 @@ export function MainTab({
                                       fontSize: 10,
                                       opacity: 0.55,
                                       letterSpacing: "0.02em",
+                                      whiteSpace: "nowrap",
                                     }}
                                   >
                                     {formatDurationMs(item.processingTime, lang)}
@@ -1370,6 +1378,11 @@ export function MainTab({
                                       fontSize: 10,
                                       opacity: 0.55,
                                       letterSpacing: "0.02em",
+                                      lineHeight: 1.25,
+                                      whiteSpace: "normal",
+                                      overflowWrap: "normal",
+                                      wordBreak: "normal",
+                                      textWrap: "balance",
                                     }}
                                   >
                                     {t(sourceLabelKey(source))}
@@ -1500,35 +1513,12 @@ export function MainTab({
                                           onActiveAudioChange={setActiveAudioId}
                                         />
                                       ) : (
-                                        <button
-                                          type="button"
-                                          className="btn"
-                                          onClick={() => {
+                                        <HistoryAudioTrackPlaceholder
+                                          loading={isLoadingFullEntry}
+                                          onLoadRequested={() => {
                                             void loadFullEntry(item.id);
                                           }}
-                                          style={{
-                                            width: 32,
-                                            minWidth: 32,
-                                            height: 32,
-                                            minHeight: 32,
-                                            padding: 0,
-                                            borderRadius: 8,
-                                            justifySelf: "center",
-                                          }}
-                                          title={t("mainTab.audioPlay")}
-                                          aria-label={t("mainTab.audioPlay")}
-                                          disabled={isLoadingFullEntry}
-                                        >
-                                          {isLoadingFullEntry ? (
-                                            <IconLoader2
-                                              className="loading-soft-icon"
-                                              size={12}
-                                              stroke={2}
-                                            />
-                                          ) : (
-                                            <IconPlayerPlay size={12} stroke={2} />
-                                          )}
-                                        </button>
+                                        />
                                       )}
                                     </div>
                                   ) : null}

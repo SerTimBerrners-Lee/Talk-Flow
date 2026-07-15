@@ -7,11 +7,11 @@ import { logError, logInfo } from "../../../lib/logger";
 import { useI18n } from "../../../lib/i18n";
 import { formatErrorMessage } from "../../../lib/utils";
 import {
-  CALL_STACK_WIDGET_HEIGHT,
-  CALL_STACK_WIDGET_WIDTH,
   MAX_RECORDING_DURATION_MS,
   MIN_AUDIO_BLOB_BYTES,
   MIN_RECORDING_DURATION_MS,
+  widgetStackHeight,
+  widgetStackWidth,
 } from "../widgetConstants";
 import type { WidgetNoticeTone } from "../widgetConstants";
 import { createRecordingRuntimeController } from "../services/recordingRuntime";
@@ -23,6 +23,7 @@ import {
 import {
   createNativeLiveDictationOptions,
   isLocalSttStreamingEnabled,
+  isSttStreamingEnabled,
 } from "../services/dictationStreamOverlay";
 import type { WidgetAction, WidgetMachineState } from "../services/widgetMachine";
 
@@ -73,13 +74,38 @@ async function resolveSelectedMicLabel(micId: string): Promise<string | null> {
     return null;
   }
 
+  let permissionStream: MediaStream | null = null;
   try {
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    const selected = devices.find((device) => device.kind === "audioinput" && device.deviceId === micId);
+    let devices = await navigator.mediaDevices.enumerateDevices();
+    let selected = devices.find(
+      (device) => device.kind === "audioinput" && device.deviceId === micId,
+    );
+    const knownLabel = selected?.label?.trim();
+    if (knownLabel) {
+      return knownLabel;
+    }
+
+    // WebKit hides device labels until microphone permission has been granted.
+    // Open the exact selected device briefly so the native recorder can resolve
+    // the same microphone and feed its PCM directly to the realtime transport.
+    permissionStream = await navigator.mediaDevices.getUserMedia({
+      audio: getAudioConstraints(micId),
+    });
+    const trackLabel = permissionStream.getAudioTracks()[0]?.label?.trim();
+    if (trackLabel) {
+      return trackLabel;
+    }
+
+    devices = await navigator.mediaDevices.enumerateDevices();
+    selected = devices.find(
+      (device) => device.kind === "audioinput" && device.deviceId === micId,
+    );
     return selected?.label?.trim() || null;
   } catch (error) {
     logError("RECORDING", `Failed to resolve selected mic label: ${formatErrorMessage(error)}`);
     return null;
+  } finally {
+    permissionStream?.getTracks().forEach((track) => track.stop());
   }
 }
 
@@ -177,6 +203,18 @@ export function useWidgetRecording({
   const lowMicMonitorCleanupRef = useRef<(() => void) | null>(null);
   const recordingLimitTimerRef = useRef<number | null>(null);
   const recordingSettingsRef = useRef<AppSettings | null>(null);
+
+  const resizeForSettings = useCallback(
+    (currentSettings: AppSettings): Promise<void> =>
+      resizeWidget(
+        widgetStackWidth(
+          false,
+          currentSettings.translation.liveWidgetEnabled,
+        ),
+        widgetStackHeight(false),
+      ),
+    [resizeWidget],
+  );
   const dictationStreamRef = useRef<DictationStreamOverlaySession | null>(null);
 
   // NOTE: Microphone pre-warm was removed because on macOS, calling
@@ -352,12 +390,13 @@ export function useWidgetRecording({
       onRecordingStart?.();
       // Update widget state to recording (via dispatch)
       machineRef.current = { ...machineRef.current, widgetState: "recording" };
-      void resizeWidget(CALL_STACK_WIDGET_WIDTH, CALL_STACK_WIDGET_HEIGHT);
+      void resizeForSettings(activeSettings);
 
       recordingSettingsRef.current = activeSettings;
       await clearTextOverlayPromise;
 
-      const liveStreamingEnabled = isLocalSttStreamingEnabled(activeSettings);
+      const liveStreamingEnabled = isSttStreamingEnabled(activeSettings);
+      const localLiveStreamingEnabled = isLocalSttStreamingEnabled(activeSettings);
       const startLiveOverlay = (): Promise<DictationStreamOverlaySession | null> =>
         startDictationStreamOverlaySession(activeSettings).then((session) => {
           if (session) {
@@ -390,7 +429,7 @@ export function useWidgetRecording({
         });
 
       let dictationStreamPromise: Promise<DictationStreamOverlaySession | null> | null = null;
-      const liveWarmUpPromise = liveStreamingEnabled
+      const liveWarmUpPromise = localLiveStreamingEnabled
         ? warmUpLiveRuntime()
         : null;
       if (liveStreamingEnabled && !activeSettings.micId) {
@@ -401,65 +440,66 @@ export function useWidgetRecording({
       if (activeSettings.micId && nativeMicLabel) {
         logInfo("RECORDING", `Using preferred native mic label: ${nativeMicLabel}`);
       } else if (activeSettings.micId) {
-        logInfo("RECORDING", "Selected mic label is unavailable for native recorder; using WebView recorder to preserve selected mic");
+        logInfo(
+          "RECORDING",
+          "Selected mic is unavailable; using the system default mic so realtime transcription remains active",
+        );
       }
 
-      if (!activeSettings.micId || nativeMicLabel) {
-        if (liveStreamingEnabled && !dictationStreamPromise) {
-          dictationStreamPromise = startLiveOverlay();
-        }
+      if (liveStreamingEnabled && !dictationStreamPromise) {
+        dictationStreamPromise = startLiveOverlay();
+      }
 
-        let dictationStream = dictationStreamPromise
-          ? await dictationStreamPromise
-          : null;
-        let liveDictation = dictationStream
-          ? createNativeLiveDictationOptions(activeSettings, dictationStream.requestId)
-          : null;
+      let dictationStream = dictationStreamPromise
+        ? await dictationStreamPromise
+        : null;
+      let liveDictation = dictationStream
+        ? createNativeLiveDictationOptions(activeSettings, dictationStream.requestId)
+        : null;
 
-        try {
-          if (dictationStream && liveDictation) {
-            const warmUpSucceeded = liveWarmUpPromise
-              ? await liveWarmUpPromise
-              : true;
-            if (!warmUpSucceeded) {
-              await dictationStream.hide().catch(() => {});
-              dictationStream.dispose();
-              dictationStream = null;
-              liveDictation = null;
-            }
-          }
-
-          const codec = await runtimeRef.current.startNative({
-            deviceLabel: nativeMicLabel,
-            liveDictation,
-          });
-          logInfo(
-            "RECORDING",
-            `Native recording start completed after ${Date.now() - startRequestedAt}ms`,
-          );
-          if (dictationStream && liveDictation) {
-            dictationStreamRef.current = dictationStream;
-          } else if (dictationStream) {
+      try {
+        if (dictationStream && liveDictation) {
+          const warmUpSucceeded = liveWarmUpPromise
+            ? await liveWarmUpPromise
+            : true;
+          if (!warmUpSucceeded) {
             await dictationStream.hide().catch(() => {});
             dictationStream.dispose();
+            dictationStream = null;
+            liveDictation = null;
           }
-          logInfo("RECORDING", codec === "native-wav" ? "Using native wav recorder" : "Using native recorder");
-          setStream(null);
-          logInfo("RECORDING", "Recording started successfully");
-          dispatch({ type: "RECORDING_STARTED", timestamp: Date.now() });
-          scheduleRecordingLimitTimer();
-          return;
-        } catch (nativeError) {
-          runtimeRef.current.reset();
-          if (dictationStream) {
-            await dictationStream.hide().catch(() => {});
-            dictationStream.dispose();
-          }
-          logError(
-            "RECORDING",
-            `Native recorder start failed, falling back to WebView recorder: ${formatErrorMessage(nativeError)}`,
-          );
         }
+
+        const codec = await runtimeRef.current.startNative({
+          deviceLabel: nativeMicLabel,
+          liveDictation,
+        });
+        logInfo(
+          "RECORDING",
+          `Native recording start completed after ${Date.now() - startRequestedAt}ms`,
+        );
+        if (dictationStream && liveDictation) {
+          dictationStreamRef.current = dictationStream;
+        } else if (dictationStream) {
+          await dictationStream.hide().catch(() => {});
+          dictationStream.dispose();
+        }
+        logInfo("RECORDING", codec === "native-wav" ? "Using native wav recorder" : "Using native recorder");
+        setStream(null);
+        logInfo("RECORDING", "Recording started successfully");
+        dispatch({ type: "RECORDING_STARTED", timestamp: Date.now() });
+        scheduleRecordingLimitTimer();
+        return;
+      } catch (nativeError) {
+        runtimeRef.current.reset();
+        if (dictationStream) {
+          await dictationStream.hide().catch(() => {});
+          dictationStream.dispose();
+        }
+        logError(
+          "RECORDING",
+          `Native recorder start failed, falling back to WebView recorder: ${formatErrorMessage(nativeError)}`,
+        );
       }
 
       const audioConstraints = getAudioConstraints(activeSettings.micId);
@@ -533,7 +573,7 @@ export function useWidgetRecording({
         }),
       );
     }
-  }, [clearDictationStreamSession, clearRecordingLimitTimer, dispatch, hideNotice, machineRef, onRecordingStart, onRecordingStartFailed, resizeWidget, scheduleRecordingLimitTimer, setStream, settings, showError, startLowMicMonitor, stopLowMicMonitor, t]);
+  }, [clearDictationStreamSession, clearRecordingLimitTimer, dispatch, hideNotice, machineRef, onRecordingStart, onRecordingStartFailed, resizeForSettings, scheduleRecordingLimitTimer, setStream, settings, showError, startLowMicMonitor, stopLowMicMonitor, t]);
 
   // ── Stop and process ────────────────────────────────────────────────────
   const stopAndProcess = useCallback(async () => {
@@ -560,7 +600,7 @@ export function useWidgetRecording({
     setStream(null);
     onRecordingProcessing?.();
     dispatch({ type: "SET_PROCESSING" });
-    void resizeWidget(CALL_STACK_WIDGET_WIDTH, CALL_STACK_WIDGET_HEIGHT);
+    void resizeForSettings(activeSettings);
     await waitForWidgetPaint();
 
     try {
@@ -594,7 +634,7 @@ export function useWidgetRecording({
           dictationStream.dispose();
         }
         dispatch({ type: "PROCESSING_COMPLETE" });
-        await resizeWidget(CALL_STACK_WIDGET_WIDTH, CALL_STACK_WIDGET_HEIGHT);
+        await resizeForSettings(activeSettings);
         return;
       }
 
@@ -611,14 +651,14 @@ export function useWidgetRecording({
         runtimeRef.current.reset();
         showNotice(t("widget.recording.speechNotRecognized"), "info");
         dispatch({ type: "PROCESSING_COMPLETE" });
-        await resizeWidget(CALL_STACK_WIDGET_WIDTH, CALL_STACK_WIDGET_HEIGHT);
+        await resizeForSettings(activeSettings);
         return;
       }
 
       recordingSettingsRef.current = null;
       runtimeRef.current.reset();
       dispatch({ type: "PROCESSING_COMPLETE" });
-      await resizeWidget(CALL_STACK_WIDGET_WIDTH, CALL_STACK_WIDGET_HEIGHT);
+      await resizeForSettings(activeSettings);
     } catch (error) {
       const errorMessage = formatErrorMessage(error);
       logError("API", `Processing error: ${errorMessage}`);
@@ -630,7 +670,7 @@ export function useWidgetRecording({
       await clearDictationStreamSession(true);
       showError(message);
     }
-  }, [clearDictationStreamSession, clearRecordingLimitTimer, dispatch, machineRef, onRecordingProcessing, resizeWidget, setStream, settings, showError, showNotice, stopLowMicMonitor, t]);
+  }, [clearDictationStreamSession, clearRecordingLimitTimer, dispatch, machineRef, onRecordingProcessing, resizeForSettings, setStream, settings, showError, showNotice, stopLowMicMonitor, t]);
 
   // ── Keep stopAndProcessRef current ──────────────────────────────────────
   useEffect(() => {

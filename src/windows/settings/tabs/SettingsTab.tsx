@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { emit, listen } from "@tauri-apps/api/event";
+import { emit } from "@tauri-apps/api/event";
 import {
   disable as disableAutostart,
   enable as enableAutostart,
@@ -20,12 +20,12 @@ import {
 
 import {
   getSettings,
+  mergeAppSettingsPatch,
   saveSettings,
   AppSettings,
+  AppSettingsPatch,
   DEFAULT_HOTKEY,
   formatHotkeyLabel,
-  isMacPlatform,
-  normalizeHotkey,
 } from "../../../lib/store";
 import { applyThemePreference } from "../../../lib/theme";
 import {
@@ -35,22 +35,11 @@ import {
   WIDGET_SCALE_MIN,
   WIDGET_SCALE_STEP,
 } from "../../../lib/widgetScale";
-import {
-  HOTKEY_CAPTURE_STATE_EVENT,
-  HOTKEY_CHANGE_REQUEST_EVENT,
-  HOTKEY_REGISTRATION_RESULT_EVENT,
-  HotkeyRegistrationResultPayload,
-  NATIVE_HOTKEY_CAPTURE_EVENT,
-  NativeHotkeyCapturePayload,
-  SETTINGS_UPDATED_EVENT,
-} from "../../../lib/hotkeyEvents";
+import { SETTINGS_UPDATED_EVENT } from "../../../lib/hotkeyEvents";
 import { logError, logInfo } from "../../../lib/logger";
-import { buildFrontendHotkeyCandidate } from "../../../lib/frontendHotkeyCapture";
 import { LANGUAGES } from "../../../config/languages";
 import { useI18n } from "../../../lib/i18n";
-import { TranslationTab } from "./TranslationTab";
-
-type HotkeyFeedbackTone = "idle" | "success" | "error";
+import { useHotkeyCapture } from "../useHotkeyCapture";
 
 const SETTING_ROW_COLUMNS = "minmax(0, 1fr) 280px";
 const SETTING_ROW_GAP = 16;
@@ -91,12 +80,8 @@ const THEME_OPTIONS: Array<{ id: AppSettings["theme"]; Icon: Icon }> = [
   { id: "light", Icon: IconSun },
   { id: "dark", Icon: IconMoon },
 ];
-type SettingsSection = "system" | "translator";
-
 export function SettingsTab() {
   const { lang, t } = useI18n();
-  const usesNativeHotkeyCapture = isMacPlatform();
-  const [section, setSection] = useState<SettingsSection>("system");
   const [settings, setSettings] = useState<AppSettings | null>(null);
 
   // Language picker state
@@ -111,21 +96,7 @@ export function SettingsTab() {
   const micRef = useRef<HTMLDivElement>(null);
 
   const settingsRef = useRef<AppSettings | null>(null);
-  const hotkeyButtonRef = useRef<HTMLDivElement>(null);
-  const pendingHotkeyRef = useRef<string | null>(null);
-  const hotkeyFeedbackResetTimerRef = useRef<ReturnType<
-    typeof setTimeout
-  > | null>(null);
-
-  const [isHotkeyCaptureActive, setIsHotkeyCaptureActive] = useState(false);
-  const isHotkeyCaptureActiveRef = useRef(false);
-  const [isHotkeySubmitting, setIsHotkeySubmitting] = useState(false);
-  const [hotkeyDraft, setHotkeyDraft] = useState<string | null>(null);
-  const [hotkeyFeedback, setHotkeyFeedback] = useState(
-    t("settingsGeneralExtra.hotkey.initial"),
-  );
-  const [hotkeyFeedbackTone, setHotkeyFeedbackTone] =
-    useState<HotkeyFeedbackTone>("idle");
+  const widgetScaleSaveRequestRef = useRef(0);
   const [autostartEnabled, setAutostartEnabled] = useState(false);
   const [autostartLoaded, setAutostartLoaded] = useState(false);
   const [autostartPending, setAutostartPending] = useState(false);
@@ -135,19 +106,42 @@ export function SettingsTab() {
   type MicAvailabilityState =
     "ready" | "missing-selected" | "permission-needed" | "empty";
 
-  const clearHotkeyFeedbackResetTimer = () => {
-    if (!hotkeyFeedbackResetTimerRef.current) {
-      return;
-    }
-
-    clearTimeout(hotkeyFeedbackResetTimerRef.current);
-    hotkeyFeedbackResetTimerRef.current = null;
-  };
-
-  const setHotkeyCaptureActiveValue = (active: boolean): void => {
-    isHotkeyCaptureActiveRef.current = active;
-    setIsHotkeyCaptureActive(active);
-  };
+  const hotkeyCapture = useHotkeyCapture({
+    target: "dictation",
+    logTag: "SETTINGS",
+    messages: {
+      initial: t("settingsGeneralExtra.hotkey.initial"),
+      applyFailed: t("settingsGeneralExtra.hotkey.applyFailed"),
+      saved: t("settingsGeneralExtra.hotkey.saved"),
+      changeAgain: t("settingsGeneralExtra.hotkey.changeAgain"),
+      pressNew: t("settingsGeneralExtra.hotkey.pressNew"),
+      releaseToApply: t("settingsGeneralExtra.hotkey.releaseToApply"),
+      cancelledKept: t("settingsGeneralExtra.hotkey.cancelledKept"),
+      needMainKey: t("settingsGeneralExtra.hotkey.needMainKey"),
+      invalid: t("settingsGeneralExtra.hotkey.invalid"),
+      recognizeFailed: t("settingsGeneralExtra.hotkey.recognizeFailed"),
+      checkingFree: t("settingsGeneralExtra.hotkey.checkingFree"),
+      sendFailed: t("settingsGeneralExtra.hotkey.sendFailed"),
+      startingCapture: t("settingsGeneralExtra.hotkey.startingCapture"),
+      pressNewCombo: t("settingsGeneralExtra.hotkey.pressNewCombo"),
+      captureStartFailed: t("settingsGeneralExtra.hotkey.captureStartFailed"),
+    },
+    onApplied: async () => {
+      const latestSettings = await getSettings({ reload: true });
+      settingsRef.current = latestSettings;
+      setSettings(latestSettings);
+    },
+  });
+  const {
+    surfaceRef: hotkeyButtonRef,
+    active: isHotkeyCaptureActive,
+    submitting: isHotkeySubmitting,
+    draft: hotkeyDraft,
+    feedback: hotkeyFeedback,
+    tone: hotkeyFeedbackTone,
+    handleSurfaceKeyDown: handleHotkeyCaptureSurfaceKeyDown,
+    handleSurfaceMouseDown: handleHotkeyCaptureSurfaceMouseDown,
+  } = hotkeyCapture;
 
   useEffect(() => {
     getSettings({ reload: true }).then((s) => {
@@ -192,154 +186,6 @@ export function SettingsTab() {
       mounted = false;
     };
   }, []);
-
-  useEffect(() => {
-    const unlistenHotkeyResult = listen<HotkeyRegistrationResultPayload>(
-      HOTKEY_REGISTRATION_RESULT_EVENT,
-      async ({ payload }) => {
-        if (
-          !pendingHotkeyRef.current ||
-          payload.requestedHotkey !== pendingHotkeyRef.current
-        ) {
-          return;
-        }
-
-        pendingHotkeyRef.current = null;
-        setIsHotkeySubmitting(false);
-        setHotkeyDraft(null);
-
-        if (!payload.success) {
-          setHotkeyFeedbackTone("error");
-          setHotkeyFeedback(
-            payload.message || t("settingsGeneralExtra.hotkey.applyFailed"),
-          );
-          return;
-        }
-
-        const latestSettings = await getSettings({ reload: true });
-        settingsRef.current = latestSettings;
-        setSettings(latestSettings);
-        setHotkeyFeedbackTone("success");
-        setHotkeyFeedback(t("settingsGeneralExtra.hotkey.saved"));
-        clearHotkeyFeedbackResetTimer();
-        hotkeyFeedbackResetTimerRef.current = setTimeout(() => {
-          setHotkeyFeedbackTone("idle");
-          setHotkeyFeedback(t("settingsGeneralExtra.hotkey.changeAgain"));
-          hotkeyFeedbackResetTimerRef.current = null;
-        }, 2200);
-      },
-    );
-
-    const unlistenNativeHotkeyCapture = listen<NativeHotkeyCapturePayload>(
-      NATIVE_HOTKEY_CAPTURE_EVENT,
-      async ({ payload }) => {
-        if (!isHotkeyCaptureActiveRef.current) {
-          return;
-        }
-
-        if (payload.status === "listening") {
-          setHotkeyCaptureActiveValue(true);
-          setIsHotkeySubmitting(false);
-          setHotkeyDraft(null);
-          setHotkeyFeedbackTone("idle");
-          setHotkeyFeedback(
-            payload.message || t("settingsGeneralExtra.hotkey.pressNew"),
-          );
-          return;
-        }
-
-        if (payload.status === "preview") {
-          setHotkeyDraft(payload.hotkey || null);
-          setHotkeyFeedbackTone("idle");
-          setHotkeyFeedback(
-            payload.message || t("settingsGeneralExtra.hotkey.releaseToApply"),
-          );
-          return;
-        }
-
-        if (payload.status === "cancelled") {
-          await invoke("stop_native_hotkey_capture").catch(() => null);
-          await emit(HOTKEY_CAPTURE_STATE_EVENT, { active: false }).catch(
-            () => null,
-          );
-          setHotkeyCaptureActiveValue(false);
-          setHotkeyDraft(null);
-          setHotkeyFeedbackTone("idle");
-          setHotkeyFeedback(
-            payload.message || t("settingsGeneralExtra.hotkey.inputCancelled"),
-          );
-          return;
-        }
-
-        if (payload.status !== "completed") {
-          return;
-        }
-
-        await invoke("stop_native_hotkey_capture").catch(() => null);
-        await applyCapturedHotkey(payload.hotkey?.trim() || null);
-      },
-    );
-
-    return () => {
-      unlistenHotkeyResult.then((unlisten) => unlisten());
-      unlistenNativeHotkeyCapture.then((unlisten) => unlisten());
-      void emit(HOTKEY_CAPTURE_STATE_EVENT, { active: false }).catch(
-        () => null,
-      );
-      void invoke("stop_native_hotkey_capture").catch(() => null);
-      clearHotkeyFeedbackResetTimer();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!isHotkeyCaptureActive || usesNativeHotkeyCapture) {
-      return;
-    }
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      event.preventDefault();
-      event.stopPropagation();
-
-      if (
-        event.key === "Escape" &&
-        !event.ctrlKey &&
-        !event.altKey &&
-        !event.shiftKey &&
-        !event.metaKey
-      ) {
-        void stopHotkeyCapture(t("settingsGeneralExtra.hotkey.cancelledKept"));
-        return;
-      }
-
-      const candidate = buildFrontendHotkeyCandidate(event);
-      if (!candidate) {
-        setHotkeyDraft(null);
-        setHotkeyFeedbackTone("idle");
-        setHotkeyFeedback(t("settingsGeneralExtra.hotkey.needMainKey"));
-        return;
-      }
-
-      const normalized = normalizeHotkey(candidate);
-      setHotkeyDraft(candidate);
-
-      if (!normalized.valid) {
-        setHotkeyFeedbackTone("error");
-        setHotkeyFeedback(
-          normalized.error || t("settingsGeneralExtra.hotkey.invalid"),
-        );
-        return;
-      }
-
-      void applyCapturedHotkey(normalized.normalized || candidate);
-    };
-
-    window.addEventListener("keydown", handleKeyDown, true);
-    window.setTimeout(() => hotkeyButtonRef.current?.focus(), 0);
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown, true);
-    };
-  }, [isHotkeyCaptureActive, usesNativeHotkeyCapture]);
 
   useEffect(() => {
     if (!settings) return;
@@ -444,26 +290,35 @@ export function SettingsTab() {
         setLangOpen(false);
       if (micRef.current && !micRef.current.contains(e.target as Node))
         setMicOpen(false);
-      if (
-        isHotkeyCaptureActive &&
-        hotkeyButtonRef.current &&
-        !hotkeyButtonRef.current.contains(e.target as Node)
-      ) {
-        void stopHotkeyCapture(t("settingsGeneralExtra.hotkey.cancelledKept"));
-      }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, [isHotkeyCaptureActive]);
+  }, []);
 
   const update = async (
-    patch: Partial<AppSettings>,
+    patch: AppSettingsPatch,
   ): Promise<AppSettings | null> => {
     if (!settingsRef.current) return null;
-    const s = { ...settingsRef.current, ...patch };
+    const s = mergeAppSettingsPatch(settingsRef.current, patch);
     settingsRef.current = s;
     setSettings(s);
-    await saveSettings(s);
+    const scaleRequestId =
+      patch.widgetScale === undefined
+        ? null
+        : ++widgetScaleSaveRequestRef.current;
+    if (scaleRequestId !== null) {
+      void logInfo(
+        "WIDGET_SCALE",
+        `requestId=${scaleRequestId} stage=queued scale=${normalizeWidgetScale(patch.widgetScale)}`,
+      );
+    }
+    await saveSettings(patch);
+    if (scaleRequestId !== null) {
+      void logInfo(
+        "WIDGET_SCALE",
+        `requestId=${scaleRequestId} stage=saved scale=${normalizeWidgetScale(patch.widgetScale)}`,
+      );
+    }
     emit(SETTINGS_UPDATED_EVENT).catch((e) => {
       void logError(
         "SETTINGS",
@@ -471,141 +326,6 @@ export function SettingsTab() {
       );
     });
     return s;
-  };
-
-  const applyCapturedHotkey = async (
-    candidate: string | null,
-  ): Promise<void> => {
-    await emit(HOTKEY_CAPTURE_STATE_EVENT, { active: false }).catch(() => null);
-
-    if (!candidate) {
-      setHotkeyCaptureActiveValue(false);
-      setHotkeyDraft(null);
-      setHotkeyFeedbackTone("error");
-      setHotkeyFeedback(t("settingsGeneralExtra.hotkey.recognizeFailed"));
-      return;
-    }
-
-    const normalized = normalizeHotkey(candidate);
-    if (!normalized.valid || !normalized.normalized) {
-      setHotkeyCaptureActiveValue(false);
-      setHotkeyDraft(null);
-      setHotkeyFeedbackTone("error");
-      setHotkeyFeedback(
-        normalized.error || t("settingsGeneralExtra.hotkey.invalid"),
-      );
-      return;
-    }
-
-    pendingHotkeyRef.current = normalized.normalized;
-    setHotkeyCaptureActiveValue(false);
-    setIsHotkeySubmitting(true);
-    setHotkeyDraft(normalized.normalized);
-    setHotkeyFeedbackTone("idle");
-    setHotkeyFeedback(t("settingsGeneralExtra.hotkey.checkingFree"));
-
-    emit(HOTKEY_CHANGE_REQUEST_EVENT, { hotkey: normalized.normalized }).catch(
-      (error) => {
-        pendingHotkeyRef.current = null;
-        setIsHotkeySubmitting(false);
-        setHotkeyDraft(null);
-        setHotkeyFeedbackTone("error");
-        setHotkeyFeedback(t("settingsGeneralExtra.hotkey.sendFailed"));
-        void logError(
-          "SETTINGS",
-          `Failed to emit hotkey change request: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      },
-    );
-  };
-
-  const startHotkeyCapture = async (): Promise<void> => {
-    if (isHotkeySubmitting || isHotkeyCaptureActive) {
-      return;
-    }
-
-    clearHotkeyFeedbackResetTimer();
-    pendingHotkeyRef.current = null;
-    setHotkeyCaptureActiveValue(true);
-    setHotkeyDraft(null);
-    setHotkeyFeedbackTone("idle");
-    setHotkeyFeedback(
-      usesNativeHotkeyCapture
-        ? t("settingsGeneralExtra.hotkey.startingCapture")
-        : t("settingsGeneralExtra.hotkey.pressNewCombo"),
-    );
-
-    try {
-      await emit(HOTKEY_CAPTURE_STATE_EVENT, { active: true });
-      if (usesNativeHotkeyCapture) {
-        await invoke("start_native_hotkey_capture");
-      } else {
-        window.setTimeout(() => hotkeyButtonRef.current?.focus(), 0);
-      }
-    } catch (error) {
-      await emit(HOTKEY_CAPTURE_STATE_EVENT, { active: false }).catch(
-        () => null,
-      );
-      setHotkeyCaptureActiveValue(false);
-      setHotkeyDraft(null);
-      setHotkeyFeedbackTone("error");
-      setHotkeyFeedback(t("settingsGeneralExtra.hotkey.captureStartFailed"));
-      void logError(
-        "SETTINGS",
-        `Failed to start native hotkey capture: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  };
-
-  const stopHotkeyCapture = async (message?: string): Promise<void> => {
-    pendingHotkeyRef.current = null;
-    setHotkeyCaptureActiveValue(false);
-    setHotkeyDraft(null);
-
-    if (usesNativeHotkeyCapture) {
-      try {
-        await invoke("stop_native_hotkey_capture");
-      } catch (error) {
-        void logError(
-          "SETTINGS",
-          `Failed to stop native hotkey capture: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    }
-
-    await emit(HOTKEY_CAPTURE_STATE_EVENT, { active: false }).catch(() => null);
-
-    if (message) {
-      setHotkeyFeedbackTone("idle");
-      setHotkeyFeedback(message);
-    }
-  };
-
-  const handleHotkeyCaptureSurfaceKeyDown = (
-    event: React.KeyboardEvent<HTMLDivElement>,
-  ): void => {
-    if (isHotkeyCaptureActive || isHotkeySubmitting) {
-      return;
-    }
-
-    if (event.key !== "Enter" && event.key !== " ") {
-      return;
-    }
-
-    event.preventDefault();
-    void startHotkeyCapture();
-  };
-
-  const handleHotkeyCaptureSurfaceMouseDown = (
-    event: React.MouseEvent<HTMLDivElement>,
-  ): void => {
-    event.preventDefault();
-
-    if (isHotkeyCaptureActive || isHotkeySubmitting) {
-      return;
-    }
-
-    void startHotkeyCapture();
   };
 
   const contactSupport = async (): Promise<void> => {
@@ -729,50 +449,6 @@ export function SettingsTab() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <div
-        style={{
-          display: "flex",
-          background: "var(--control-track)",
-          borderRadius: 10,
-          padding: 3,
-          gap: 2,
-          width: "100%",
-        }}
-      >
-        {(["system", "translator"] as const).map((id) => {
-          const active = section === id;
-
-          return (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setSection(id)}
-              style={{
-                flex: 1,
-                minHeight: CONTROL_HEIGHT - 4,
-                borderRadius: CONTROL_RADIUS,
-                border: "none",
-                background: active ? "var(--dropdown-active)" : "transparent",
-                color: active ? "var(--text-hi)" : "var(--text-mid)",
-                fontSize: CONTROL_FONT_SIZE,
-                fontWeight: active ? 800 : 600,
-                cursor: "pointer",
-                transition: "background 0.15s ease, color 0.15s ease",
-              }}
-            >
-              {t(
-                id === "system"
-                  ? "settings.section.system"
-                  : "settings.section.translator",
-              )}
-            </button>
-          );
-        })}
-      </div>
-
-      {section === "translator" ? (
-        <TranslationTab />
-      ) : (
         <div
           className="card"
           style={{
@@ -1260,9 +936,7 @@ export function SettingsTab() {
                       overflow: "hidden",
                     }}
                   >
-                    <div
-                      style={{ overflow: "auto", flex: 1, padding: "6px 0" }}
-                    >
+                  <div style={{ overflow: "auto", flex: 1, padding: "6px 0" }}>
                       <button
                         onClick={() => {
                           void update({ micId: "" });
@@ -1647,6 +1321,103 @@ export function SettingsTab() {
             </div>
           </div>
 
+        <div style={GROUPED_SETTINGS_SECTION_STYLE}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: SETTING_ROW_COLUMNS,
+              alignItems: "center",
+              gap: SETTING_ROW_GAP,
+            }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <div
+                style={{
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: "var(--text-hi)",
+                  margin: 0,
+                }}
+              >
+                {t("settings.realtimeTranscription.title")}
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={settings.realtimeTranscriptionEnabled}
+              onClick={() => {
+                void update({
+                  realtimeTranscriptionEnabled:
+                    !settings.realtimeTranscriptionEnabled,
+                });
+              }}
+              className="btn"
+              style={{
+                width: "100%",
+                minHeight: CONTROL_HEIGHT,
+                padding: "0 10px",
+                borderRadius: CONTROL_RADIUS,
+                display: "grid",
+                gridTemplateColumns: "minmax(0, 1fr) 34px",
+                alignItems: "center",
+                gap: 10,
+                cursor: "pointer",
+                transform: "none",
+                justifySelf: "end",
+              }}
+            >
+              <span
+                style={{
+                  color: "var(--text-hi)",
+                  fontSize: CONTROL_FONT_SIZE,
+                  fontWeight: 700,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  minWidth: 0,
+                }}
+              >
+                {settings.realtimeTranscriptionEnabled
+                  ? t("settings.realtimeTranscription.on")
+                  : t("settings.realtimeTranscription.off")}
+              </span>
+              <span
+                aria-hidden="true"
+                style={{
+                  width: 34,
+                  height: 20,
+                  borderRadius: 999,
+                  background: settings.realtimeTranscriptionEnabled
+                    ? "var(--accent)"
+                    : "var(--switch-track)",
+                  padding: 3,
+                  position: "relative",
+                  transition: "background 0.15s ease",
+                  flexShrink: 0,
+                }}
+              >
+                <span
+                  style={{
+                    position: "absolute",
+                    top: 3,
+                    left: 3,
+                    width: 14,
+                    height: 14,
+                    borderRadius: "50%",
+                    background: "var(--accent-contrast)",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.18)",
+                    transform: settings.realtimeTranscriptionEnabled
+                      ? "translateX(14px)"
+                      : "translateX(0)",
+                    transition: "transform 0.18s ease",
+                  }}
+                />
+              </span>
+            </button>
+          </div>
+        </div>
+
           <div style={GROUPED_SETTINGS_SECTION_STYLE}>
             <div
               style={{
@@ -1853,7 +1624,6 @@ export function SettingsTab() {
             )}
           </div>
         </div>
-      )}
     </div>
   );
 }

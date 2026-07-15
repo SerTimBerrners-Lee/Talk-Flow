@@ -4,6 +4,7 @@ import { load } from "@tauri-apps/plugin-store";
 import { DEFAULT_WIDGET_SCALE, normalizeWidgetScale } from "./widgetScale";
 import { recordTranscriptionStats } from "./stats";
 import { logInfo } from "./logger";
+import { createSerialTaskQueue } from "./serialTaskQueue";
 
 export interface SummaryEntry {
   id: string;
@@ -24,7 +25,7 @@ export interface HistoryEntry {
   duration: number;
   raw: string;
   cleaned: string;
-  source?: "voice" | "file" | "call";
+  source?: "voice" | "file" | "call" | "liveTranslation";
   fileName?: string;
   fileSize?: number;
   callSessionId?: string;
@@ -49,6 +50,11 @@ export interface HistoryEntry {
   speakers?: Speaker[];
   segments?: SpeakerTranscriptSegment[];
   dictationTranslation?: DictationTranslationMetadata;
+  liveTranslation?: {
+    targetLanguage: string;
+    adapterId: string;
+    segments: LiveTranslationSegment[];
+  };
   /** Generated summaries for this record (newest first); persists across restarts. */
   summaries?: SummaryEntry[];
 }
@@ -57,7 +63,7 @@ export interface HistoryListEntry {
   id: string;
   timestamp: string;
   duration: number;
-  source: "voice" | "file" | "call";
+  source: "voice" | "file" | "call" | "liveTranslation";
   status?: HistoryEntry["status"];
   errorMessage?: string;
   processingTime?: number;
@@ -96,6 +102,26 @@ export interface ApiAdapterSettings {
   lastTestedApiKey?: string;
   lastTestedModel?: string;
   lastTestedEndpoint?: string;
+  /** Result of a realtime handshake for the exact tested configuration. */
+  streamingCapability?: "supported" | "unsupported";
+  /** Stable, non-secret fingerprint of provider/model/endpoint/API-key configuration. */
+  streamingCapabilityFingerprint?: string;
+}
+
+export type LiveTranslationChannel = "mic" | "system";
+export type LiveTranslationSegmentState = "partial" | "final";
+
+export interface LiveTranslationSegment {
+  sessionId: string;
+  channel: LiveTranslationChannel;
+  speakerId?: string;
+  startedAtMs: number;
+  endedAtMs?: number;
+  original: string;
+  translated: string;
+  state: LiveTranslationSegmentState;
+  /** Number of translated characters already finalized by the provider. */
+  stableTranslatedLength?: number;
 }
 
 export interface LocalModelSettings {
@@ -103,7 +129,6 @@ export interface LocalModelSettings {
   message?: string;
   downloadedAt?: string;
   lastCheckedAt?: string;
-  streamingEnabled?: boolean;
 }
 
 /** Kind of text processing a prompt performs. */
@@ -136,7 +161,7 @@ export interface DictationTranslationMetadata {
 }
 
 export interface TranslationSettings {
-  /** Show the translation toggle bubble in the widget. */
+  /** Legacy persisted flag; the quick dictation-translation button was removed. */
   widgetEnabled: boolean;
   /** Translate ordinary dictation after recognition, before paste. */
   active: boolean;
@@ -154,6 +179,22 @@ export interface TranslationSettings {
   selectionLocalTranslatorProvider: string;
   /** One-time migration marker for the selected-text translation default. */
   selectionEnableMigrationVersion: number;
+  /** Show the separate synchronous-translation button in the widget. */
+  liveWidgetEnabled: boolean;
+  /** Include microphone audio in synchronous translation. Off avoids speaker echo duplication. */
+  liveMicrophoneEnabled: boolean;
+  /** BCP-47 target language for synchronous microphone/system translation. */
+  liveTargetLanguage: string;
+  /** Speak synchronous OpenAI Realtime translation through the system output. */
+  liveVoiceEnabled: boolean;
+  /** OpenAI Realtime voice used for synchronous translation playback. */
+  liveVoice: string;
+  /** Playback gain for synchronous translation, from 0 to 1. */
+  liveVoiceVolume: number;
+  /** OpenAI Realtime output speech speed multiplier. */
+  liveVoiceSpeed: number;
+  /** Mute captured source playback while keeping its full-level tap signal. */
+  liveMuteOriginalEnabled: boolean;
 }
 
 export interface AppSettings {
@@ -162,6 +203,10 @@ export interface AppSettings {
   apiAdapters: Record<string, ApiAdapterSettings>;
   /** API adapter selected for active API transcription mode */
   selectedApiAdapter: string;
+  /** Realtime translation credentials keyed by adapter id. */
+  translationAdapters: Record<string, ApiAdapterSettings>;
+  /** Adapter used for synchronous translation. */
+  selectedTranslationAdapter: string;
   /** Cached local model states keyed by local catalog id */
   localModels: Record<string, LocalModelSettings>;
   /** Optional custom directory for downloaded local STT models; empty means default app data path */
@@ -170,6 +215,8 @@ export interface AppSettings {
   transcriptionStorageDir: string;
   /** Save audio files for completed voice history entries. */
   saveRecordingAudio: boolean;
+  /** Use realtime transcription whenever the selected STT model supports streaming. */
+  realtimeTranscriptionEnabled: boolean;
   /** Separate API key for Whisper/STT endpoint (used in custom mode) */
   whisperApiKey: string;
   /** Separate API key for LLM endpoint (used in custom mode; empty = skip LLM) */
@@ -224,6 +271,7 @@ export interface WidgetPosition {
 const HISTORY_MAX_VOICE_ENTRIES = 1000;
 const HISTORY_MAX_FILE_ENTRIES = 200;
 const HISTORY_MAX_CALL_ENTRIES = 200;
+const HISTORY_MAX_LIVE_TRANSLATION_ENTRIES = 200;
 const HISTORY_MAX_TOTAL_BYTES = 50 * 1024 * 1024;
 export const HISTORY_MAX_SUMMARIES_PER_ENTRY = 3;
 export const HISTORY_MAX_VOICE_AUDIO_ENTRIES = 100;
@@ -240,21 +288,10 @@ const MODIFIER_ALIASES: Record<string, (typeof MODIFIER_ORDER)[number]> = {
   meta: "Command",
 };
 const MAIN_KEY_ALIASES: Record<string, string> = {
-  esc: "Escape",
-  escape: "Escape",
   return: "Enter",
   enter: "Enter",
-  tab: "Tab",
   space: "Space",
   spacebar: "Space",
-  backspace: "Backspace",
-  delete: "Delete",
-  del: "Delete",
-  insert: "Insert",
-  home: "Home",
-  end: "End",
-  pageup: "PageUp",
-  pagedown: "PageDown",
   arrowup: "Up",
   up: "Up",
   arrowdown: "Down",
@@ -268,16 +305,18 @@ const FUNCTION_KEY_PATTERN = /^F(?:[1-9]|1[0-2])$/;
 const DEFAULT_MAC_HOTKEY = "Command+Shift+Space";
 const DEFAULT_DESKTOP_HOTKEY = "Control+Alt+Space";
 const DEFAULT_LANGUAGE = "ru";
-const LEGACY_MAC_SELECTION_TRANSLATION_HOTKEYS = [
+const LEGACY_SELECTION_TRANSLATION_HOTKEYS = [
   "Command+Alt+Y",
   "Control+Command+T",
+  "Alt+T",
+  "Control+Alt+Y",
 ];
 const SELECTION_ENABLE_MIGRATION_VERSION = 1;
 const SELECTION_TARGET_MIGRATION_VERSION = 1;
 const LEGACY_SELECTION_LOCAL_TRANSLATOR_PROVIDER = "trad";
 const DEFAULT_SELECTION_LOCAL_TRANSLATOR_PROVIDER = "nllb-200";
-const DEFAULT_MAC_SELECTION_TRANSLATION_HOTKEY = "Alt+T";
-const DEFAULT_DESKTOP_SELECTION_TRANSLATION_HOTKEY = "Control+Alt+Y";
+const DEFAULT_MAC_SELECTION_TRANSLATION_HOTKEY = "Control+Shift+Y";
+const DEFAULT_DESKTOP_SELECTION_TRANSLATION_HOTKEY = "Control+Shift+Y";
 const RESERVED_MAC_SYSTEM_HOTKEYS = new Set(["Command+Z", "Shift+Command+Z"]);
 const BUNDLED_LOCAL_LLM_PORTS = new Set([8011]);
 const BUNDLED_LOCAL_LLM_MODEL_IDS = new Set([
@@ -370,10 +409,6 @@ function isModifier(part: string): part is (typeof MODIFIER_ORDER)[number] {
   return MODIFIER_ORDER.includes(part as (typeof MODIFIER_ORDER)[number]);
 }
 
-function isFunctionKey(part: string): boolean {
-  return FUNCTION_KEY_PATTERN.test(part);
-}
-
 function normalizedHotkeyFromParts(parts: string[]): string | null {
   const modifiers = MODIFIER_ORDER.filter((modifier) =>
     parts.includes(modifier),
@@ -435,7 +470,7 @@ export function validateHotkey(hotkey: string): {
     return {
       valid: false,
       error:
-        "Поддерживаются буквы, цифры, Space, F-клавиши и стандартные модификаторы",
+        "Поддерживаются буквы, цифры, Space, Enter, стрелки, F1–F12 и стандартные модификаторы",
     };
   }
 
@@ -453,7 +488,8 @@ export function validateHotkey(hotkey: string): {
   if (mainKeys.length === 0) {
     return {
       valid: false,
-      error: "Добавьте основную клавишу: Space, букву, цифру или F-клавишу",
+      error:
+        "Добавьте основную клавишу: букву, цифру, Space, Enter, стрелку или F1–F12",
     };
   }
 
@@ -504,10 +540,10 @@ export function validateHotkey(hotkey: string): {
     };
   }
 
-  if (modifiers.length === 0 && !isFunctionKey(mainKeys[0])) {
+  if (modifiers.length === 0) {
     return {
       valid: false,
-      error: "Без модификатора разрешены только F-клавиши",
+      error: "Добавьте хотя бы один модификатор: Cmd, Ctrl, Alt или Shift",
     };
   }
 
@@ -536,7 +572,8 @@ export function normalizeHotkey(hotkey: string): {
   if (!mainKey) {
     return {
       valid: false,
-      error: "Добавьте основную клавишу: Space, букву, цифру или F-клавишу",
+      error:
+        "Добавьте основную клавишу: букву, цифру, Space, Enter, стрелку или F1–F12",
     };
   }
 
@@ -689,18 +726,14 @@ export function needsHotkeySettingsMigration(
       typeof rawTranslation.selectionEnableMigrationVersion === "number"
         ? rawTranslation.selectionEnableMigrationVersion
         : 0;
-    if (
-      selectionEnableMigrationVersion < SELECTION_ENABLE_MIGRATION_VERSION
-    ) {
+    if (selectionEnableMigrationVersion < SELECTION_ENABLE_MIGRATION_VERSION) {
       return true;
     }
     const selectionTargetMigrationVersion =
       typeof rawTranslation.selectionTargetMigrationVersion === "number"
         ? rawTranslation.selectionTargetMigrationVersion
         : 0;
-    if (
-      selectionTargetMigrationVersion < SELECTION_TARGET_MIGRATION_VERSION
-    ) {
+    if (selectionTargetMigrationVersion < SELECTION_TARGET_MIGRATION_VERSION) {
       return true;
     }
   }
@@ -725,10 +758,13 @@ const DEFAULT_SETTINGS: AppSettings = {
   apiKey: "",
   apiAdapters: {},
   selectedApiAdapter: "openai",
+  translationAdapters: {},
+  selectedTranslationAdapter: "openai",
   localModels: {},
   localModelsDir: "",
   transcriptionStorageDir: "",
   saveRecordingAudio: false,
+  realtimeTranscriptionEnabled: true,
   whisperApiKey: "",
   llmApiKey: "",
   provider: "openai",
@@ -754,12 +790,21 @@ const DEFAULT_SETTINGS: AppSettings = {
     widgetEnabled: false,
     active: false,
     targetLanguage: "en",
-    selectionTargetLanguage: defaultSelectionTranslationTarget(DEFAULT_LANGUAGE),
+    selectionTargetLanguage:
+      defaultSelectionTranslationTarget(DEFAULT_LANGUAGE),
     selectionTargetMigrationVersion: SELECTION_TARGET_MIGRATION_VERSION,
     selectionEnabled: true,
     selectionHotkey: DEFAULT_SELECTION_TRANSLATION_HOTKEY,
     selectionLocalTranslatorProvider: "",
     selectionEnableMigrationVersion: SELECTION_ENABLE_MIGRATION_VERSION,
+    liveWidgetEnabled: false,
+    liveMicrophoneEnabled: false,
+    liveTargetLanguage: "en",
+    liveVoiceEnabled: false,
+    liveVoice: "marin",
+    liveVoiceVolume: 0.8,
+    liveVoiceSpeed: 1.05,
+    liveMuteOriginalEnabled: true,
   },
 };
 
@@ -894,31 +939,37 @@ function normalizeTranslationSettings(
     typeof translation.selectionHotkey === "string"
       ? normalizeHotkey(translation.selectionHotkey).normalized
       : undefined;
-  const isLegacyMacSelectionHotkey = LEGACY_MAC_SELECTION_TRANSLATION_HOTKEYS
-    .map((hotkey) => normalizeHotkey(hotkey).normalized)
-    .includes(normalizedSelectionHotkey);
-  const selectionHotkey =
-    isMacPlatform() && isLegacyMacSelectionHotkey
-      ? DEFAULT_SELECTION_TRANSLATION_HOTKEY
-      : !isMacPlatform() &&
-          normalizedSelectionHotkey ===
-            normalizeHotkey(DEFAULT_MAC_SELECTION_TRANSLATION_HOTKEY).normalized
-        ? DEFAULT_DESKTOP_SELECTION_TRANSLATION_HOTKEY
-        : normalizedSelectionHotkey || DEFAULT_SELECTION_TRANSLATION_HOTKEY;
+  const isLegacySelectionHotkey = LEGACY_SELECTION_TRANSLATION_HOTKEYS.map(
+    (hotkey) => normalizeHotkey(hotkey).normalized,
+  ).includes(normalizedSelectionHotkey);
+  const selectionHotkey = isLegacySelectionHotkey
+    ? DEFAULT_SELECTION_TRANSLATION_HOTKEY
+    : normalizedSelectionHotkey || DEFAULT_SELECTION_TRANSLATION_HOTKEY;
 
   return {
     widgetEnabled: translation.widgetEnabled,
-    active: translation.widgetEnabled ? translation.active : false,
+    active: translation.active,
     targetLanguage: normalizedTarget,
     selectionTargetLanguage: normalizedSelectionTarget,
     selectionTargetMigrationVersion: SELECTION_TARGET_MIGRATION_VERSION,
     selectionEnabled: translation.selectionEnabled,
     selectionHotkey,
-    selectionLocalTranslatorProvider:
-      normalizeSelectionLocalTranslatorProvider(
-        translation.selectionLocalTranslatorProvider,
-      ),
+    selectionLocalTranslatorProvider: normalizeSelectionLocalTranslatorProvider(
+      translation.selectionLocalTranslatorProvider,
+    ),
     selectionEnableMigrationVersion: SELECTION_ENABLE_MIGRATION_VERSION,
+    liveWidgetEnabled: translation.liveWidgetEnabled,
+    liveMicrophoneEnabled: translation.liveMicrophoneEnabled,
+    liveTargetLanguage:
+      translation.liveTargetLanguage &&
+      translation.liveTargetLanguage !== "auto"
+        ? translation.liveTargetLanguage
+        : fallbackTarget,
+    liveVoiceEnabled: translation.liveVoiceEnabled,
+    liveVoice: translation.liveVoice.trim() || "marin",
+    liveVoiceVolume: Math.min(1, Math.max(0, translation.liveVoiceVolume)),
+    liveVoiceSpeed: Math.min(1.5, Math.max(0.25, translation.liveVoiceSpeed)),
+    liveMuteOriginalEnabled: translation.liveMuteOriginalEnabled,
   };
 }
 
@@ -927,7 +978,7 @@ function nonConflictingSelectionHotkey(voiceHotkey?: string): string {
     ? normalizeHotkey(voiceHotkey).normalized
     : undefined;
   const candidates = isMacPlatform()
-    ? [DEFAULT_MAC_SELECTION_TRANSLATION_HOTKEY, "Alt+Space"]
+    ? [DEFAULT_MAC_SELECTION_TRANSLATION_HOTKEY, "Control+Shift+U"]
     : [DEFAULT_DESKTOP_SELECTION_TRANSLATION_HOTKEY, "Control+Alt+T"];
   return (
     candidates
@@ -980,15 +1031,13 @@ function parseTranslationSettings(
         typeof raw.targetLanguage === "string" && raw.targetLanguage.trim()
           ? raw.targetLanguage.trim()
           : defaultTranslationTarget(sourceLanguage),
-      selectionTargetLanguage:
-        shouldMigrateSelectionTarget
-          ? fallbackSelectionTarget
-          : rawSelectionTargetLanguage,
+      selectionTargetLanguage: shouldMigrateSelectionTarget
+        ? fallbackSelectionTarget
+        : rawSelectionTargetLanguage,
       selectionTargetMigrationVersion,
-      selectionEnabled:
-        shouldAutoEnableSelection
-          ? true
-          : typeof raw.selectionEnabled === "boolean"
+      selectionEnabled: shouldAutoEnableSelection
+        ? true
+        : typeof raw.selectionEnabled === "boolean"
           ? raw.selectionEnabled
           : DEFAULT_SETTINGS.translation.selectionEnabled,
       selectionHotkey:
@@ -1000,6 +1049,41 @@ function parseTranslationSettings(
           raw.selectionLocalTranslatorProvider,
         ),
       selectionEnableMigrationVersion,
+      liveWidgetEnabled:
+        typeof raw.liveWidgetEnabled === "boolean"
+          ? raw.liveWidgetEnabled
+          : DEFAULT_SETTINGS.translation.liveWidgetEnabled,
+      liveMicrophoneEnabled:
+        typeof raw.liveMicrophoneEnabled === "boolean"
+          ? raw.liveMicrophoneEnabled
+          : DEFAULT_SETTINGS.translation.liveMicrophoneEnabled,
+      liveTargetLanguage:
+        typeof raw.liveTargetLanguage === "string" &&
+        raw.liveTargetLanguage.trim()
+          ? raw.liveTargetLanguage.trim()
+          : defaultTranslationTarget(sourceLanguage),
+      liveVoiceEnabled:
+        typeof raw.liveVoiceEnabled === "boolean"
+          ? raw.liveVoiceEnabled
+          : DEFAULT_SETTINGS.translation.liveVoiceEnabled,
+      liveVoice:
+        typeof raw.liveVoice === "string" && raw.liveVoice.trim()
+          ? raw.liveVoice.trim()
+          : DEFAULT_SETTINGS.translation.liveVoice,
+      liveVoiceVolume:
+        typeof raw.liveVoiceVolume === "number" &&
+        Number.isFinite(raw.liveVoiceVolume)
+          ? raw.liveVoiceVolume
+          : DEFAULT_SETTINGS.translation.liveVoiceVolume,
+      liveVoiceSpeed:
+        typeof raw.liveVoiceSpeed === "number" &&
+        Number.isFinite(raw.liveVoiceSpeed)
+          ? raw.liveVoiceSpeed
+          : DEFAULT_SETTINGS.translation.liveVoiceSpeed,
+      liveMuteOriginalEnabled:
+        typeof raw.liveMuteOriginalEnabled === "boolean"
+          ? raw.liveMuteOriginalEnabled
+          : DEFAULT_SETTINGS.translation.liveMuteOriginalEnabled,
     },
     sourceLanguage || DEFAULT_SETTINGS.language,
   );
@@ -1047,6 +1131,63 @@ export function normalizeSavedSettings(saved: unknown): Partial<AppSettings> {
               typeof adapter.lastTestedEndpoint === "string"
                 ? adapter.lastTestedEndpoint
                 : undefined,
+            streamingCapability:
+              adapter.streamingCapability === "supported" ||
+              adapter.streamingCapability === "unsupported"
+                ? adapter.streamingCapability
+                : undefined,
+            streamingCapabilityFingerprint:
+              typeof adapter.streamingCapabilityFingerprint === "string"
+                ? adapter.streamingCapabilityFingerprint
+                : undefined,
+          };
+          return acc;
+        }, {})
+      : undefined;
+  const rawTranslationAdapters =
+    raw.translationAdapters && typeof raw.translationAdapters === "object"
+      ? Object.entries(
+          raw.translationAdapters as Record<string, unknown>,
+        ).reduce<Record<string, ApiAdapterSettings>>((acc, [key, value]) => {
+          if (!value || typeof value !== "object") return acc;
+          const adapter = value as Record<string, unknown>;
+          acc[key] = {
+            apiKey: typeof adapter.apiKey === "string" ? adapter.apiKey : "",
+            model: typeof adapter.model === "string" ? adapter.model : "",
+            endpoint:
+              typeof adapter.endpoint === "string"
+                ? adapter.endpoint
+                : undefined,
+            connectionStatus:
+              adapter.connectionStatus === "saved" ||
+              adapter.connectionStatus === "verified"
+                ? adapter.connectionStatus
+                : undefined,
+            lastConnectedAt:
+              typeof adapter.lastConnectedAt === "string"
+                ? adapter.lastConnectedAt
+                : undefined,
+            lastTestedApiKey:
+              typeof adapter.lastTestedApiKey === "string"
+                ? adapter.lastTestedApiKey
+                : undefined,
+            lastTestedModel:
+              typeof adapter.lastTestedModel === "string"
+                ? adapter.lastTestedModel
+                : undefined,
+            lastTestedEndpoint:
+              typeof adapter.lastTestedEndpoint === "string"
+                ? adapter.lastTestedEndpoint
+                : undefined,
+            streamingCapability:
+              adapter.streamingCapability === "supported" ||
+              adapter.streamingCapability === "unsupported"
+                ? adapter.streamingCapability
+                : undefined,
+            streamingCapabilityFingerprint:
+              typeof adapter.streamingCapabilityFingerprint === "string"
+                ? adapter.streamingCapabilityFingerprint
+                : undefined,
           };
           return acc;
         }, {})
@@ -1078,13 +1219,23 @@ export function normalizeSavedSettings(saved: unknown): Partial<AppSettings> {
               typeof model.lastCheckedAt === "string"
                 ? model.lastCheckedAt
                 : undefined,
-            streamingEnabled:
-              typeof model.streamingEnabled === "boolean"
-                ? model.streamingEnabled
-                : undefined,
           };
           return acc;
         }, {})
+      : undefined;
+  const legacyStreamingValues = rawLocalModels
+    ? Object.values(raw.localModels as Record<string, unknown>)
+        .map((value) =>
+          value && typeof value === "object"
+            ? (value as Record<string, unknown>).streamingEnabled
+            : undefined,
+        )
+        .filter((value): value is boolean => typeof value === "boolean")
+    : [];
+  const legacyStreamingEnabled = legacyStreamingValues.includes(false)
+    ? false
+    : legacyStreamingValues.includes(true)
+      ? true
       : undefined;
   const normalizedHotkey =
     typeof raw.hotkey === "string"
@@ -1102,6 +1253,11 @@ export function normalizeSavedSettings(saved: unknown): Partial<AppSettings> {
       typeof raw.selectedApiAdapter === "string"
         ? raw.selectedApiAdapter
         : undefined,
+    translationAdapters: rawTranslationAdapters,
+    selectedTranslationAdapter:
+      typeof raw.selectedTranslationAdapter === "string"
+        ? raw.selectedTranslationAdapter
+        : undefined,
     localModels: rawLocalModels,
     localModelsDir: "",
     transcriptionStorageDir: "",
@@ -1109,6 +1265,10 @@ export function normalizeSavedSettings(saved: unknown): Partial<AppSettings> {
       typeof raw.saveRecordingAudio === "boolean"
         ? raw.saveRecordingAudio
         : undefined,
+    realtimeTranscriptionEnabled:
+      typeof raw.realtimeTranscriptionEnabled === "boolean"
+        ? raw.realtimeTranscriptionEnabled
+        : legacyStreamingEnabled,
     whisperApiKey:
       typeof raw.whisperApiKey === "string" ? raw.whisperApiKey : undefined,
     llmApiKey: typeof raw.llmApiKey === "string" ? raw.llmApiKey : undefined,
@@ -1205,6 +1365,7 @@ export function normalizeSavedSettings(saved: unknown): Partial<AppSettings> {
 
 let _store: Awaited<ReturnType<typeof load>> | null = null;
 let _appDataLayoutMigration: Promise<void> | null = null;
+const settingsSaveQueue = createSerialTaskQueue();
 
 async function getStore() {
   if (!_store) {
@@ -1249,7 +1410,11 @@ async function migrateAppDataLayoutOnce(saved: unknown): Promise<void> {
 function getHistoryEntrySource(
   entry: HistoryEntry,
 ): NonNullable<HistoryEntry["source"]> {
-  if (entry.source === "file" || entry.source === "call") {
+  if (
+    entry.source === "file" ||
+    entry.source === "call" ||
+    entry.source === "liveTranslation"
+  ) {
     return entry.source;
   }
 
@@ -1260,9 +1425,11 @@ function estimateJsonBytes(value: unknown): number {
   return new TextEncoder().encode(JSON.stringify(value)).length;
 }
 
-function historyEntryText(entry: Pick<HistoryEntry, "cleaned" | "raw">): string {
+function historyEntryText(
+  entry: Pick<HistoryEntry, "cleaned" | "raw">,
+): string {
   const cleaned = entry.cleaned ?? "";
-  return cleaned.length > 0 ? cleaned : entry.raw ?? "";
+  return cleaned.length > 0 ? cleaned : (entry.raw ?? "");
 }
 
 export function toHistoryListEntry(entry: HistoryEntry): HistoryListEntry {
@@ -1291,7 +1458,9 @@ export function toHistoryListEntry(entry: HistoryEntry): HistoryListEntry {
   };
 }
 
-export function compactHistoryEntryForStorage(entry: HistoryEntry): HistoryEntry {
+export function compactHistoryEntryForStorage(
+  entry: HistoryEntry,
+): HistoryEntry {
   const summaries = entry.summaries?.slice(0, HISTORY_MAX_SUMMARIES_PER_ENTRY);
   const raw = entry.raw ?? "";
   const cleaned = entry.cleaned ?? "";
@@ -1308,7 +1477,9 @@ export function compactHistoryEntryForStorage(entry: HistoryEntry): HistoryEntry
   return next;
 }
 
-export function normalizeHistoryEntryFromStorage(entry: HistoryEntry): HistoryEntry {
+export function normalizeHistoryEntryFromStorage(
+  entry: HistoryEntry,
+): HistoryEntry {
   if (!entry.raw && entry.cleaned) {
     return { ...entry, raw: entry.cleaned };
   }
@@ -1334,6 +1505,7 @@ function pruneHistory(history: HistoryEntry[]): HistoryEntry[] {
   let voiceCount = 0;
   let fileCount = 0;
   let callCount = 0;
+  let liveTranslationCount = 0;
 
   for (const entry of history) {
     const source = getHistoryEntrySource(entry);
@@ -1348,6 +1520,11 @@ function pruneHistory(history: HistoryEntry[]): HistoryEntry[] {
         continue;
       }
       callCount += 1;
+    } else if (source === "liveTranslation") {
+      if (liveTranslationCount >= HISTORY_MAX_LIVE_TRANSLATION_ENTRIES) {
+        continue;
+      }
+      liveTranslationCount += 1;
     } else {
       if (voiceCount >= HISTORY_MAX_VOICE_ENTRIES) {
         continue;
@@ -1380,7 +1557,8 @@ export function pruneHistoryAudioRetention(history: HistoryEntry[]): {
   const pathsToDelete: string[] = [];
   const updated = history.map((entry) => {
     const hasVoiceAudio =
-      isVoiceHistoryEntry(entry) && Boolean(entry.audioPath || entry.audioBase64);
+      isVoiceHistoryEntry(entry) &&
+      Boolean(entry.audioPath || entry.audioBase64);
     if (!hasVoiceAudio) {
       return entry;
     }
@@ -1462,35 +1640,52 @@ export async function getSettings(
   return result;
 }
 
-export async function saveSettings(
-  settings: Partial<AppSettings>,
-): Promise<void> {
-  const store = await getStore();
-  const current = await getSettings({ reload: true });
-  const nextSettings = { ...current, ...settings };
+export type AppSettingsPatch = Omit<Partial<AppSettings>, "translation"> & {
+  translation?: Partial<TranslationSettings>;
+};
 
-  if (typeof settings.hotkey === "string") {
-    const normalized = normalizeHotkey(settings.hotkey);
-    if (!normalized.valid || !normalized.normalized) {
-      throw new Error(normalized.error || "Неверный формат горячей клавиши");
+export function mergeAppSettingsPatch(
+  current: AppSettings,
+  patch: AppSettingsPatch,
+): AppSettings {
+  return {
+    ...current,
+    ...patch,
+    translation: patch.translation
+      ? { ...current.translation, ...patch.translation }
+      : current.translation,
+  };
+}
+
+export function saveSettings(settings: AppSettingsPatch): Promise<void> {
+  return settingsSaveQueue.enqueue(async () => {
+    const store = await getStore();
+    const current = await getSettings({ reload: true });
+    const nextSettings = mergeAppSettingsPatch(current, settings);
+
+    if (typeof settings.hotkey === "string") {
+      const normalized = normalizeHotkey(settings.hotkey);
+      if (!normalized.valid || !normalized.normalized) {
+        throw new Error(normalized.error || "Неверный формат горячей клавиши");
+      }
+
+      nextSettings.hotkey = normalized.normalized;
     }
 
-    nextSettings.hotkey = normalized.normalized;
-  }
+    if (settings.widgetScale !== undefined) {
+      nextSettings.widgetScale = normalizeWidgetScale(settings.widgetScale);
+    }
 
-  if (settings.widgetScale !== undefined) {
-    nextSettings.widgetScale = normalizeWidgetScale(settings.widgetScale);
-  }
+    nextSettings.translation = normalizeTranslationSettings(
+      nextSettings.translation,
+      nextSettings.language,
+    );
+    nextSettings.localModelsDir = "";
+    nextSettings.transcriptionStorageDir = "";
 
-  nextSettings.translation = normalizeTranslationSettings(
-    nextSettings.translation,
-    nextSettings.language,
-  );
-  nextSettings.localModelsDir = "";
-  nextSettings.transcriptionStorageDir = "";
-
-  await store.set("settings", nextSettings);
-  await store.save();
+    await store.set("settings", nextSettings);
+    await store.save();
+  });
 }
 
 export function makePromptId(): string {
@@ -1638,7 +1833,9 @@ export async function getHistoryIndex(): Promise<HistoryListEntry[]> {
   return index;
 }
 
-export async function getHistoryEntry(id: string): Promise<HistoryEntry | null> {
+export async function getHistoryEntry(
+  id: string,
+): Promise<HistoryEntry | null> {
   const storageDir = await getHistoryStorageDir();
   const entry = await invoke<HistoryEntry | null>("read_history_entry_file", {
     storageDir,
@@ -1931,7 +2128,10 @@ function historyAudioPaths(entry: HistoryEntry): string[] {
     paths.push(entry.audioPath);
   }
 
-  if (entry.source === "call" && entry.callTracks?.length) {
+  if (
+    (entry.source === "call" || entry.source === "liveTranslation") &&
+    entry.callTracks?.length
+  ) {
     for (const track of entry.callTracks) {
       if (track.path) {
         paths.push(track.path);
@@ -1952,8 +2152,9 @@ async function deleteHistoryAudioForEntry(entry?: HistoryEntry): Promise<void> {
 
 const PERMISSIONS_PASSED_KEY = "permissions_passed";
 const PERMISSIONS_VERSION_KEY = "permissions_version";
-const SYSTEM_AUDIO_PERMISSION_PASSED_KEY = "system_audio_permission_passed";
 const CURRENT_PERMISSIONS_VERSION = 3;
+const SYSTEM_AUDIO_PERMISSION_VERIFIED_V2_KEY =
+  "system_audio_permission_verified_v2";
 const WIDGET_POSITION_KEY = "widget_position";
 
 export async function getPermissionsPassed(): Promise<boolean> {
@@ -1973,18 +2174,18 @@ export async function setPermissionsPassed(value: boolean): Promise<void> {
   await store.save();
 }
 
-export async function getSystemAudioPermissionPassed(): Promise<boolean> {
+export async function getSystemAudioPermissionVerifiedV2(): Promise<boolean> {
   const store = await getStore();
   return (
-    (await store.get<boolean>(SYSTEM_AUDIO_PERMISSION_PASSED_KEY)) ?? false
+    (await store.get<boolean>(SYSTEM_AUDIO_PERMISSION_VERIFIED_V2_KEY)) ?? false
   );
 }
 
-export async function setSystemAudioPermissionPassed(
+export async function setSystemAudioPermissionVerifiedV2(
   value: boolean,
 ): Promise<void> {
   const store = await getStore();
-  await store.set(SYSTEM_AUDIO_PERMISSION_PASSED_KEY, value);
+  await store.set(SYSTEM_AUDIO_PERMISSION_VERIFIED_V2_KEY, value);
   await store.save();
 }
 

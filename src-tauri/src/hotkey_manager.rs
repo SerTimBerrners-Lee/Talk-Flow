@@ -146,12 +146,17 @@ pub fn unregister_handy_hotkey(app: AppHandle, hotkey: Option<String>) -> Result
 fn run_hotkey_thread(app: AppHandle, command_receiver: Receiver<HotkeyCommand>) {
     logger::log_info("HOTKEY", "Starting handy-keys manager thread");
 
-    let manager_result = HotkeyManager::new_with_blocking()
-        .map_err(|err| format!("Не удалось запустить handy-keys: {}", err));
+    let mut manager = match create_hotkey_manager() {
+        Ok(manager) => Some(manager),
+        Err(error) => {
+            logger::log_error("HOTKEY", &error);
+            None
+        }
+    };
     let mut active_hotkeys = ActiveHotkeys::default();
 
     loop {
-        if let Ok(manager) = manager_result.as_ref() {
+        if let Some(manager) = manager.as_ref() {
             while let Some(event) = manager.try_recv() {
                 let Some(active) = active_hotkeys.get_by_id(event.id) else {
                     continue;
@@ -175,9 +180,28 @@ fn run_hotkey_thread(app: AppHandle, command_receiver: Receiver<HotkeyCommand>) 
                     break;
                 }
 
-                let result = match manager_result.as_ref() {
-                    Ok(manager) => handle_command(manager, command, &mut active_hotkeys),
-                    Err(err) => reply_manager_error(command, err),
+                if manager.is_none() {
+                    match create_hotkey_manager() {
+                        Ok(next_manager) => {
+                            logger::log_info(
+                                "HOTKEY",
+                                "handy-keys manager recovered after permission change",
+                            );
+                            manager = Some(next_manager);
+                        }
+                        Err(error) => {
+                            let result = reply_manager_error(command, &error);
+                            if let Err(error) = result {
+                                logger::log_error("HOTKEY", &error);
+                            }
+                            continue;
+                        }
+                    }
+                }
+
+                let result = match manager.as_ref() {
+                    Some(manager) => handle_command(manager, command, &mut active_hotkeys),
+                    None => unreachable!("manager was initialized above"),
                 };
 
                 if let Err(err) = result {
@@ -190,6 +214,11 @@ fn run_hotkey_thread(app: AppHandle, command_receiver: Receiver<HotkeyCommand>) 
     }
 
     logger::log_info("HOTKEY", "Stopped handy-keys manager thread");
+}
+
+fn create_hotkey_manager() -> Result<HotkeyManager, String> {
+    HotkeyManager::new_with_blocking()
+        .map_err(|err| format!("Не удалось запустить handy-keys: {}", err))
 }
 
 fn handle_command(

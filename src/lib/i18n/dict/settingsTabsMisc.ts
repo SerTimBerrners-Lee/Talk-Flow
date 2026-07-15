@@ -184,6 +184,11 @@ export const settingsTabsMisc = {
   // ---- TranslationTab ----
   "translation.loading": { ru: "Загружаем переводчик…", en: "Loading translator…" },
   "translation.title": { ru: "Переводчик", en: "Translator" },
+  "translation.view.live": {
+    ru: "Синхронный перевод (Облако/API)",
+    en: "Live translation (Cloud/API)",
+  },
+  "translation.view.other": { ru: "Остальное", en: "Other" },
   "translation.source.title": { ru: "Распознавать с", en: "Recognize from" },
   "translation.source.desc": {
     ru: "Источник берется из основного языка распознавания в настройках.",
@@ -198,13 +203,64 @@ export const settingsTabsMisc = {
     ru: "Перевод через транскрибацию",
     en: "Translation through transcription",
   },
-  "translation.widget.title": { ru: "Показывать кнопку в виджете", en: "Show button in widget" },
+  "translation.widget.title": { ru: "Включить перевод", en: "Enable translation" },
   "translation.widget.desc": {
-    ru: "Кнопка в виджете включает и выключает активный перевод диктовки.",
-    en: "The widget button turns active dictation translation on and off.",
+    ru: "Переводит обычную диктовку после распознавания и перед вставкой.",
+    en: "Translates ordinary dictation after recognition and before paste.",
   },
-  "translation.widget.on": { ru: "Показывать", en: "Show" },
-  "translation.widget.off": { ru: "Не показывать", en: "Hide" },
+  "translation.widget.on": { ru: "Включён", en: "On" },
+  "translation.widget.off": { ru: "Выключен", en: "Off" },
+  "translation.live.title": {
+    ru: "Синхронный перевод",
+    en: "Synchronous translation",
+  },
+  "translation.live.target": {
+    ru: "Язык перевода",
+    en: "Translation language",
+  },
+  "translation.live.widget": {
+    ru: "Кнопка над виджетом",
+    en: "Widget button",
+  },
+  "translation.live.microphone": {
+    ru: "Переводить микрофон",
+    en: "Translate microphone",
+  },
+  "translation.live.voice": {
+    ru: "Озвучивать перевод",
+    en: "Speak translation",
+  },
+  "translation.live.voiceName": { ru: "Голос", en: "Voice" },
+  "translation.live.volume": { ru: "Громкость", en: "Volume" },
+  "translation.live.speed": { ru: "Скорость речи", en: "Speech speed" },
+  "translation.live.muteOriginal": {
+    ru: "Приглушать оригинал",
+    en: "Duck original audio",
+  },
+  "translation.live.muteOriginalDesc": {
+    ru: "Оригинальный звук остаётся слышен тихо, а Talkis получает его на полной громкости для распознавания.",
+    en: "The original audio remains quietly audible while Talkis captures it at full level for recognition.",
+  },
+  "translation.live.voice.marin": { ru: "Marin", en: "Marin" },
+  "translation.live.voice.cedar": { ru: "Cedar", en: "Cedar" },
+  "translation.live.voice.coral": { ru: "Coral", en: "Coral" },
+  "translation.live.voice.verse": { ru: "Verse", en: "Verse" },
+  "translation.live.voiceDesc": {
+    ru: "Перевод воспроизводится сразу короткими фрагментами. Talkis исключает собственный звук из захвата, чтобы не возникал повторный перевод.",
+    en: "Translation is played immediately in short chunks. Talkis excludes its own audio from capture to prevent a translation feedback loop.",
+  },
+  "translation.live.voiceOpenAiOnly": {
+    ru: "Озвучка доступна в облаке Talkis или через проверенное подключение OpenAI Realtime.",
+    en: "Voice playback is available through Talkis Cloud or a verified OpenAI Realtime connection.",
+  },
+  "translation.live.voiceMacOnly": {
+    ru: "Озвучка сейчас доступна на macOS. Для Windows и Linux нужна безопасная защита от повторного захвата звука Talkis.",
+    en: "Voice playback is currently available on macOS. Windows and Linux still need safe Talkis self-audio exclusion.",
+  },
+  "translation.live.desc": {
+    ru: "Системный звук переводится напрямую через облачную Realtime-модель или подключённый API. Локальные модели остаются доступны для обычной диктовки и перевода выделенного текста.",
+    en: "System audio is translated through a cloud Realtime model or connected API. Local models remain available for ordinary dictation and selected-text translation.",
+  },
   "translation.selection.title": {
     ru: "Перевод выделенного текста",
     en: "Selected text translation",

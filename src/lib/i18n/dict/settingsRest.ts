@@ -4,8 +4,16 @@ export const settingsRest = {
   "mainTab.filter.voice": { ru: "Голос", en: "Voice" },
   "mainTab.filter.file": { ru: "Файл", en: "File" },
   "mainTab.filter.call": { ru: "Созвон", en: "Call" },
+  "mainTab.filter.liveTranslation": {
+    ru: "Синхронный перевод",
+    en: "Live translation",
+  },
   "mainTab.source.file": { ru: "Файл", en: "File" },
   "mainTab.source.call": { ru: "Созвон", en: "Call" },
+  "mainTab.source.liveTranslation": {
+    ru: "Синхронный перевод",
+    en: "Live translation",
+  },
   "mainTab.source.voice": { ru: "Голос", en: "Voice" },
   "mainTab.speakerNameAria": { ru: "Имя {name}", en: "Name {name}" },
   "mainTab.collapse": { ru: "Скрыть", en: "Collapse" },

@@ -3,7 +3,10 @@ export const components = {
   // ── PermissionScreen ──────────────────────────────────────
   // PermissionRow status badges (not granted yet)
   "permission.badge.check": { ru: "Проверьте", en: "Check" },
-  "permission.badge.actionNeeded": { ru: "Нужно действие", en: "Action needed" },
+  "permission.badge.actionNeeded": {
+    ru: "Нужно действие",
+    en: "Action needed",
+  },
   "permission.badge.notGranted": { ru: "Не выдано", en: "Not granted" },
 
   // PermissionRow action button
@@ -30,7 +33,10 @@ export const components = {
   },
 
   // Paste / accessibility permission row
-  "permission.paste.titleAccessibility": { ru: "Универсальный доступ", en: "Accessibility" },
+  "permission.paste.titleAccessibility": {
+    ru: "Универсальный доступ",
+    en: "Accessibility",
+  },
   "permission.paste.titlePaste": { ru: "Вставка текста", en: "Text insertion" },
   "permission.paste.descAccessibility": {
     ru: "Нужен для глобальной горячей клавиши и вставки текста.",
@@ -54,7 +60,10 @@ export const components = {
   },
 
   // Header
-  "permission.header.title": { ru: "Доступы для Talkis", en: "Permissions for Talkis" },
+  "permission.header.title": {
+    ru: "Доступы для Talkis",
+    en: "Permissions for Talkis",
+  },
   "permission.header.subtitle": {
     ru: "Осталось выдать системные разрешения для записи голоса, звука созвона и работы горячей клавиши.",
     en: "Just grant the system permissions for recording your voice, call audio and the hotkey.",
@@ -84,8 +93,8 @@ export const components = {
     en: "Needed to capture call audio together with the microphone.",
   },
   "permission.systemAudio.help": {
-    ru: "После нажатия macOS может попросить разрешить Talkis запись системного аудио.",
-    en: "After clicking, macOS may ask you to allow Talkis to record system audio.",
+    ru: "Кнопка запускает короткую проверку захвата. Если доступа ещё нет, macOS предложит разрешить Talkis запись системного аудио.",
+    en: "The button runs a short capture check. If access is missing, macOS will ask you to allow Talkis to record system audio.",
   },
 
   // Hint block
@@ -101,13 +110,24 @@ export const components = {
     ru: "macOS применяет доступ не мгновенно. После изменения настройки вернитесь в приложение.",
     en: "macOS does not apply access instantly. After changing the setting, return to the app.",
   },
+  "permission.hint.restartAccessibility": {
+    ru: "Talkis пока не видит выданный Универсальный доступ. Перезапустите приложение: после запуска проверка продолжится автоматически с этого шага.",
+    en: "Talkis still cannot see the Accessibility permission. Restart the app; after launch, the check will automatically continue from this step.",
+  },
+  "permission.hint.restartFailed": {
+    ru: "Не удалось перезапустить Talkis автоматически. Закройте и снова откройте приложение вручную.",
+    en: "Talkis could not restart automatically. Close and reopen the app manually.",
+  },
 
   // Footer status line
   "permission.footer.launchFromApplications": {
     ru: "Сначала запустите из Applications.",
     en: "Launch from Applications first.",
   },
-  "permission.footer.allGranted": { ru: "Все доступы выданы.", en: "All permissions granted." },
+  "permission.footer.allGranted": {
+    ru: "Все доступы выданы.",
+    en: "All permissions granted.",
+  },
   "permission.footer.grantToContinue": {
     ru: "Выдайте разрешения для продолжения.",
     en: "Grant the permissions to continue.",
@@ -124,6 +144,14 @@ export const components = {
   // Footer button
   "permission.button.continue": { ru: "Продолжить", en: "Continue" },
   "permission.button.check": { ru: "Проверить", en: "Check" },
+  "permission.button.restartAndCheck": {
+    ru: "Перезапустить и проверить",
+    en: "Restart and check",
+  },
+  "permission.button.restarting": {
+    ru: "Перезапуск…",
+    en: "Restarting…",
+  },
 
   // ── TranscriptionStatsPanel ───────────────────────────────
   "stats.suffix.thousand": { ru: "к", en: "k" },
@@ -138,12 +166,27 @@ export const components = {
   "titleBar.maximize": { ru: "Развернуть", en: "Maximize" },
 
   // ── UserPanel ─────────────────────────────────────────────
-  "userPanel.subscriptionActive": { ru: "Подписка активна", en: "Subscription active" },
+  "userPanel.subscriptionActive": {
+    ru: "Подписка активна",
+    en: "Subscription active",
+  },
   "userPanel.upgradeToPro": { ru: "Перейти на PRO", en: "Upgrade to PRO" },
   "userPanel.logout": { ru: "Выйти", en: "Log out" },
   "userPanel.cta.title": { ru: "Активируйте Talkis", en: "Activate Talkis" },
-  "userPanel.cta.feature.unlimited": { ru: "Безлимитное использование", en: "Unlimited usage" },
-  "userPanel.cta.feature.noVpn": { ru: "Без VPN и Прокси", en: "No VPN or proxy" },
-  "userPanel.cta.feature.deviceSync": { ru: "Синхронизация устройств", en: "Device sync" },
-  "userPanel.cta.feature.freeTrial": { ru: "7 дней бесплатно", en: "7 days free" },
+  "userPanel.cta.feature.unlimited": {
+    ru: "Безлимитное использование",
+    en: "Unlimited usage",
+  },
+  "userPanel.cta.feature.noVpn": {
+    ru: "Без VPN и Прокси",
+    en: "No VPN or proxy",
+  },
+  "userPanel.cta.feature.deviceSync": {
+    ru: "Синхронизация устройств",
+    en: "Device sync",
+  },
+  "userPanel.cta.feature.freeTrial": {
+    ru: "7 дней бесплатно",
+    en: "7 days free",
+  },
 } as const;

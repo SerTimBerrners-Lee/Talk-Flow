@@ -1,7 +1,7 @@
 {
   "name": "talkis",
   "private": true,
-  "version": "0.3.12",
+  "version": "0.3.13",
   "license": "AGPL-3.0-or-later",
   "type": "module",
   "packageManager": "bun@1.2.13",
@@ -22,7 +22,7 @@
     "build:release:windows": "bun scripts/build-release.mjs windows",
     "build:release:linux": "bun scripts/build-release.mjs linux",
     "preview": "bun scripts/run-vite.mjs preview",
-    "tauri": "tauri",
+    "tauri": "bun scripts/run-tauri.mjs",
     "logs": "tail -f ~/.talkis/talkis.log",
     "logs:clear": "rm -f ~/.talkis/talkis.log"
   },

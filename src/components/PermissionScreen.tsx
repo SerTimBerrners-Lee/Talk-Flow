@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openPath } from "@tauri-apps/plugin-opener";
-import { IconMicrophone, IconKeyboard, IconCheck, IconAlertCircle, IconVolume } from "../lib/icons";
+import { relaunch } from "@tauri-apps/plugin-process";
+import {
+  IconMicrophone,
+  IconKeyboard,
+  IconCheck,
+  IconAlertCircle,
+  IconVolume,
+} from "../lib/icons";
 import {
   PermissionStatus,
   checkAccessibilityPermission,
@@ -11,12 +18,12 @@ import {
   requestSystemAudioPermission,
 } from "../lib/permissions";
 import { getSettings } from "../lib/store";
-import { logError } from "../lib/logger";
+import { logError, logInfo } from "../lib/logger";
 import { useI18n } from "../lib/i18n";
 import { scaleWidgetDimension } from "../lib/widgetScale";
 import {
-  CALL_STACK_WIDGET_HEIGHT,
-  CALL_STACK_WIDGET_WIDTH,
+  widgetStackHeight,
+  widgetStackWidth,
 } from "../windows/widget/widgetConstants";
 
 interface PermissionRowProps {
@@ -25,6 +32,8 @@ interface PermissionRowProps {
   description: string;
   status: PermissionStatus;
   onAction: () => void;
+  actionLabel?: string;
+  actionDisabled?: boolean;
   helpText?: string;
 }
 
@@ -34,6 +43,8 @@ function PermissionRow({
   description,
   status,
   onAction,
+  actionLabel,
+  actionDisabled = false,
   helpText,
 }: PermissionRowProps) {
   const { t } = useI18n();
@@ -107,6 +118,7 @@ function PermissionRow({
           {!isGranted && (
             <button
               onClick={onAction}
+              disabled={actionDisabled}
               style={{
                 padding: "8px 16px",
                 borderRadius: 8,
@@ -114,7 +126,7 @@ function PermissionRow({
                 fontWeight: 700,
                 textTransform: "uppercase",
                 letterSpacing: "0.06em",
-                cursor: "pointer",
+                cursor: actionDisabled ? "wait" : "pointer",
                 border: "none",
                 background: isPrompting
                   ? "var(--control-muted)"
@@ -124,9 +136,15 @@ function PermissionRow({
                   : "var(--accent-contrast)",
                 fontFamily: "var(--font)",
                 transition: "opacity 0.15s",
+                opacity: actionDisabled ? 0.65 : 1,
               }}
             >
-              {isPrompting ? t("permission.action.check") : isDenied ? t("permission.action.retry") : t("permission.action.allow")}
+              {actionLabel ??
+                (isPrompting
+                  ? t("permission.action.check")
+                  : isDenied
+                    ? t("permission.action.retry")
+                    : t("permission.action.allow"))}
             </button>
           )}
         </div>
@@ -207,9 +225,18 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
   const [systemAudioStatus, setSystemAudioStatus] =
     useState<PermissionStatus>("unknown");
   const [runtimeInfo, setRuntimeInfo] = useState<AppRuntimeInfo | null>(null);
+  const [accessibilityRestartSuggested, setAccessibilityRestartSuggested] =
+    useState(false);
+  const [restarting, setRestarting] = useState(false);
+  const [restartError, setRestartError] = useState<string | null>(null);
 
   const refreshAccessibilityStatus = useCallback(async () => {
     const nextStatus = await checkAccessibilityPermission();
+
+    if (nextStatus === "granted") {
+      setAccessibilityRestartSuggested(false);
+      setRestartError(null);
+    }
 
     setAccStatus((current) => {
       if (nextStatus === "granted") {
@@ -287,7 +314,10 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
 
   const handleAccessibilityRequest = async () => {
     if (accStatus === "prompting") {
-      await refreshAccessibilityStatus();
+      const nextStatus = await refreshAccessibilityStatus();
+      if (nextStatus !== "granted" && requiresAccessibility) {
+        setAccessibilityRestartSuggested(true);
+      }
       return;
     }
 
@@ -308,6 +338,26 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
     }
   };
 
+  const handleRestartAndCheck = async (): Promise<void> => {
+    if (restarting) return;
+
+    setRestarting(true);
+    setRestartError(null);
+    void logInfo(
+      "PERMISSIONS",
+      "Restarting Talkis to refresh Accessibility permission",
+    );
+
+    try {
+      await relaunch();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      void logError("PERMISSIONS", `Failed to restart Talkis: ${message}`);
+      setRestartError(t("permission.hint.restartFailed"));
+      setRestarting(false);
+    }
+  };
+
   const handleSystemAudioRequest = async () => {
     if (!requiresSystemAudio) {
       setSystemAudioStatus("granted");
@@ -315,13 +365,22 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
     }
 
     setSystemAudioStatus("prompting");
-    const granted = await requestSystemAudioPermission();
-    setSystemAudioStatus(granted ? "granted" : "denied");
+    try {
+      await requestSystemAudioPermission();
+      setSystemAudioStatus("granted");
+    } catch {
+      setSystemAudioStatus("denied");
+    }
   };
 
   const handleContinue = async () => {
     if (shouldShowInstallWarning) {
       await openPath("/Applications");
+      return;
+    }
+
+    if (accessibilityRestartSuggested) {
+      await handleRestartAndCheck();
       return;
     }
 
@@ -333,14 +392,21 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
       (requiresAccessibility && nextAccStatus !== "granted") ||
       (requiresSystemAudio && nextSystemAudioStatus !== "granted")
     ) {
+      if (
+        requiresAccessibility &&
+        accStatus === "prompting" &&
+        nextAccStatus !== "granted"
+      ) {
+        setAccessibilityRestartSuggested(true);
+      }
       return;
     }
 
     const settings = await getSettings({ reload: true }).catch(() => null);
     const widgetScale = settings?.widgetScale ?? 1;
     await invoke("widget_resize", {
-      width: scaleWidgetDimension(CALL_STACK_WIDGET_WIDTH, widgetScale),
-      height: scaleWidgetDimension(CALL_STACK_WIDGET_HEIGHT, widgetScale),
+      width: scaleWidgetDimension(widgetStackWidth(false), widgetScale),
+      height: scaleWidgetDimension(widgetStackHeight(false), widgetScale),
       growthOffsetRatio: 0,
     });
     onComplete();
@@ -363,7 +429,9 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
       ? t("permission.paste.descLinux")
       : t("permission.paste.descDefault");
   const pastePermissionHelpText = shouldShowInstallWarning
-    ? t("permission.paste.helpNotInApplications", { path: runtimeInfo?.bundlePath ?? "-" })
+    ? t("permission.paste.helpNotInApplications", {
+        path: runtimeInfo?.bundlePath ?? "-",
+      })
     : platform === "linux"
       ? t("permission.paste.helpLinux")
       : undefined;
@@ -498,6 +566,7 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
                 description={t("permission.systemAudio.desc")}
                 status={systemAudioStatus}
                 onAction={handleSystemAudioRequest}
+                actionLabel={t("permission.action.check")}
                 helpText={t("permission.systemAudio.help")}
               />
             )}
@@ -519,14 +588,28 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
                   return;
                 }
 
+                if (accessibilityRestartSuggested) {
+                  void handleRestartAndCheck();
+                  return;
+                }
+
                 void handleAccessibilityRequest();
               }}
+              actionLabel={
+                accessibilityRestartSuggested
+                  ? restarting
+                    ? t("permission.button.restarting")
+                    : t("permission.button.restartAndCheck")
+                  : undefined
+              }
+              actionDisabled={restarting}
               helpText={pastePermissionHelpText}
             />
           </div>
 
           {/* Hint */}
           {(accStatus === "prompting" ||
+            accessibilityRestartSuggested ||
             micStatus === "denied" ||
             systemAudioStatus === "denied") && (
             <div
@@ -555,13 +638,16 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
                   lineHeight: 1.6,
                 }}
               >
-                {micStatus === "denied"
-                  ? microphoneHelpText(platform, t)
-                  : systemAudioStatus === "denied"
-                    ? t("permission.hint.systemAudioDenied")
-                    : shouldShowInstallWarning
-                      ? t("permission.hint.reopenAfterMove")
-                      : t("permission.hint.macosDelay")}
+                {restartError ??
+                  (micStatus === "denied"
+                    ? microphoneHelpText(platform, t)
+                    : systemAudioStatus === "denied"
+                      ? t("permission.hint.systemAudioDenied")
+                      : accessibilityRestartSuggested
+                        ? t("permission.hint.restartAccessibility")
+                        : shouldShowInstallWarning
+                          ? t("permission.hint.reopenAfterMove")
+                          : t("permission.hint.macosDelay"))}
               </div>
             </div>
           )}
@@ -594,6 +680,7 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
             </div>
             <button
               onClick={handleContinue}
+              disabled={restarting}
               style={{
                 padding: "10px 20px",
                 borderRadius: 10,
@@ -601,7 +688,7 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
                 fontWeight: 700,
                 textTransform: "uppercase",
                 letterSpacing: "0.06em",
-                cursor: "pointer",
+                cursor: restarting ? "wait" : "pointer",
                 border: "none",
                 background: canCompleteOnboarding
                   ? "var(--accent)"
@@ -612,13 +699,18 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
                 fontFamily: "var(--font)",
                 transition: "opacity 0.15s",
                 minWidth: 140,
+                opacity: restarting ? 0.65 : 1,
               }}
             >
-              {canCompleteOnboarding
-                ? t("permission.button.continue")
-                : shouldShowInstallWarning
-                  ? "Applications"
-                  : t("permission.button.check")}
+              {accessibilityRestartSuggested
+                ? restarting
+                  ? t("permission.button.restarting")
+                  : t("permission.button.restartAndCheck")
+                : canCompleteOnboarding
+                  ? t("permission.button.continue")
+                  : shouldShowInstallWarning
+                    ? "Applications"
+                    : t("permission.button.check")}
             </button>
           </div>
         </div>

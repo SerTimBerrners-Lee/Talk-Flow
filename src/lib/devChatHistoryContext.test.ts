@@ -73,11 +73,15 @@ describe("dev chat history context", () => {
   });
 
   it("filters records by recent week metadata", () => {
+    const recent = new Date();
+    recent.setDate(recent.getDate() - 2);
+    const old = new Date();
+    old.setDate(old.getDate() - 10);
     const result = buildDevChatHistoryContext(
       "сколько записей за неделю?",
       [
-        historyEntry("recent", "2026-07-04T10:00:00.000Z", "Свежая запись"),
-        historyEntry("old", "2026-06-01T10:00:00.000Z", "Старая запись"),
+        historyEntry("recent", recent.toISOString(), "Свежая запись"),
+        historyEntry("old", old.toISOString(), "Старая запись"),
       ],
       "ru",
     );

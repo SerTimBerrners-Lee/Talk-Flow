@@ -11,7 +11,7 @@ import { logError } from "../lib/logger";
 import { readHistoryAudio, type HistoryEntry } from "../lib/store";
 import { useI18n } from "../lib/i18n";
 
-interface AudioTrackSource {
+export interface AudioTrackSource {
   id: string;
   label: string;
   path?: string;
@@ -54,8 +54,150 @@ function formatAudioTime(value: number): string {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
-function buildTrackSources(entry: HistoryEntry): AudioTrackSource[] {
-  if (entry.source === "call" && entry.callTracks?.length) {
+function AudioTrackControls({
+  loading,
+  playing,
+  error,
+  currentTime,
+  duration,
+  onTogglePlayback,
+  onSeek,
+}: {
+  loading: boolean;
+  playing: boolean;
+  error: boolean;
+  currentTime: number;
+  duration: number;
+  onTogglePlayback: () => void;
+  onSeek?: (time: number) => void;
+}): ReactElement {
+  const { t } = useI18n();
+  const canSeek = duration > 0 && Boolean(onSeek);
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "28px minmax(160px, 420px)",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 8,
+        minWidth: 0,
+        width: "100%",
+      }}
+    >
+      <button
+        type="button"
+        className="btn"
+        onClick={onTogglePlayback}
+        style={{
+          width: 28,
+          minWidth: 28,
+          height: 28,
+          minHeight: 28,
+          padding: 0,
+          borderRadius: 8,
+        }}
+        title={playing ? t("mainTab.audioPause") : t("mainTab.audioPlay")}
+        aria-label={playing ? t("mainTab.audioPause") : t("mainTab.audioPlay")}
+      >
+        {loading ? (
+          <IconLoader2 className="loading-soft-icon" size={12} stroke={2} />
+        ) : playing ? (
+          <IconPause size={12} stroke={2.4} />
+        ) : (
+          <IconPlayerPlay size={12} stroke={2.4} />
+        )}
+      </button>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "max-content minmax(0, 1fr) max-content",
+          alignItems: "center",
+          gap: 8,
+          minWidth: 0,
+          height: 28,
+        }}
+      >
+        <span
+          style={{
+            color: "var(--text-low)",
+            fontSize: 10,
+            fontVariantNumeric: "tabular-nums",
+            lineHeight: 1,
+          }}
+        >
+          {formatAudioTime(currentTime)}
+        </span>
+        <input
+          type="range"
+          min={0}
+          max={duration > 0 ? duration : 1}
+          step={0.1}
+          value={duration > 0 ? Math.min(currentTime, duration) : 0}
+          onChange={(event) => {
+            if (!onSeek) return;
+            onSeek(Number(event.currentTarget.value));
+          }}
+          disabled={!canSeek}
+          aria-label={t("mainTab.audioProgress")}
+          style={{
+            width: "100%",
+            accentColor: "var(--accent)",
+            cursor: canSeek ? "pointer" : "default",
+            display: "block",
+            opacity: 1,
+          }}
+        />
+        <span
+          style={{
+            color: error ? "var(--danger)" : "var(--text-low)",
+            fontSize: 10,
+            fontVariantNumeric: "tabular-nums",
+            lineHeight: 1,
+            minWidth: 0,
+            maxWidth: 94,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {error ? t("mainTab.audioLoadFailed") : formatAudioTime(duration)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+export function HistoryAudioTrackPlaceholder({
+  loading,
+  onLoadRequested,
+}: {
+  loading: boolean;
+  onLoadRequested: () => void;
+}): ReactElement {
+  return (
+    <div style={{ display: "grid", gap: 6, minWidth: 0, width: "100%" }}>
+      <AudioTrackControls
+        loading={loading}
+        playing={false}
+        error={false}
+        currentTime={0}
+        duration={0}
+        onTogglePlayback={onLoadRequested}
+      />
+    </div>
+  );
+}
+
+export function buildHistoryAudioTrackSources(
+  entry: HistoryEntry,
+): AudioTrackSource[] {
+  if (
+    (entry.source === "call" || entry.source === "liveTranslation") &&
+    entry.callTracks?.length
+  ) {
     const tracks = [...entry.callTracks].sort((a, b) => {
       if (a.kind === b.kind) return 0;
       return a.kind === "system" ? -1 : 1;
@@ -102,7 +244,6 @@ export function HistoryAudioTrack({
   activeAudioId,
   onActiveAudioChange,
 }: HistoryAudioTrackProps): ReactElement | null {
-  const { t } = useI18n();
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const objectUrlRef = useRef<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -111,7 +252,7 @@ export function HistoryAudioTrack({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
 
-  const sources = useMemo(() => buildTrackSources(entry), [entry]);
+  const sources = useMemo(() => buildHistoryAudioTrackSources(entry), [entry]);
   const selectedSource = sources[0] ?? null;
   const ownAudioId = selectedSource ? `${entry.id}:${selectedSource.id}` : null;
 
@@ -240,102 +381,22 @@ export function HistoryAudioTrack({
         width: "100%",
       }}
     >
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "28px minmax(160px, 420px)",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 8,
-          minWidth: 0,
-          width: "100%",
+      <AudioTrackControls
+        loading={loading}
+        playing={playing}
+        error={error}
+        currentTime={currentTime}
+        duration={duration}
+        onTogglePlayback={() => {
+          void togglePlayback();
         }}
-      >
-        <button
-          type="button"
-          className="btn"
-          onClick={() => {
-            void togglePlayback();
-          }}
-          style={{
-            width: 28,
-            minWidth: 28,
-            height: 28,
-            minHeight: 28,
-            padding: 0,
-            borderRadius: 8,
-          }}
-          title={playing ? t("mainTab.audioPause") : t("mainTab.audioPlay")}
-          aria-label={playing ? t("mainTab.audioPause") : t("mainTab.audioPlay")}
-        >
-          {loading ? (
-            <IconLoader2 className="loading-soft-icon" size={12} stroke={2} />
-          ) : playing ? (
-            <IconPause size={12} stroke={2.4} />
-          ) : (
-            <IconPlayerPlay size={12} stroke={2.4} />
-          )}
-        </button>
-
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "max-content minmax(0, 1fr) max-content",
-            alignItems: "center",
-            gap: 8,
-            minWidth: 0,
-            height: 28,
-          }}
-        >
-          <span
-            style={{
-              color: "var(--text-low)",
-              fontSize: 10,
-              fontVariantNumeric: "tabular-nums",
-              lineHeight: 1,
-            }}
-          >
-            {formatAudioTime(currentTime)}
-          </span>
-          <input
-            type="range"
-            min={0}
-            max={duration || 0}
-            step={0.1}
-            value={duration ? Math.min(currentTime, duration) : 0}
-            onChange={(event) => {
-              const audio = audioRef.current;
-              if (!audio) return;
-              const nextTime = Number(event.currentTarget.value);
-              audio.currentTime = nextTime;
-              setCurrentTime(nextTime);
-            }}
-            disabled={!duration}
-            aria-label={t("mainTab.audioProgress")}
-            style={{
-              width: "100%",
-              accentColor: "var(--accent)",
-              cursor: duration ? "pointer" : "default",
-              display: "block",
-            }}
-          />
-          <span
-            style={{
-              color: error ? "var(--danger)" : "var(--text-low)",
-              fontSize: 10,
-              fontVariantNumeric: "tabular-nums",
-              lineHeight: 1,
-              minWidth: 0,
-              maxWidth: 94,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {error ? t("mainTab.audioLoadFailed") : formatAudioTime(duration)}
-          </span>
-        </div>
-      </div>
+        onSeek={(nextTime) => {
+          const audio = audioRef.current;
+          if (!audio) return;
+          audio.currentTime = nextTime;
+          setCurrentTime(nextTime);
+        }}
+      />
 
       <audio
         ref={audioRef}

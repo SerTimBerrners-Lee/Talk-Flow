@@ -11,6 +11,7 @@ import {
   IconCpu,
   IconLoader2,
   IconMessage,
+  IconLanguage,
   IconSparkles,
   IconAdjustmentsHorizontal,
   Icon,
@@ -21,6 +22,7 @@ import { FileTranscriptionTab } from "./tabs/FileTranscriptionTab";
 import { SettingsTab } from "./tabs/SettingsTab";
 import { SettingsTabs } from "./tabs/SettingsTabs";
 import { DevChatTab } from "./tabs/DevChatTab";
+import { TranslationTab } from "./tabs/TranslationTab";
 import { PermissionScreen } from "../../components/PermissionScreen";
 import {
   SETTINGS_NAVIGATE_EVENT,
@@ -52,7 +54,7 @@ import { useI18n, type MsgKey } from "../../lib/i18n";
 
 type Tab = "main" | "file" | "interpreter" | "chat" | "settings" | "model" | "style";
 
-const SHOW_INTERPRETER_TAB = false;
+const SHOW_INTERPRETER_TAB = true;
 const SHOW_DEV_CHAT_TAB = import.meta.env.DEV;
 
 function isVisibleTab(tab: Tab): boolean {
@@ -74,9 +76,7 @@ function resolveInitialTab(): Tab {
     return isVisibleTab(requestedTab) ? requestedTab : "main";
   }
 
-  if (requestedTab === "interpreter") {
-    return "settings";
-  }
+  if (requestedTab === "interpreter") return "interpreter";
 
   return "main";
 }
@@ -100,6 +100,12 @@ const TABS: { id: Tab; labelKey: MsgKey; icon: Icon; note: string }[] = [
     labelKey: "settingsApp.tab.model",
     icon: IconCpu,
     note: "Ключи и подключение модели",
+  },
+  {
+    id: "interpreter",
+    labelKey: "settingsApp.tab.interpreter",
+    icon: IconLanguage,
+    note: "Перевод диктовки, выделения и живой речи",
   },
   { id: "style", labelKey: "settingsApp.tab.style", icon: IconSparkles, note: "Стиль обработки и Промпты для саммари" },
   {
@@ -447,12 +453,7 @@ export function SettingsApp() {
     const unlisten = listen<SettingsNavigatePayload>(
       SETTINGS_NAVIGATE_EVENT,
       ({ payload }) => {
-        const nextTab =
-          payload.tab === "interpreter"
-            ? "settings"
-            : isVisibleTab(payload.tab)
-              ? payload.tab
-              : "main";
+        const nextTab = isVisibleTab(payload.tab) ? payload.tab : "main";
         setActiveTab(nextTab);
         setFocusedFileResultId(
           nextTab === "file" ? payload.resultId || null : null,
@@ -492,6 +493,7 @@ export function SettingsApp() {
   const handlePermissionsComplete = async () => {
     await setPermissionsPassed(true);
     setShowPermissions(false);
+    await emit(SETTINGS_UPDATED_EVENT);
   };
 
   const openHistoryEntryFromChat = (entryId: string): void => {
@@ -651,6 +653,7 @@ export function SettingsApp() {
                 </div>
                 {activeTab === "model" && <SettingsTabs type="model" />}
                 {activeTab === "style" && <SettingsTabs type="style" />}
+                {activeTab === "interpreter" && <TranslationTab />}
               </div>
             </div>
           </main>
