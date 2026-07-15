@@ -16,7 +16,7 @@
   - Reworks dictation and selected-text hotkeys into one transactional capture and runtime registration path with conflict checks, rollback, and stale-request protection.
   - Adds macOS, Windows, and Linux system-audio capture for call transcription and stores live-translation sessions and audio tracks in local history.
   - Improves the floating widget, text overlay, permission recovery, history action menus, settings persistence, and macOS development app runner.
-  - Adds the authenticated Talkis Cloud Realtime client-secret endpoint in `talkis-proxy` v0.1.5 without exposing the provider API key to the desktop app.
+  - Adds the authenticated Talkis Cloud Realtime client-secret endpoint in `talkis-proxy` v0.1.9 without exposing the provider API key to the desktop app.
 - User-facing changes:
   - Live translation starts from the widget and displays compact translated speaker turns while audio is still playing.
   - Selected text can be translated with a separate configurable global shortcut.
@@ -41,8 +41,9 @@
   - Sidecar preparation, `bunx tsc --noEmit`, `cargo check`, hotkey smoke tests, and Vite production build passed.
 - `TAURI_SIGNING_PRIVATE_KEY_PATH=/Users/trixter/.tauri/talkis-updater.key bun run build:release:macos`: passed.
   - Built release sidecars, frontend, Rust binary, `Talkis.app`, updater `.app.tar.gz`, updater `.sig`, and `Talkis_0.3.13_aarch64.dmg`.
-- Talkis Cloud proxy: `go test ./...` passed; commit `1f366a7` was pushed to `main` and tagged `v0.1.5`.
-  - Deploy run `29450364496` failed at `Configure SSH` because `ssh-keyscan` could not reach the configured `VDS_HOST` from the GitHub runner; no code was transferred and the existing production proxy stayed running.
+- Talkis Cloud proxy: `go test ./...` passed; endpoint commit `1f366a7` and deploy hardening through `db49bc2` were pushed to `main` and published as `v0.1.9`.
+  - Deploy run `29451482082` passed SSH setup, exact-directory Docker build, container restart, active Nginx config update, and internal/public route probes.
+  - Public verification passed: `/health` returns `200`, while unauthenticated `POST /api/realtime/client-secret` returns the expected `401` instead of exposing a credential.
 - GitHub Release Preflight: pending for `Preflight macos`, `Preflight windows`, and `Preflight linux` on the final release commit.
 - Native/GitHub Windows build: pending Release Preflight.
 - Native/GitHub Linux build: pending Release Preflight.
@@ -61,7 +62,6 @@
 ## Findings
 
 - Blockers:
-  - Restore proxy deployment access and deploy `talkis-proxy` v0.1.5 before publishing the desktop tag; otherwise Cloud live translation cannot obtain a Realtime client secret.
   - Do not merge or tag until the final manual smoke test is confirmed.
   - Do not merge or tag until Release Preflight is green for macOS, Windows, and Linux on the exact release commit.
 - Non-blocking issues:
