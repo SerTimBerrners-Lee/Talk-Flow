@@ -650,6 +650,7 @@ pub async fn copy_selected_text(app: tauri::AppHandle) -> Result<String, String>
     let (tx, rx) = mpsc::channel::<Result<String, String>>();
 
     app.run_on_main_thread(move || {
+        let started = std::time::Instant::now();
         let result = (|| -> Result<String, String> {
             logger::log_info(
                 "PASTE",
@@ -710,8 +711,19 @@ pub async fn copy_selected_text(app: tauri::AppHandle) -> Result<String, String>
             copy_result
         })();
 
-        if let Err(err) = &result {
-            logger::log_error("PASTE", err);
+        match &result {
+            Ok(text) => logger::log_info(
+                "PASTE",
+                &format!(
+                    "Selected text copy completed: chars={}, elapsed_ms={}",
+                    text.chars().count(),
+                    started.elapsed().as_millis()
+                ),
+            ),
+            Err(err) => logger::log_error(
+                "PASTE",
+                &format!("{} (elapsed_ms={})", err, started.elapsed().as_millis()),
+            ),
         }
 
         let _ = tx.send(result);

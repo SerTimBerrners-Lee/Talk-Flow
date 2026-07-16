@@ -113,6 +113,7 @@ export function useWidgetController({
   });
   const stopAndProcessRef = useRef<() => Promise<void>>(async () => {});
   const selectionTranslationRequestRef = useRef<string | null>(null);
+  const selectionTranslationAbortRef = useRef<AbortController | null>(null);
 
   // ── Dispatch: apply action → update machine state → execute effects ─────
   const dispatch = useCallback((action: WidgetAction) => {
@@ -385,8 +386,8 @@ export function useWidgetController({
       translatedText?: string;
       targetLanguage?: string;
       message?: string;
-    }): void => {
-      void invoke("show_widget_text_overlay", {
+    }): Promise<void> => {
+      return invoke<void>("show_widget_text_overlay", {
         payload: {
           requestId: payload.requestId,
           status: payload.status,
@@ -405,14 +406,20 @@ export function useWidgetController({
     [],
   );
 
-  const hideSelectionTextOverlay = useCallback((): void => {
-    void invoke("hide_widget_text_overlay").catch((error) => {
-      logError(
-        "TRANSLATION",
-        `Failed to hide text overlay: ${formatErrorMessage(error)}`,
-      );
-    });
-  }, []);
+  const hideSelectionTextOverlay = useCallback(
+    (requestId?: string): Promise<void> => {
+      const command = requestId
+        ? invoke<void>("hide_widget_text_overlay_request", { requestId })
+        : invoke<void>("hide_widget_text_overlay");
+      return command.catch((error) => {
+        logError(
+          "TRANSLATION",
+          `Failed to hide text overlay: ${formatErrorMessage(error)}`,
+        );
+      });
+    },
+    [],
+  );
 
   const requestTalkisSelectedText = useCallback((): Promise<string> => {
     const requestId =
@@ -475,11 +482,28 @@ export function useWidgetController({
       typeof crypto.randomUUID === "function"
         ? `selection-${crypto.randomUUID()}`
         : `selection-${Date.now()}-${Math.random()}`;
+    const previousRequestId = selectionTranslationRequestRef.current;
+    selectionTranslationAbortRef.current?.abort();
+    const abortController = new AbortController();
+    selectionTranslationAbortRef.current = abortController;
     selectionTranslationRequestRef.current = requestId;
     const isCurrentRequest = (): boolean =>
-      selectionTranslationRequestRef.current === requestId;
+      selectionTranslationRequestRef.current === requestId &&
+      !abortController.signal.aborted;
+    const startedAt = performance.now();
+
+    if (previousRequestId) {
+      logInfo(
+        "TRANSLATION",
+        `requestId=${previousRequestId} stage=superseded nextRequestId=${requestId}`,
+      );
+    }
+    logInfo("TRANSLATION", `requestId=${requestId} stage=started`);
 
     try {
+      await hideSelectionTextOverlay();
+      if (!isCurrentRequest()) return;
+
       const activeSettings =
         settingsRef.current ?? (await getSettings({ reload: true }));
       settingsRef.current = activeSettings;
@@ -492,7 +516,7 @@ export function useWidgetController({
         return;
       }
 
-      showSelectionTextOverlay({
+      await showSelectionTextOverlay({
         requestId,
         status: "copying",
         targetLanguage,
@@ -526,9 +550,9 @@ export function useWidgetController({
             : tn("widget.selectionTranslation.copyFailed");
 
           if (hasNoSelection) {
-            hideSelectionTextOverlay();
+            await hideSelectionTextOverlay(requestId);
           } else {
-            showSelectionTextOverlay({
+            await showSelectionTextOverlay({
               requestId,
               status: "error",
               targetLanguage,
@@ -542,12 +566,16 @@ export function useWidgetController({
 
       if (!selectedText.trim()) {
         if (!isCurrentRequest()) return;
-        hideSelectionTextOverlay();
+        await hideSelectionTextOverlay(requestId);
         showError(tn("widget.selectionTranslation.noSelection"));
         return;
       }
 
-      showSelectionTextOverlay({
+      logInfo(
+        "TRANSLATION",
+        `requestId=${requestId} stage=copied chars=${selectedText.trim().length} elapsedMs=${Math.round(performance.now() - startedAt)}`,
+      );
+      await showSelectionTextOverlay({
         requestId,
         status: "translating",
         sourceText: selectedText,
@@ -557,9 +585,10 @@ export function useWidgetController({
       const translatedText = await translateSelectedText({
         text: selectedText,
         settings: activeSettings,
+        signal: abortController.signal,
         onProgress: (progress: SelectionTranslationProgress) => {
           if (!isCurrentRequest()) return;
-          showSelectionTextOverlay({
+          void showSelectionTextOverlay({
             requestId,
             status: "translating",
             sourceText: progress.sourceText,
@@ -571,7 +600,7 @@ export function useWidgetController({
       if (!isCurrentRequest()) return;
 
       if (!translatedText.trim()) {
-        showSelectionTextOverlay({
+        await showSelectionTextOverlay({
           requestId,
           status: "error",
           sourceText: selectedText,
@@ -582,21 +611,30 @@ export function useWidgetController({
         return;
       }
 
-      showSelectionTextOverlay({
+      await showSelectionTextOverlay({
         requestId,
         status: "done",
         sourceText: selectedText,
         translatedText,
         targetLanguage,
       });
+      logInfo(
+        "TRANSLATION",
+        `requestId=${requestId} stage=done chars=${translatedText.trim().length} elapsedMs=${Math.round(performance.now() - startedAt)}`,
+      );
     } catch (error) {
-      if (!isCurrentRequest()) return;
-      showSelectionTextOverlay({
+      if (!isCurrentRequest() || abortController.signal.aborted) return;
+      await showSelectionTextOverlay({
         requestId,
         status: "error",
         message: formatErrorMessage(error),
       });
       showError(formatErrorMessage(error));
+    } finally {
+      if (selectionTranslationRequestRef.current === requestId) {
+        selectionTranslationRequestRef.current = null;
+        selectionTranslationAbortRef.current = null;
+      }
     }
   }, [
     hideSelectionTextOverlay,
@@ -658,6 +696,7 @@ export function useWidgetController({
   // ── Cleanup ─────────────────────────────────────────────────────────────
   useEffect(() => {
     return () => {
+      selectionTranslationAbortRef.current?.abort();
       clearReleaseStopTimer();
       clearMoveSaveTimer();
     };

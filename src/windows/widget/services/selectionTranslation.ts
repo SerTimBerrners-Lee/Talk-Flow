@@ -26,6 +26,7 @@ interface SelectionTranslationBackend {
     prompt: string;
     temperature?: number;
     maxTokens?: number;
+    signal?: AbortSignal;
   }) => Promise<string>;
 }
 
@@ -45,7 +46,9 @@ interface LocalTranslatorRequest {
 interface SelectionTranslationDependencies {
   resolveSummaryBackend?: typeof resolveSummaryBackend;
   listLocalTranslators?: () => Promise<LocalTranslatorInfo[]>;
-  translateWithLocalTranslator?: (req: LocalTranslatorRequest) => Promise<string>;
+  translateWithLocalTranslator?: (
+    req: LocalTranslatorRequest,
+  ) => Promise<string>;
 }
 
 export interface SelectionTranslationProgress {
@@ -55,7 +58,15 @@ export interface SelectionTranslationProgress {
   total: number;
 }
 
-export function selectionTranslationLanguageLabel(languageCode: string): string {
+function throwIfTranslationAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new DOMException("Selection translation superseded", "AbortError");
+  }
+}
+
+export function selectionTranslationLanguageLabel(
+  languageCode: string,
+): string {
   if (languageCode === "auto") {
     return "auto";
   }
@@ -64,7 +75,9 @@ export function selectionTranslationLanguageLabel(languageCode: string): string 
   return language ? `${language.native} (${language.name})` : languageCode;
 }
 
-export function buildSelectionTranslationPrompt(targetLanguage: string): string {
+export function buildSelectionTranslationPrompt(
+  targetLanguage: string,
+): string {
   return (
     `Переведи текст на язык "${selectionTranslationLanguageLabel(targetLanguage)}". ` +
     "Исходный язык определи автоматически. " +
@@ -77,7 +90,9 @@ export function buildSelectionTranslationPrompt(targetLanguage: string): string 
   );
 }
 
-export function buildSelectionTranslationSourcePayload(sourceText: string): string {
+export function buildSelectionTranslationSourcePayload(
+  sourceText: string,
+): string {
   return [
     "ТЕКСТ ДЛЯ ПЕРЕВОДА:",
     TRANSLATION_SOURCE_START,
@@ -100,12 +115,15 @@ export async function translateSelectedTextWithBackend({
   targetLanguage,
   backend,
   onProgress,
+  signal,
 }: {
   text: string;
   targetLanguage: string;
   backend: SelectionTranslationBackend;
   onProgress?: (progress: SelectionTranslationProgress) => void;
+  signal?: AbortSignal;
 }): Promise<string> {
+  throwIfTranslationAborted(signal);
   const sourceText = text.trim();
   if (!sourceText) {
     throw new Error(tn("widget.selectionTranslation.noSelection"));
@@ -123,8 +141,10 @@ export async function translateSelectedTextWithBackend({
         text: textForSelectionTranslationBackend(backend, sourceText),
         prompt,
         temperature: 0.1,
+        signal,
       })
     ).trim();
+    throwIfTranslationAborted(signal);
 
     if (!translated) {
       throw new Error(tn("widget.selectionTranslation.emptyResult"));
@@ -144,6 +164,7 @@ export async function translateSelectedTextWithBackend({
   const translatedChunks: string[] = [];
 
   for (let index = 0; index < chunks.length; index += 1) {
+    throwIfTranslationAborted(signal);
     const chunkPrompt =
       `${prompt}\n\n` +
       `Это фрагмент ${index + 1} из ${chunks.length} длинного выделенного текста. ` +
@@ -153,8 +174,10 @@ export async function translateSelectedTextWithBackend({
         text: textForSelectionTranslationBackend(backend, chunks[index]),
         prompt: chunkPrompt,
         temperature: 0.1,
+        signal,
       })
     ).trim();
+    throwIfTranslationAborted(signal);
 
     if (!translated) {
       throw new Error(tn("widget.selectionTranslation.emptyResult"));
@@ -176,7 +199,9 @@ async function listLocalTranslators(): Promise<LocalTranslatorInfo[]> {
   return invoke<LocalTranslatorInfo[]>("list_local_translators");
 }
 
-async function translateWithLocalTranslator(req: LocalTranslatorRequest): Promise<string> {
+async function translateWithLocalTranslator(
+  req: LocalTranslatorRequest,
+): Promise<string> {
   return invoke<string>("translate_with_local_translator", { req });
 }
 
@@ -184,7 +209,10 @@ function resolveLocalTranslatorProvider(provider: string): string | null {
   if (provider === LEGACY_LOCAL_TRANSLATOR_PROVIDER) {
     return NLLB_TRANSLATOR_PROVIDER;
   }
-  if (provider === NLLB_TRANSLATOR_PROVIDER || provider === OPUS_RU_EN_TRANSLATOR_PROVIDER) {
+  if (
+    provider === NLLB_TRANSLATOR_PROVIDER ||
+    provider === OPUS_RU_EN_TRANSLATOR_PROVIDER
+  ) {
     return provider;
   }
   return null;
@@ -195,13 +223,16 @@ async function resolveLocalTranslatorBackend(
   targetLanguage: string,
   deps: SelectionTranslationDependencies,
 ): Promise<SelectionTranslationBackend | null> {
-  const selectedProvider = resolveLocalTranslatorProvider(settings.translation.selectionLocalTranslatorProvider);
+  const selectedProvider = resolveLocalTranslatorProvider(
+    settings.translation.selectionLocalTranslatorProvider,
+  );
   if (!selectedProvider) {
     return null;
   }
 
   const list = deps.listLocalTranslators || listLocalTranslators;
-  const translate = deps.translateWithLocalTranslator || translateWithLocalTranslator;
+  const translate =
+    deps.translateWithLocalTranslator || translateWithLocalTranslator;
 
   let translators: LocalTranslatorInfo[];
   try {
@@ -221,7 +252,10 @@ async function resolveLocalTranslatorBackend(
     const reason = localTranslator
       ? `${localTranslator.status}${localTranslator.message ? `: ${localTranslator.message}` : ""}`
       : "not listed";
-    logInfo("TRANSLATION", `${selectedProvider} unavailable, fallback candidate: ${reason}`);
+    logInfo(
+      "TRANSLATION",
+      `${selectedProvider} unavailable, fallback candidate: ${reason}`,
+    );
     return null;
   }
 
@@ -249,18 +283,27 @@ export async function translateSelectedText({
   text,
   settings,
   onProgress,
+  signal,
   deps = {},
 }: {
   text: string;
   settings: AppSettings;
   onProgress?: (progress: SelectionTranslationProgress) => void;
+  signal?: AbortSignal;
   deps?: SelectionTranslationDependencies;
 }): Promise<string> {
+  throwIfTranslationAborted(signal);
   const targetLanguage = settings.translation.selectionTargetLanguage;
   const selectedLocalProvider =
-    resolveLocalTranslatorProvider(settings.translation.selectionLocalTranslatorProvider) ||
-    settings.translation.selectionLocalTranslatorProvider;
-  const localTranslatorBackend = await resolveLocalTranslatorBackend(settings, targetLanguage, deps);
+    resolveLocalTranslatorProvider(
+      settings.translation.selectionLocalTranslatorProvider,
+    ) || settings.translation.selectionLocalTranslatorProvider;
+  const localTranslatorBackend = await resolveLocalTranslatorBackend(
+    settings,
+    targetLanguage,
+    deps,
+  );
+  throwIfTranslationAborted(signal);
   const llmBackend = (): SelectionTranslationBackend | null =>
     resolveLlmTranslationBackend(settings, deps);
 
@@ -275,8 +318,10 @@ export async function translateSelectedText({
         targetLanguage,
         backend: localTranslatorBackend,
         onProgress,
+        signal,
       });
     } catch (err) {
+      throwIfTranslationAborted(signal);
       logInfo(
         "TRANSLATION",
         `${selectedLocalProvider} failed, trying LLM fallback: ${err instanceof Error ? err.message : String(err)}`,
@@ -294,6 +339,7 @@ export async function translateSelectedText({
         targetLanguage,
         backend: fallbackBackend,
         onProgress,
+        signal,
       });
     }
   }
@@ -313,5 +359,6 @@ export async function translateSelectedText({
     targetLanguage,
     backend,
     onProgress,
+    signal,
   });
 }

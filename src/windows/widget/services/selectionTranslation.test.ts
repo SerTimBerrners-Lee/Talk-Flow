@@ -37,7 +37,9 @@ describe("selected text translation prompt", () => {
 
     expect(payload).toContain("ТЕКСТ ДЛЯ ПЕРЕВОДА");
     expect(payload).toContain("<<<TALKIS_TRANSLATION_SOURCE>>>");
-    expect(payload).toContain("Последние записи доступны для копирования и удаления.");
+    expect(payload).toContain(
+      "Последние записи доступны для копирования и удаления.",
+    );
     expect(payload).toContain("<<<END_TALKIS_TRANSLATION_SOURCE>>>");
   });
 });
@@ -45,8 +47,9 @@ describe("selected text translation prompt", () => {
 describe("selected text translation chunking", () => {
   it("translates long text in order without reducing it into history-like summaries", async () => {
     const calls: string[] = [];
-    const source = Array.from({ length: 4 }, (_, index) =>
-      `Фрагмент ${index + 1}. ${"Текст ".repeat(1800)}`,
+    const source = Array.from(
+      { length: 4 },
+      (_, index) => `Фрагмент ${index + 1}. ${"Текст ".repeat(1800)}`,
     ).join("\n\n");
 
     const result = await translateSelectedTextWithBackend({
@@ -62,11 +65,39 @@ describe("selected text translation chunking", () => {
     });
 
     expect(calls.length).toBeGreaterThan(1);
-    expect(result).toBe(calls.map((_, index) => `translated-${index + 1}`).join("\n\n"));
+    expect(result).toBe(
+      calls.map((_, index) => `translated-${index + 1}`).join("\n\n"),
+    );
     const translatedSource = calls.join("\n");
     expect(translatedSource.indexOf("Фрагмент 1")).toBeLessThan(
       translatedSource.indexOf("Фрагмент 4"),
     );
+  });
+
+  it("stops before the next chunk when a newer request cancels translation", async () => {
+    const abortController = new AbortController();
+    const calls: string[] = [];
+    const source = Array.from(
+      { length: 4 },
+      (_, index) => `Фрагмент ${index + 1}. ${"Текст ".repeat(1800)}`,
+    ).join("\n\n");
+
+    const translation = translateSelectedTextWithBackend({
+      text: source,
+      targetLanguage: "en",
+      signal: abortController.signal,
+      backend: {
+        kind: "local",
+        run: async ({ text }) => {
+          calls.push(text);
+          return `translated-${calls.length}`;
+        },
+      },
+      onProgress: () => abortController.abort(),
+    });
+
+    await expect(translation).rejects.toMatchObject({ name: "AbortError" });
+    expect(calls).toHaveLength(1);
   });
 });
 
@@ -84,7 +115,9 @@ describe("selected text translation backend selection", () => {
         },
       }),
       deps: {
-        listLocalTranslators: async () => [{ provider: "nllb-200", status: "ready" }],
+        listLocalTranslators: async () => [
+          { provider: "nllb-200", status: "ready" },
+        ],
         translateWithLocalTranslator: async ({ text, target_language }) => {
           nllbCalls.push(`${text}:${target_language}`);
           return "Hello";
@@ -118,8 +151,14 @@ describe("selected text translation backend selection", () => {
         },
       }),
       deps: {
-        listLocalTranslators: async () => [{ provider: "opus-mt-ru-en", status: "ready" }],
-        translateWithLocalTranslator: async ({ provider, text, target_language }) => {
+        listLocalTranslators: async () => [
+          { provider: "opus-mt-ru-en", status: "ready" },
+        ],
+        translateWithLocalTranslator: async ({
+          provider,
+          text,
+          target_language,
+        }) => {
           opusCalls.push(`${provider}:${text}:${target_language}`);
           return "Hello";
         },
@@ -151,7 +190,9 @@ describe("selected text translation backend selection", () => {
         },
       }),
       deps: {
-        listLocalTranslators: async () => [{ provider: "nllb-200", status: "ready" }],
+        listLocalTranslators: async () => [
+          { provider: "nllb-200", status: "ready" },
+        ],
         translateWithLocalTranslator: async () => {
           throw new Error("unsupported language");
         },
@@ -183,7 +224,9 @@ describe("selected text translation backend selection", () => {
           },
         }),
         deps: {
-          listLocalTranslators: async () => [{ provider: "nllb-200", status: "not_installed" }],
+          listLocalTranslators: async () => [
+            { provider: "nllb-200", status: "not_installed" },
+          ],
           resolveSummaryBackend: () => null,
         },
       }),
@@ -192,8 +235,9 @@ describe("selected text translation backend selection", () => {
 
   it("translates long text through NLLB chunks in order", async () => {
     const calls: string[] = [];
-    const source = Array.from({ length: 4 }, (_, index) =>
-      `Фрагмент ${index + 1}. ${"Текст ".repeat(1800)}`,
+    const source = Array.from(
+      { length: 4 },
+      (_, index) => `Фрагмент ${index + 1}. ${"Текст ".repeat(1800)}`,
     ).join("\n\n");
 
     const result = await translateSelectedText({
@@ -205,7 +249,9 @@ describe("selected text translation backend selection", () => {
         },
       }),
       deps: {
-        listLocalTranslators: async () => [{ provider: "nllb-200", status: "ready" }],
+        listLocalTranslators: async () => [
+          { provider: "nllb-200", status: "ready" },
+        ],
         translateWithLocalTranslator: async ({ text }) => {
           calls.push(text);
           return `translated-${calls.length}`;
@@ -215,7 +261,9 @@ describe("selected text translation backend selection", () => {
     });
 
     expect(calls.length).toBeGreaterThan(1);
-    expect(result).toBe(calls.map((_, index) => `translated-${index + 1}`).join("\n\n"));
+    expect(result).toBe(
+      calls.map((_, index) => `translated-${index + 1}`).join("\n\n"),
+    );
     const translatedSource = calls.join("\n");
     expect(translatedSource.indexOf("Фрагмент 1")).toBeLessThan(
       translatedSource.indexOf("Фрагмент 4"),
@@ -262,7 +310,9 @@ describe("selected text translation backend selection", () => {
         },
       }),
       deps: {
-        listLocalTranslators: async () => [{ provider: "nllb-200", status: "ready" }],
+        listLocalTranslators: async () => [
+          { provider: "nllb-200", status: "ready" },
+        ],
         translateWithLocalTranslator: async ({ text }) => {
           nllbCalls.push(text);
           return "Hello";

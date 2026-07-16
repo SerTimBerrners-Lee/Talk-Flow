@@ -4,6 +4,7 @@ import {
   createNativeLiveDictationOptions,
   createDictationOverlayState,
   dictationOverlayStateFromStreamUpdate,
+  isCloudSttStreamingEnabled,
   isLocalSttStreamingEnabled,
   shouldApplyDictationStreamUpdate,
 } from "./dictationStreamOverlay";
@@ -152,5 +153,32 @@ describe("dictation stream overlay state", () => {
       endpoint: "https://api.openai.com",
       streamingEnabled: true,
     });
+  });
+
+  test("enables cloud realtime transcription with the device token", () => {
+    const settings = {
+      useOwnKey: false,
+      deviceToken: "device-jwt",
+      realtimeTranscriptionEnabled: true,
+      language: "ru",
+    } as AppSettings;
+
+    expect(isCloudSttStreamingEnabled(settings)).toBe(true);
+    expect(createNativeLiveDictationOptions(settings, "req-cloud")).toEqual({
+      requestId: "req-cloud",
+      provider: "talkis-cloud",
+      apiKey: "device-jwt",
+      model: "gpt-realtime-whisper",
+      language: "ru",
+      endpoint: "https://proxy.talkis.ru",
+      streamingEnabled: true,
+    });
+
+    expect(
+      isCloudSttStreamingEnabled({
+        ...settings,
+        deviceToken: "",
+      } as AppSettings),
+    ).toBe(false);
   });
 });

@@ -202,7 +202,13 @@ export function WidgetTextOverlay(): ReactElement | null {
     }
 
     const timeout = window.setTimeout(() => {
-      void invoke("hide_widget_text_overlay");
+      const requestId = state.requestId;
+      void invoke(
+        requestId
+          ? "hide_widget_text_overlay_request"
+          : "hide_widget_text_overlay",
+        requestId ? { requestId } : undefined,
+      );
     }, TEXT_OVERLAY_AUTO_DISMISS_MS);
 
     return () => window.clearTimeout(timeout);
@@ -250,7 +256,13 @@ export function WidgetTextOverlay(): ReactElement | null {
   };
 
   const close = (): void => {
-    void invoke("hide_widget_text_overlay");
+    const requestId = state?.requestId;
+    void invoke(
+      requestId
+        ? "hide_widget_text_overlay_request"
+        : "hide_widget_text_overlay",
+      requestId ? { requestId } : undefined,
+    );
   };
 
   const copy = async (): Promise<void> => {
@@ -510,7 +522,9 @@ export function WidgetTextOverlay(): ReactElement | null {
                     </div>
                   ))}
                 </div>
-              ) : visibleText}
+              ) : (
+                visibleText
+              )}
             </div>
             {!followingLatest && state.status === "liveTranslation" ? (
               <button
@@ -537,8 +551,7 @@ export function WidgetTextOverlay(): ReactElement | null {
                   cursor: "pointer",
                 }}
               >
-                <IconChevronDown size={11} stroke={2.2} />
-                К последнему
+                <IconChevronDown size={11} stroke={2.2} />К последнему
               </button>
             ) : null}
             {state?.status === "error" && translatedText && messageText ? (

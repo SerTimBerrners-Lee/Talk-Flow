@@ -120,6 +120,7 @@ type RunOnce = (params: {
   prompt: string;
   temperature?: number;
   maxTokens?: number;
+  signal?: AbortSignal;
 }) => Promise<string>;
 
 export interface ResolvedSummaryBackend {
@@ -133,8 +134,8 @@ interface ProcessTextResponse {
 }
 
 function cloudRunner(settings: AppSettings): RunOnce {
-  return ({ text, prompt, temperature }) =>
-    processTextWithCloudPrompt({ text, prompt, settings, temperature });
+  return ({ text, prompt, temperature, signal }) =>
+    processTextWithCloudPrompt({ text, prompt, settings, temperature, signal });
 }
 
 function llmRunner(endpoint: string, model: string, apiKey: string): RunOnce {
@@ -156,7 +157,9 @@ function llmRunner(endpoint: string, model: string, apiKey: string): RunOnce {
 
 function isRestartableLocalLlmError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return /sending request|connect|connection|refused|closed|terminated|reset|timed out|timeout/i.test(message);
+  return /sending request|connect|connection|refused|closed|terminated|reset|timed out|timeout/i.test(
+    message,
+  );
 }
 
 /**
@@ -206,12 +209,13 @@ function localLlmRunner(
       }
     }
 
-    const message = lastRestartableError instanceof Error
-      ? lastRestartableError.message
-      : String(lastRestartableError);
+    const message =
+      lastRestartableError instanceof Error
+        ? lastRestartableError.message
+        : String(lastRestartableError);
     throw new Error(
       `Локальная текстовая модель не смогла обработать фрагмент после нескольких перезапусков runtime. ` +
-      `Попробуйте выбрать модель крупнее или облачный режим для длинных записей. Детали: ${message}`,
+        `Попробуйте выбрать модель крупнее или облачный режим для длинных записей. Детали: ${message}`,
     );
   };
 }
@@ -263,7 +267,8 @@ function isBundledLocalRuntime(endpoint: string): boolean {
 export function resolveSummaryBackend(
   settings: AppSettings,
 ): ResolvedSummaryBackend | null {
-  const cloudReady = !settings.useOwnKey && Boolean(settings.deviceToken?.trim());
+  const cloudReady =
+    !settings.useOwnKey && Boolean(settings.deviceToken?.trim());
   if (cloudReady) {
     return { kind: "cloud", label: "Talkis Cloud", run: cloudRunner(settings) };
   }
@@ -298,7 +303,11 @@ export function resolveSummaryBackend(
 
   // Own OpenAI key without a custom endpoint.
   if (settings.useOwnKey && apiKey) {
-    return { kind: "custom", label: "OpenAI", run: llmRunner("", model, apiKey) };
+    return {
+      kind: "custom",
+      label: "OpenAI",
+      run: llmRunner("", model, apiKey),
+    };
   }
 
   return null;
@@ -387,7 +396,11 @@ export async function runTextMapReduce(
 
   if (trimmed.length <= limits.directChars) {
     onProgress?.({ phase: "single", current: 1, total: 1 });
-    const result = await run({ text: trimmed, prompt: instruction, temperature });
+    const result = await run({
+      text: trimmed,
+      prompt: instruction,
+      temperature,
+    });
     throwIfCancelled();
     return result;
   }
@@ -414,7 +427,11 @@ export async function runTextMapReduce(
   }
 
   throwIfCancelled();
-  onProgress?.({ phase: "reduce", current: chunks.length, total: chunks.length });
+  onProgress?.({
+    phase: "reduce",
+    current: chunks.length,
+    total: chunks.length,
+  });
   let reduceInputs = partials;
   let combined = formatPartialBlocks(reduceInputs);
 
@@ -427,7 +444,11 @@ export async function runTextMapReduce(
     const merged: string[] = [];
     for (let index = 0; index < groups.length; index += 1) {
       throwIfCancelled();
-      onProgress?.({ phase: "reduce", current: index + 1, total: groups.length });
+      onProgress?.({
+        phase: "reduce",
+        current: index + 1,
+        total: groups.length,
+      });
       const partial = await run({
         text: formatPartialBlocks(groups[index]),
         prompt:

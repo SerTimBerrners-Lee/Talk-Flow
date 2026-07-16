@@ -106,6 +106,13 @@ fn should_ignore_text_overlay_payload(
     next.request_id.as_deref() != Some(current_request_id)
 }
 
+fn text_overlay_request_matches(
+    current: Option<&WidgetTextOverlayPayload>,
+    request_id: &str,
+) -> bool {
+    current.and_then(|payload| payload.request_id.as_deref()) == Some(request_id)
+}
+
 pub fn ensure_widget_notice_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
     if let Some(win) = app.get_webview_window(NOTICE_WINDOW_LABEL) {
         return Ok(win);
@@ -536,18 +543,35 @@ pub async fn get_widget_text_overlay_payload() -> Result<Option<WidgetTextOverla
 
 #[tauri::command]
 pub async fn hide_widget_text_overlay(app: AppHandle) -> Result<(), String> {
-    {
-        let mut cached = text_overlay_payload_store()
-            .lock()
-            .map_err(|e| format!("Text overlay state lock failed: {e}"))?;
-        *cached = None;
+    hide_widget_text_overlay_inner(&app, None)
+}
+
+#[tauri::command]
+pub async fn hide_widget_text_overlay_request(
+    app: AppHandle,
+    request_id: String,
+) -> Result<(), String> {
+    hide_widget_text_overlay_inner(&app, Some(request_id.trim()))
+}
+
+fn hide_widget_text_overlay_inner(
+    app: &AppHandle,
+    expected_request_id: Option<&str>,
+) -> Result<(), String> {
+    let mut cached = text_overlay_payload_store()
+        .lock()
+        .map_err(|e| format!("Text overlay state lock failed: {e}"))?;
+    if let Some(request_id) = expected_request_id {
+        if !text_overlay_request_matches(cached.as_ref(), request_id) {
+            return Ok(());
+        }
     }
-    {
-        let mut opened_request = text_overlay_open_request_store()
-            .lock()
-            .map_err(|e| format!("Text overlay request lock failed: {e}"))?;
-        *opened_request = None;
-    }
+
+    let mut opened_request = text_overlay_open_request_store()
+        .lock()
+        .map_err(|e| format!("Text overlay request lock failed: {e}"))?;
+    *cached = None;
+    *opened_request = None;
 
     if let Some(win) = app.get_webview_window(TEXT_WINDOW_LABEL) {
         let _ = app.emit_to(
@@ -610,8 +634,9 @@ pub async fn activate_widget_for_hotkey(app: AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_new_text_overlay_request, should_ignore_text_overlay_payload, text_overlay_width,
-        WidgetTextOverlayPayload, TEXT_OVERLAY_STREAM_WIDTH, TEXT_OVERLAY_WIDTH,
+        is_new_text_overlay_request, should_ignore_text_overlay_payload,
+        text_overlay_request_matches, text_overlay_width, WidgetTextOverlayPayload,
+        TEXT_OVERLAY_STREAM_WIDTH, TEXT_OVERLAY_WIDTH,
     };
 
     fn overlay_payload(status: &str, request_id: &str) -> WidgetTextOverlayPayload {
@@ -654,6 +679,14 @@ mod tests {
             Some(&replacement),
             &stale_progress
         ));
+    }
+
+    #[test]
+    fn request_scoped_hide_cannot_close_a_newer_overlay() {
+        let current = overlay_payload("copying", "selection-2");
+
+        assert!(!text_overlay_request_matches(Some(&current), "selection-1"));
+        assert!(text_overlay_request_matches(Some(&current), "selection-2"));
     }
 
     #[test]

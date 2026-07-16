@@ -9,6 +9,7 @@ export interface ProcessTextParams {
   prompt: string;
   settings: AppSettings;
   temperature?: number;
+  signal?: AbortSignal;
 }
 
 export async function processTextWithCloudPrompt({
@@ -16,6 +17,7 @@ export async function processTextWithCloudPrompt({
   prompt,
   settings,
   temperature,
+  signal,
 }: ProcessTextParams): Promise<string> {
   if (!settings.deviceToken?.trim()) {
     throw new Error("Talkis Cloud session missing");
@@ -32,6 +34,7 @@ export async function processTextWithCloudPrompt({
       prompt,
       ...(temperature == null ? {} : { temperature }),
     }),
+    signal,
   });
 
   const body = await response.text();
@@ -45,7 +48,10 @@ export async function processTextWithCloudPrompt({
     const parsed = JSON.parse(body) as { result?: string };
     return typeof parsed.result === "string" ? parsed.result : "";
   } catch (error) {
-    logError("CLOUD_PROCESS_TEXT", `Proxy response parse failed: ${formatErrorMessage(error)}; body=${body}`);
+    logError(
+      "CLOUD_PROCESS_TEXT",
+      `Proxy response parse failed: ${formatErrorMessage(error)}; body=${body}`,
+    );
     throw new Error("Talkis Cloud returned an invalid response");
   }
 }

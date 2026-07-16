@@ -7,9 +7,8 @@ import type {
 import {
   hasVerifiedRealtimeCapability,
   REALTIME_TRANSLATION_ADAPTERS,
+  TALKIS_CLOUD_REALTIME_ENDPOINT,
 } from "../../../lib/realtimeModels";
-
-const CLOUD_REALTIME_ENDPOINT = "https://proxy.talkis.ru";
 
 export interface LiveTranslationConnectionConfig {
   provider: "talkis-cloud" | "openai" | "gemini";
@@ -36,7 +35,7 @@ export function resolveLiveTranslationConnection(
       provider: "talkis-cloud",
       apiKey: deviceToken,
       model: "gpt-realtime",
-      endpoint: CLOUD_REALTIME_ENDPOINT,
+      endpoint: TALKIS_CLOUD_REALTIME_ENDPOINT,
       adapterId: "talkis-cloud",
       supportsVoice: true,
     };

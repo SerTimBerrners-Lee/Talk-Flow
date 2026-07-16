@@ -16,6 +16,8 @@ const TARGET_CHANNELS: u16 = 1;
 const LIVE_FINISH_TIMEOUT: Duration = Duration::from_secs(12);
 const PCM_CHUNK_BYTES: usize = (TARGET_SAMPLE_RATE as usize / 10) * 2;
 const LIVE_QUEUE_CHUNKS: usize = 24;
+const TALKIS_CLOUD_PROVIDER: &str = "talkis-cloud";
+const TALKIS_CLOUD_REALTIME_PATH: &str = "/api/realtime/client-secret";
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,6 +36,15 @@ pub struct LiveDictationStartRequest {
 pub struct LiveDictationFinal {
     pub request_id: String,
     pub text: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CloudRealtimeClientSecret {
+    client_secret: String,
+    provider: String,
+    model: String,
+    endpoint: String,
 }
 
 #[derive(Clone)]
@@ -355,25 +366,29 @@ fn run_remote_live_dictation_client(
     rx: tokio::sync::mpsc::Receiver<RealtimeAudioCommand>,
 ) -> Result<LiveDictationFinal, String> {
     let language = req.language.trim().to_string();
-    let connection = RealtimeConnectionRequest {
-        provider,
-        api_key: req.api_key.unwrap_or_default(),
-        model: req.model,
-        endpoint: req.endpoint,
-        target_language: if language.is_empty() {
-            None
-        } else {
-            Some(language)
-        },
-        purpose: "stt".to_string(),
-        voice_output: false,
-        voice: None,
-        voice_speed: None,
-    };
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|err| format!("Failed to start realtime runtime: {}", err))?;
+    let connection = if provider == TALKIS_CLOUD_PROVIDER {
+        runtime.block_on(resolve_cloud_live_dictation_connection(&req))?
+    } else {
+        RealtimeConnectionRequest {
+            provider,
+            api_key: req.api_key.unwrap_or_default(),
+            model: req.model,
+            endpoint: req.endpoint,
+            target_language: if language.is_empty() {
+                None
+            } else {
+                Some(language)
+            },
+            purpose: "stt".to_string(),
+            voice_output: false,
+            voice: None,
+            voice_speed: None,
+        }
+    };
     let event_app = app.clone();
     let event_request_id = request_id.clone();
     let text =
@@ -409,6 +424,107 @@ fn run_remote_live_dictation_client(
         ))?;
 
     Ok(LiveDictationFinal { request_id, text })
+}
+
+fn cloud_live_dictation_request_body(language: &str) -> serde_json::Value {
+    serde_json::json!({
+        "purpose": "stt",
+        "language": language,
+    })
+}
+
+async fn resolve_cloud_live_dictation_connection(
+    req: &LiveDictationStartRequest,
+) -> Result<RealtimeConnectionRequest, String> {
+    let device_token = req.api_key.as_deref().unwrap_or_default().trim();
+    if device_token.is_empty() {
+        return Err("Войдите в Talkis и выберите активную облачную подписку.".to_string());
+    }
+    let url = format!(
+        "{}{}",
+        req.endpoint.trim().trim_end_matches('/'),
+        TALKIS_CLOUD_REALTIME_PATH
+    );
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|error| format!("Не удалось подготовить облачную транскрибацию: {}", error))?;
+    logger::log_info(
+        "LIVE_DICTATION",
+        "provider=talkis-cloud stage=client_secret_request purpose=stt",
+    );
+    let response = client
+        .post(url)
+        .bearer_auth(device_token)
+        .json(&cloud_live_dictation_request_body(req.language.trim()))
+        .send()
+        .await
+        .map_err(|error| format!("Облако Talkis недоступно: {}", error))?;
+    let status = response.status();
+    let response_text = response
+        .text()
+        .await
+        .map_err(|error| format!("Некорректный ответ облака Talkis: {}", error))?;
+    if !status.is_success() {
+        let upstream_message = serde_json::from_str::<serde_json::Value>(&response_text)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("error")
+                    .and_then(|error| error.as_str())
+                    .map(str::to_string)
+            });
+        let message = match status.as_u16() {
+            401 => "Сессия Talkis истекла. Войдите в облако повторно.".to_string(),
+            403 => "Для realtime-транскрибации нужна активная подписка Talkis.".to_string(),
+            429 => {
+                "Слишком много запусков realtime-транскрибации. Повторите через минуту.".to_string()
+            }
+            _ => upstream_message.unwrap_or_else(|| {
+                format!(
+                    "Облако Talkis не запустило realtime-транскрибацию ({})",
+                    status
+                )
+            }),
+        };
+        logger::log_error(
+            "LIVE_DICTATION",
+            &format!(
+                "provider=talkis-cloud stage=client_secret_failed purpose=stt status={}",
+                status
+            ),
+        );
+        return Err(message);
+    }
+
+    let secret: CloudRealtimeClientSecret = serde_json::from_str(&response_text)
+        .map_err(|error| format!("Некорректный ответ облака Talkis: {}", error))?;
+    if secret.client_secret.trim().is_empty()
+        || secret.provider != "openai"
+        || secret.model.trim().is_empty()
+        || secret.endpoint.trim().is_empty()
+    {
+        return Err("Облако Talkis вернуло неполные данные Realtime-сессии.".to_string());
+    }
+    logger::log_info(
+        "LIVE_DICTATION",
+        &format!(
+            "provider=talkis-cloud stage=client_secret_ready purpose=stt model={}",
+            secret.model
+        ),
+    );
+
+    Ok(RealtimeConnectionRequest {
+        provider: secret.provider,
+        api_key: secret.client_secret,
+        model: secret.model,
+        endpoint: secret.endpoint,
+        target_language: Some(req.language.trim().to_string()),
+        purpose: "stt".to_string(),
+        voice_output: false,
+        voice: None,
+        voice_speed: None,
+    })
 }
 
 fn run_live_dictation_client(
@@ -674,6 +790,17 @@ mod tests {
         assert_eq!(
             finish_live_dictation_session(session).unwrap_err(),
             "mock realtime failure"
+        );
+    }
+
+    #[test]
+    fn cloud_live_dictation_requests_an_stt_session() {
+        assert_eq!(
+            cloud_live_dictation_request_body("ru"),
+            serde_json::json!({
+                "purpose": "stt",
+                "language": "ru",
+            })
         );
     }
 }
