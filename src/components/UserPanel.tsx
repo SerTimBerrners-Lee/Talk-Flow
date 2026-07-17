@@ -10,7 +10,7 @@ import {
   CloudProfile,
   fetchCloudProfile,
   cloudLogout,
-  getAuthLoginUrl,
+  getCloudTopUpUrl,
   handleAuthToken,
   generateExchangeCode,
   getAuthLoginUrlWithCode,
@@ -35,7 +35,7 @@ function extractTokenFromUrl(url: string): string | null {
 }
 
 export function UserPanel() {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [profile, setProfile] = useState<CloudProfile | null | undefined>(() => getCachedCloudProfile());
   const [loading, setLoading] = useState(() => getCachedCloudProfile() === undefined);
   const [waitingForAuth, setWaitingForAuth] = useState(false);
@@ -200,7 +200,7 @@ export function UserPanel() {
   const handleActivate = async () => {
     try {
       if (profile) {
-        await openUrl(getAuthLoginUrl().replace("/auth/login?device=true", "/dashboard"));
+        await openUrl(profile.topUpUrl || getCloudTopUpUrl());
         return;
       }
 
@@ -228,20 +228,34 @@ export function UserPanel() {
     return <div style={styles.container} />;
   }
 
-  // ── Authenticated + active subscription ─────────────────────
+  // ── Authenticated + available cloud balance ──────────────────
   if (profile && profile.subscription.active) {
+    const balance = profile.wallet
+      ? formatCloudBalance(
+          profile.wallet.balanceMilliTokens,
+          lang === "ru" ? "ru-RU" : "en-US",
+        )
+      : null;
     return (
       <div style={styles.container}>
         <ProfileRow profile={profile} onLogout={handleLogout} />
         <div style={styles.badgeActive}>
           <div style={styles.badgeDot} />
-          {t("userPanel.subscriptionActive")}
+          {balance
+            ? t("userPanel.balance", { tokens: balance })
+            : t("userPanel.subscriptionActive")}
         </div>
+        {profile.wallet?.low && (
+          <button onClick={handleActivate} style={styles.compactCta}>
+            <IconCrown size={13} stroke={2} color="var(--accent-contrast)" />
+            <span style={styles.compactCtaLabel}>{t("userPanel.upgradeToPro")}</span>
+          </button>
+        )}
       </div>
     );
   }
 
-  // ── Authenticated but no active subscription ────────────────
+  // ── Authenticated but empty cloud balance ───────────────────
   if (profile && !profile.subscription.active) {
     return (
       <div style={styles.container}>
@@ -260,6 +274,14 @@ export function UserPanel() {
       <SubscriptionCTA onActivate={handleActivate} />
     </div>
   );
+}
+
+function formatCloudBalance(value: string, locale: string): string {
+  try {
+    return (BigInt(value) / 1_000n).toLocaleString(locale);
+  } catch {
+    return "0";
+  }
 }
 
 function ProfileRow({ profile, onLogout }: { profile: CloudProfile; onLogout: () => void }) {

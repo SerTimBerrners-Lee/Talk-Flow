@@ -2,7 +2,7 @@
  * Talkis Cloud authentication client.
  *
  * Handles communication with talkis.ru API for:
- * - Fetching user profile and subscription status
+ * - Fetching user profile and cloud balance
  * - Deep link token handling
  * - Logout
  */
@@ -53,9 +53,29 @@ export interface CloudSubscription {
   expiresAt: string | null;
 }
 
+export interface CloudWallet {
+  balanceMilliTokens: string;
+  balanceTokens: string;
+  reservedMilliTokens: string;
+  debtMilliTokens: string;
+  lifetimeGrantedMilliTokens: string;
+  lifetimeSpentMilliTokens: string;
+  low: boolean;
+  empty: boolean;
+  cloudBlocked: boolean;
+}
+
+export interface CloudThresholds {
+  lowBalanceMilliTokens: string;
+  progressTargetMilliTokens: string;
+}
+
 export interface CloudProfile {
   user: CloudUser;
   subscription: CloudSubscription;
+  wallet?: CloudWallet;
+  thresholds?: CloudThresholds;
+  topUpUrl?: string;
 }
 
 export function getCachedCloudProfile(): CloudProfile | null | undefined {
@@ -195,6 +215,10 @@ export async function isCloudAuthenticated(): Promise<boolean> {
  */
 export function getAuthLoginUrl(): string {
   return `${CLOUD_API_BASE}/auth/login?device=true`;
+}
+
+export function getCloudTopUpUrl(): string {
+  return `${CLOUD_API_BASE}/dashboard/billing`;
 }
 
 /**

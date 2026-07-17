@@ -167,26 +167,27 @@ export const components = {
 
   // ── UserPanel ─────────────────────────────────────────────
   "userPanel.subscriptionActive": {
-    ru: "Подписка активна",
-    en: "Subscription active",
+    ru: "Облако доступно",
+    en: "Cloud is available",
   },
-  "userPanel.upgradeToPro": { ru: "Перейти на PRO", en: "Upgrade to PRO" },
+  "userPanel.balance": { ru: "Баланс: {tokens} токенов", en: "Balance: {tokens} tokens" },
+  "userPanel.upgradeToPro": { ru: "Пополнить баланс", en: "Top up balance" },
   "userPanel.logout": { ru: "Выйти", en: "Log out" },
-  "userPanel.cta.title": { ru: "Активируйте Talkis", en: "Activate Talkis" },
+  "userPanel.cta.title": { ru: "Облако Talkis", en: "Talkis Cloud" },
   "userPanel.cta.feature.unlimited": {
-    ru: "Безлимитное использование",
-    en: "Unlimited usage",
+    ru: "Без подписки и автоплатежей",
+    en: "No subscription or recurring charges",
   },
   "userPanel.cta.feature.noVpn": {
     ru: "Без VPN и Прокси",
     en: "No VPN or proxy",
   },
   "userPanel.cta.feature.deviceSync": {
-    ru: "Синхронизация устройств",
-    en: "Device sync",
+    ru: "Токены не сгорают",
+    en: "Tokens do not expire",
   },
   "userPanel.cta.feature.freeTrial": {
-    ru: "7 дней бесплатно",
-    en: "7 days free",
+    ru: "500 токенов после регистрации",
+    en: "500 tokens after registration",
   },
 } as const;

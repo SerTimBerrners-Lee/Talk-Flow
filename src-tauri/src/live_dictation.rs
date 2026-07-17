@@ -438,7 +438,7 @@ async fn resolve_cloud_live_dictation_connection(
 ) -> Result<RealtimeConnectionRequest, String> {
     let device_token = req.api_key.as_deref().unwrap_or_default().trim();
     if device_token.is_empty() {
-        return Err("Войдите в Talkis и выберите активную облачную подписку.".to_string());
+        return Err("Войдите в Talkis и проверьте облачный баланс.".to_string());
     }
     let url = format!(
         "{}{}",
@@ -474,19 +474,21 @@ async fn resolve_cloud_live_dictation_connection(
                     .and_then(|error| error.as_str())
                     .map(str::to_string)
             });
-        let message = match status.as_u16() {
-            401 => "Сессия Talkis истекла. Войдите в облако повторно.".to_string(),
-            403 => "Для realtime-транскрибации нужна активная подписка Talkis.".to_string(),
-            429 => {
-                "Слишком много запусков realtime-транскрибации. Повторите через минуту.".to_string()
-            }
-            _ => upstream_message.unwrap_or_else(|| {
-                format!(
-                    "Облако Talkis не запустило realtime-транскрибацию ({})",
-                    status
-                )
-            }),
-        };
+        let message =
+            match status.as_u16() {
+                401 => "Сессия Talkis истекла. Войдите в облако повторно.".to_string(),
+                402 => "Облачный баланс закончился. Пополните его в личном кабинете Talkis."
+                    .to_string(),
+                403 => "Облачный доступ Talkis сейчас недоступен.".to_string(),
+                429 => "Слишком много запусков realtime-транскрибации. Повторите через минуту."
+                    .to_string(),
+                _ => upstream_message.unwrap_or_else(|| {
+                    format!(
+                        "Облако Talkis не запустило realtime-транскрибацию ({})",
+                        status
+                    )
+                }),
+            };
         logger::log_error(
             "LIVE_DICTATION",
             &format!(

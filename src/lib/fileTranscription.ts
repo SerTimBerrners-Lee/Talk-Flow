@@ -458,7 +458,12 @@ export function toFileTranscriptionErrorMessage(
     return tn("fileTranscription.errLocalRuntimeRejected");
   }
 
-  if (normalized.includes("subscription inactive") || normalized.includes("403")) {
+  if (
+    normalized.includes("subscription inactive") ||
+    normalized.includes("insufficient_cloud_tokens") ||
+    normalized.includes("402") ||
+    normalized.includes("403")
+  ) {
     return tn("fileTranscription.errSubscriptionInactive");
   }
 

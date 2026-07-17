@@ -44,7 +44,7 @@ import {
   cancelCloudAuthFlow,
   CloudProfile,
   fetchCloudProfile,
-  getAuthLoginUrl,
+  getCloudTopUpUrl,
   cloudLogout,
   handleAuthToken,
   generateExchangeCode,
@@ -880,37 +880,146 @@ function SubscriptionGuestCard({ onActivate }: { onActivate: () => void }) {
   );
 }
 
+const DEFAULT_CLOUD_PROGRESS_TARGET = 3_900_000n;
+const DEFAULT_CLOUD_LOW_THRESHOLD = 780_000n;
+
+function cloudMilliTokens(value: string | undefined, fallback = 0n): bigint {
+  if (!value) return fallback;
+  try {
+    return BigInt(value);
+  } catch {
+    return fallback;
+  }
+}
+
+function formatCloudTokens(milliTokens: bigint, locale: string): string {
+  const whole = milliTokens / 1_000n;
+  const fraction = milliTokens % 1_000n;
+  if (fraction === 0n) return whole.toLocaleString(locale);
+  return `${whole.toLocaleString(locale)},${fraction
+    .toString()
+    .padStart(3, "0")
+    .replace(/0+$/, "")}`;
+}
+
 /**
- * Three-state subscription block, shared by the Models → IconCloud section and the
- * dedicated "Подписка Talkis" tab: active-subscription banner, signed-in account
- * card (activate / log out), or guest promo (sign in + start the free trial).
+ * Three-state cloud block shared by the recognition mode surfaces: available
+ * wallet, signed-in empty wallet, or guest sign-in card.
  */
 function SubscriptionCards({
   profile,
   onActivate,
+  onTopUp,
   onLogout,
 }: {
   profile: CloudProfile | null | undefined;
   onActivate: () => void;
+  onTopUp: () => void;
   onLogout: () => void;
 }) {
   const { t, lang } = useI18n();
 
   if (profile?.subscription.active === true) {
+    const locale = lang === "ru" ? "ru-RU" : "en-US";
+    const wallet = profile.wallet;
+    const balance = cloudMilliTokens(wallet?.balanceMilliTokens);
+    const reserved = cloudMilliTokens(wallet?.reservedMilliTokens);
+    const target = cloudMilliTokens(
+      profile.thresholds?.progressTargetMilliTokens,
+      DEFAULT_CLOUD_PROGRESS_TARGET,
+    );
+    const lowThreshold = cloudMilliTokens(
+      profile.thresholds?.lowBalanceMilliTokens,
+      DEFAULT_CLOUD_LOW_THRESHOLD,
+    );
+    const boundedBalance = balance > target ? target : balance;
+    const progress =
+      target > 0n ? Number((boundedBalance * 10_000n) / target) / 100 : 0;
+    const low = wallet?.low ?? balance < lowThreshold;
+
     return (
-      <div className="card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <div style={{ width: 42, height: 42, borderRadius: 999, background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <IconCrown size={20} stroke={2.2} color="var(--accent-contrast)" />
-          </div>
-          <div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-hi)" }}>{t("models.subscription.active")}</div>
-            <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>
-              {t("models.subscription.unlimitedUntil", { date: profile.subscription.expiresAt ? new Date(profile.subscription.expiresAt).toLocaleDateString(lang === "ru" ? "ru-RU" : "en-US", { day: "numeric", month: "long" }) : "—" })}
+      <div className="card" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
+            <div style={{ width: 42, height: 42, borderRadius: 999, background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <IconCrown size={20} stroke={2.2} color="var(--accent-contrast)" />
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-hi)" }}>{t("models.subscription.active")}</div>
+              <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>
+                {wallet
+                  ? t("models.subscription.balance", {
+                      tokens: formatCloudTokens(balance, locale),
+                    })
+                  : t("models.cloud.proReady")}
+              </div>
             </div>
           </div>
+          <div style={{ width: 10, height: 10, borderRadius: 999, background: low ? "var(--text-low)" : "var(--accent)", flexShrink: 0 }} />
         </div>
-        <div style={{ width: 10, height: 10, borderRadius: 999, background: "var(--accent)", flexShrink: 0 }} />
+
+        {wallet && (
+          <>
+            <div
+              role="progressbar"
+              aria-label={t("models.subscription.balance", {
+                tokens: formatCloudTokens(balance, locale),
+              })}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(progress)}
+              style={{
+                height: 8,
+                borderRadius: 999,
+                overflow: "hidden",
+                background: "var(--control-track)",
+              }}
+            >
+              <div
+                style={{
+                  width: `${progress}%`,
+                  height: "100%",
+                  borderRadius: 999,
+                  background: "var(--accent)",
+                  transition: "width 0.2s ease",
+                }}
+              />
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 12, color: low ? "var(--text-hi)" : "var(--text-low)", lineHeight: 1.5 }}>
+                {low
+                  ? t("models.subscription.low")
+                  : reserved > 0n
+                    ? t("models.subscription.reserved", {
+                        tokens: formatCloudTokens(reserved, locale),
+                      })
+                    : `${Math.round(progress)}%`}
+              </div>
+              {low && (
+                <button
+                  type="button"
+                  onClick={onTopUp}
+                  style={{
+                    padding: "9px 14px",
+                    borderRadius: 10,
+                    border: "none",
+                    background: "var(--accent)",
+                    color: "var(--accent-contrast)",
+                    fontSize: 11,
+                    fontWeight: 700,
+                    fontFamily: "var(--font-main)",
+                    cursor: "pointer",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.06em",
+                  }}
+                >
+                  {t("models.subscription.topUp")}
+                </button>
+              )}
+            </div>
+          </>
+        )}
       </div>
     );
   }
@@ -1908,7 +2017,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
       const authed = cloudProfile !== null && cloudProfile !== undefined;
       if (authed) {
         setWaitingForSubscriptionRefresh(true);
-        await openUrl(getAuthLoginUrl().replace("/auth/login?device=true", "/dashboard"));
+        await openUrl(cloudProfile.topUpUrl || getCloudTopUpUrl());
         return;
       }
 
@@ -3018,6 +3127,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
               <SubscriptionCards
                 profile={cloudProfile}
                 onActivate={handleActivateSubscription}
+                onTopUp={handleActivateSubscription}
                 onLogout={() => {
                   void handleCloudLogout();
                 }}

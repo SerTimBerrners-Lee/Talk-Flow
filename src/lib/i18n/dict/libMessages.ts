@@ -69,12 +69,12 @@ export const libMessages = {
     en: "Cloud speaker labeling is not available yet. Use local preparation in the file transcription section.",
   },
   "fileTranscription.errCloudDiarizationUnavailable": {
-    ru: "Облачное разделение по говорящим сейчас недоступно. Проверьте активную подписку PRO или переключитесь на локальный режим.",
-    en: "Cloud speaker separation is currently unavailable. Check your active PRO subscription or switch to local mode.",
+    ru: "Облачное разделение по говорящим сейчас недоступно. Проверьте баланс или переключитесь на локальный режим.",
+    en: "Cloud speaker separation is currently unavailable. Check your balance or switch to local mode.",
   },
   "fileTranscription.errSubscriptionInactive": {
-    ru: "Для облачной транскрибации нужна активная подписка Talkis.",
-    en: "Cloud transcription requires an active Talkis subscription.",
+    ru: "Облачный баланс закончился. Пополните его или переключитесь на локальный режим.",
+    en: "Your cloud balance is empty. Top it up or switch to local mode.",
   },
   "fileTranscription.errCannotPrepareDiarization": {
     ru: "Не удалось подготовить аудио для разметки говорящих. Попробуйте другой аудио- или видеофайл.",

@@ -2,14 +2,17 @@
 export const settingsModels = {
   // ── Account / subscription cards ──
   "models.account.logout": { ru: "Выйти", en: "Log out" },
-  "models.cta.upgradePro": { ru: "Перейти на PRO", en: "Upgrade to PRO" },
-  "models.cta.freeTrial": { ru: "7 дней бесплатно", en: "7 days free" },
-  "models.guest.title": { ru: "Подписка Talkis", en: "Talkis subscription" },
-  "models.guest.benefit1": { ru: "• Безлимитное использование без ограничений", en: "• Unlimited use, no limits" },
-  "models.guest.benefit2": { ru: "• Без VPN и Прокси", en: "• No VPN or proxy required" },
-  "models.guest.benefit3": { ru: "• Синхронизация со всеми устройствами", en: "• Sync across all your devices" },
-  "models.subscription.active": { ru: "Подписка активна", en: "Subscription active" },
-  "models.subscription.unlimitedUntil": { ru: "Безлимитный доступ до {date}", en: "Unlimited access until {date}" },
+  "models.cta.upgradePro": { ru: "Пополнить баланс", en: "Top up balance" },
+  "models.cta.freeTrial": { ru: "500 токенов новым пользователям", en: "500 tokens for new users" },
+  "models.guest.title": { ru: "Облачный баланс", en: "Cloud balance" },
+  "models.guest.benefit1": { ru: "• Без подписки и автоплатежей", en: "• No subscription or recurring charges" },
+  "models.guest.benefit2": { ru: "• Токены не сгорают", en: "• Tokens do not expire" },
+  "models.guest.benefit3": { ru: "• Локальные модели остаются бесплатными", en: "• Local models remain free" },
+  "models.subscription.active": { ru: "Облако доступно", en: "Cloud is available" },
+  "models.subscription.balance": { ru: "Доступно {tokens} токенов", en: "{tokens} tokens available" },
+  "models.subscription.reserved": { ru: "Зарезервировано: {tokens}", en: "Reserved: {tokens}" },
+  "models.subscription.low": { ru: "Осталось меньше 20%", en: "Less than 20% remaining" },
+  "models.subscription.topUp": { ru: "Пополнить", en: "Top up" },
 
   // ── Prompt library ──
   "models.prompt.nameLabel": { ru: "Название", en: "Name" },
@@ -77,11 +80,11 @@ export const settingsModels = {
     en: "Recognition, text processing, and live translation run through Talkis Cloud. Data is encrypted in transit, and the primary API key remains on the server.",
   },
   "models.cloud.descGuest": {
-    ru: "Для облачного режима нужна авторизация и активная подписка. После входа плашка и статус подписки обновятся автоматически.",
-    en: "Cloud mode requires sign-in and an active subscription. After you log in, the banner and subscription status update automatically.",
+    ru: "Для облачного режима нужна авторизация и положительный баланс. После входа данные обновятся автоматически.",
+    en: "Cloud mode requires sign-in and a positive balance. The data refreshes automatically after you log in.",
   },
-  "models.cloud.proReady": { ru: "PRO активен, облако готово к выбору", en: "PRO is active, the cloud is ready to select" },
-  "models.cloud.needPro": { ru: "7 дней бесплатно — перейдите на PRO", en: "7 days free — upgrade to PRO" },
+  "models.cloud.proReady": { ru: "Облачный режим готов к выбору", en: "Cloud mode is ready to select" },
+  "models.cloud.needPro": { ru: "Пополните баланс для облачного режима", en: "Top up your balance for cloud mode" },
 
   // ── API adapters section ──
   "models.apiSection.title": { ru: "Доступные API-адаптеры", en: "Available API adapters" },

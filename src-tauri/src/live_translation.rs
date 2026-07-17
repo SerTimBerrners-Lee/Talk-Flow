@@ -513,7 +513,7 @@ async fn resolve_translation_connection(
     }
 
     if req.api_key.trim().is_empty() {
-        return Err("Войдите в Talkis и выберите активную облачную подписку.".to_string());
+        return Err("Войдите в Talkis и проверьте облачный баланс.".to_string());
     }
     let url = format!(
         "{}{}",
@@ -554,16 +554,18 @@ async fn resolve_translation_connection(
                     .and_then(|error| error.as_str())
                     .map(str::to_string)
             });
-        let message = match status.as_u16() {
-            401 => "Сессия Talkis истекла. Войдите в облако повторно.".to_string(),
-            403 => "Для синхронного перевода нужна активная подписка Talkis.".to_string(),
-            429 => {
-                "Слишком много запусков синхронного перевода. Повторите через минуту.".to_string()
-            }
-            _ => upstream_message.unwrap_or_else(|| {
-                format!("Облако Talkis не запустило синхронный перевод ({})", status)
-            }),
-        };
+        let message =
+            match status.as_u16() {
+                401 => "Сессия Talkis истекла. Войдите в облако повторно.".to_string(),
+                402 => "Облачный баланс закончился. Пополните его в личном кабинете Talkis."
+                    .to_string(),
+                403 => "Облачный доступ Talkis сейчас недоступен.".to_string(),
+                429 => "Слишком много запусков синхронного перевода. Повторите через минуту."
+                    .to_string(),
+                _ => upstream_message.unwrap_or_else(|| {
+                    format!("Облако Talkis не запустило синхронный перевод ({})", status)
+                }),
+            };
         logger::log_error(
             "LIVE_TRANSLATION",
             &format!(

@@ -136,8 +136,8 @@ export const widget = {
     en: "The recognition service is currently unavailable in your region. Try a different endpoint or a VPN.",
   },
   "widget.error.subscriptionRequired": {
-    ru: "Для облачного режима нужна активная подписка Talkis.",
-    en: "Cloud mode requires an active Talkis subscription.",
+    ru: "Облачный баланс закончился. Пополните его в личном кабинете Talkis.",
+    en: "Your cloud balance is empty. Top it up in your Talkis account.",
   },
   "widget.error.requestRejected": {
     ru: "Сервис отклонил запрос. Проверьте API-ключ, регион доступа или настройки endpoint.",

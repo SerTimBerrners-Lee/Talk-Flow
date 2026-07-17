@@ -292,6 +292,13 @@ function toUserFacingErrorMessage(error: unknown, settings: AppSettings): string
     return tn("widget.error.regionUnsupported");
   }
 
+  if (
+    normalized.includes("402") ||
+    normalized.includes("insufficient_cloud_tokens")
+  ) {
+    return tn("widget.error.subscriptionRequired");
+  }
+
   if (normalized.includes("403") || normalized.includes("forbidden")) {
     if (isLocalStt) {
       return tn("widget.error.localRuntimeRejected");
