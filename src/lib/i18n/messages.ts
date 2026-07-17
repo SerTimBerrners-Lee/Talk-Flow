@@ -11,6 +11,7 @@ import { widget } from "./dict/widget";
 import { components } from "./dict/components";
 import { libMessages } from "./dict/libMessages";
 import { summary } from "./dict/summary";
+import { onboarding } from "./dict/onboarding";
 
 export const MESSAGES = {
   ...common,
@@ -22,6 +23,7 @@ export const MESSAGES = {
   ...components,
   ...libMessages,
   ...summary,
+  ...onboarding,
 } as const;
 
 export type MsgKey = keyof typeof MESSAGES;

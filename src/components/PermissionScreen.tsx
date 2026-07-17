@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { emit } from "@tauri-apps/api/event";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
 import {
@@ -17,9 +18,10 @@ import {
   requestMicrophonePermission,
   requestSystemAudioPermission,
 } from "../lib/permissions";
-import { getSettings } from "../lib/store";
+import { getSettings, saveSettings } from "../lib/store";
 import { logError, logInfo } from "../lib/logger";
 import { useI18n } from "../lib/i18n";
+import { SETTINGS_UPDATED_EVENT } from "../lib/hotkeyEvents";
 import { scaleWidgetDimension } from "../lib/widgetScale";
 import {
   widgetStackHeight,
@@ -219,7 +221,7 @@ function microphoneHelpText(platform: DesktopPlatform, t: TranslateFn): string {
 }
 
 export function PermissionScreen({ onComplete }: PermissionScreenProps) {
-  const { t } = useI18n();
+  const { lang, t } = useI18n();
   const [micStatus, setMicStatus] = useState<PermissionStatus>("unknown");
   const [accStatus, setAccStatus] = useState<PermissionStatus>("unknown");
   const [systemAudioStatus, setSystemAudioStatus] =
@@ -412,6 +414,22 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
     onComplete();
   };
 
+  const handleUiLanguageChange = async (
+    uiLanguage: "ru" | "en",
+  ): Promise<void> => {
+    if (uiLanguage === lang) return;
+
+    try {
+      await saveSettings({ uiLanguage });
+      await emit(SETTINGS_UPDATED_EVENT);
+    } catch (error) {
+      void logError(
+        "PERMISSIONS",
+        `Failed to change UI language: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  };
+
   const platform = runtimeInfo?.platform ?? detectDesktopPlatform();
   const requiresAccessibility = platform === "macos";
   const requiresSystemAudio = platform === "macos";
@@ -445,7 +463,7 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
     <div
       style={{
         position: "fixed",
-        top: 48,
+        top: platform === "macos" ? 48 : 0,
         right: 0,
         bottom: 0,
         left: 0,
@@ -712,6 +730,71 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
                     ? "Applications"
                     : t("permission.button.check")}
             </button>
+          </div>
+
+          <div
+            style={{
+              paddingTop: 14,
+              borderTop: "1px solid var(--border-subtle)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 16,
+            }}
+          >
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 650,
+                color: "var(--text-low)",
+              }}
+            >
+              {t("permission.language.label")}
+            </span>
+            <div
+              style={{
+                display: "flex",
+                minWidth: 190,
+                padding: 3,
+                gap: 2,
+                borderRadius: 10,
+                background: "var(--control-track)",
+              }}
+            >
+              {(["ru", "en"] as const).map((code) => {
+                const active = lang === code;
+
+                return (
+                  <button
+                    key={code}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => void handleUiLanguageChange(code)}
+                    style={{
+                      flex: 1,
+                      minHeight: 30,
+                      padding: "0 10px",
+                      border: "none",
+                      borderRadius: 8,
+                      background: active
+                        ? "var(--dropdown-active)"
+                        : "transparent",
+                      color: active ? "var(--text-hi)" : "var(--text-mid)",
+                      fontFamily: "var(--font)",
+                      fontSize: 11,
+                      fontWeight: active ? 700 : 550,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {t(
+                      code === "ru"
+                        ? "settings.uiLanguage.ru"
+                        : "settings.uiLanguage.en",
+                    )}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
       </div>
