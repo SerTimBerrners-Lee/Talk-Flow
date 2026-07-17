@@ -24,7 +24,6 @@ import { SettingsTabs } from "./tabs/SettingsTabs";
 import { DevChatTab } from "./tabs/DevChatTab";
 import { TranslationTab } from "./tabs/TranslationTab";
 import { PermissionScreen } from "../../components/PermissionScreen";
-import { OnboardingFlow } from "../../components/OnboardingFlow";
 import {
   SETTINGS_NAVIGATE_EVENT,
   SETTINGS_UPDATED_EVENT,
@@ -35,13 +34,10 @@ import {
 } from "../../lib/hotkeyEvents";
 import {
   getPermissionsPassed,
-  getOnboardingStage,
   setPermissionsPassed,
-  setOnboardingStage,
   getHistoryIndex,
   getSettings,
   isMacPlatform,
-  type OnboardingStage,
   type ThemePreference,
 } from "../../lib/store";
 import { checkAllPermissions } from "../../lib/permissions";
@@ -398,12 +394,6 @@ export function SettingsApp() {
     useState<ThemePreference>("system");
   const [navigationNonce, setNavigationNonce] = useState(0);
   const [showPermissions, setShowPermissions] = useState<boolean | null>(null);
-  const [onboardingStage, setCurrentOnboardingStage] = useState<Exclude<
-    OnboardingStage,
-    "completed"
-  > | null>(null);
-  const [startOnboardingAfterPermissions, setStartOnboardingAfterPermissions] =
-    useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -428,45 +418,24 @@ export function SettingsApp() {
   }, [themePreference]);
 
   useEffect(() => {
-    Promise.all([
-      getPermissionsPassed(),
-      checkAllPermissions(),
-      getOnboardingStage(),
-    ])
-      .then(async ([passed, permissions, storedOnboardingStage]) => {
+    Promise.all([getPermissionsPassed(), checkAllPermissions()])
+      .then(async ([passed, permissions]) => {
         const hasRequiredStartupPermissions =
           permissions.microphone !== "denied" &&
           (!isMacPlatform() || permissions.accessibility === "granted");
-        const hasExistingHistory =
-          !passed &&
-          (await getHistoryIndex()
-            .then((history) => history.length > 0)
-            .catch(() => false));
         const shouldRecoverExistingInstall =
           !passed &&
           hasRequiredStartupPermissions &&
-          hasExistingHistory;
+          (await getHistoryIndex()
+            .then((history) => history.length > 0)
+            .catch(() => false));
 
         if (shouldRecoverExistingInstall) {
           await setPermissionsPassed(true);
         }
 
-        const pendingOnboardingStage =
-          storedOnboardingStage && storedOnboardingStage !== "completed"
-            ? storedOnboardingStage
-            : null;
-        setCurrentOnboardingStage(pendingOnboardingStage);
-        setStartOnboardingAfterPermissions(
-          !passed &&
-            !shouldRecoverExistingInstall &&
-            !hasExistingHistory &&
-            storedOnboardingStage === null,
-        );
         setShowPermissions(
-          !(
-            (passed || shouldRecoverExistingInstall) &&
-            hasRequiredStartupPermissions
-          ),
+          !((passed || shouldRecoverExistingInstall) && hasRequiredStartupPermissions),
         );
         setLoadError(null);
       })
@@ -476,8 +445,6 @@ export function SettingsApp() {
           `Failed to load initial state: ${error instanceof Error ? error.message : String(error)}`,
         );
         setShowPermissions(false);
-        setCurrentOnboardingStage(null);
-        setStartOnboardingAfterPermissions(false);
         setLoadError(t("settingsApp.loadError"));
       });
   }, []);
@@ -526,19 +493,7 @@ export function SettingsApp() {
   const handlePermissionsComplete = async () => {
     await setPermissionsPassed(true);
     setShowPermissions(false);
-
-    if (onboardingStage) {
-      setCurrentOnboardingStage(onboardingStage);
-    } else if (startOnboardingAfterPermissions) {
-      await setOnboardingStage("model");
-      setCurrentOnboardingStage("model");
-    }
-
     await emit(SETTINGS_UPDATED_EVENT);
-  };
-
-  const handleOnboardingComplete = (): void => {
-    setCurrentOnboardingStage(null);
   };
 
   const openHistoryEntryFromChat = (entryId: string): void => {
@@ -707,12 +662,6 @@ export function SettingsApp() {
 
       {showPermissions && (
         <PermissionScreen onComplete={handlePermissionsComplete} />
-      )}
-      {!showPermissions && onboardingStage && (
-        <OnboardingFlow
-          initialStage={onboardingStage}
-          onComplete={handleOnboardingComplete}
-        />
       )}
     </div>
   );

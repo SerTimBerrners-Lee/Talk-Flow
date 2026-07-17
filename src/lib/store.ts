@@ -263,8 +263,6 @@ export interface AppSettings {
   translation: TranslationSettings;
 }
 
-export type OnboardingStage = "model" | "practice" | "success" | "completed";
-
 export interface WidgetPosition {
   x: number;
   y: number;
@@ -2157,7 +2155,6 @@ const PERMISSIONS_VERSION_KEY = "permissions_version";
 const CURRENT_PERMISSIONS_VERSION = 3;
 const SYSTEM_AUDIO_PERMISSION_VERIFIED_V2_KEY =
   "system_audio_permission_verified_v2";
-const ONBOARDING_STAGE_KEY = "onboarding_stage";
 const WIDGET_POSITION_KEY = "widget_position";
 
 export async function getPermissionsPassed(): Promise<boolean> {
@@ -2189,26 +2186,6 @@ export async function setSystemAudioPermissionVerifiedV2(
 ): Promise<void> {
   const store = await getStore();
   await store.set(SYSTEM_AUDIO_PERMISSION_VERIFIED_V2_KEY, value);
-  await store.save();
-}
-
-export async function getOnboardingStage(): Promise<OnboardingStage | null> {
-  const store = await getStore();
-  const stage = await store.get<unknown>(ONBOARDING_STAGE_KEY);
-
-  return stage === "model" ||
-    stage === "practice" ||
-    stage === "success" ||
-    stage === "completed"
-    ? stage
-    : null;
-}
-
-export async function setOnboardingStage(
-  stage: OnboardingStage,
-): Promise<void> {
-  const store = await getStore();
-  await store.set(ONBOARDING_STAGE_KEY, stage);
   await store.save();
 }
 
