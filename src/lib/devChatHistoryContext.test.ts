@@ -4,6 +4,7 @@ import {
   buildDevChatHistoryContext,
   buildHistorySearchIndex,
   cosineSimilarity,
+  historySearchEmbeddingQuery,
   reconcileHistorySearchIndex,
 } from "./devChatHistoryContext";
 import type { HistoryEntry } from "./store";
@@ -145,6 +146,122 @@ describe("dev chat history context", () => {
     expect(result.contextText).not.toContain("Говорили про отпуск");
     expect(result.sources).toHaveLength(1);
     expect(result.sources?.[0]?.entryId).toBe("match");
+  });
+
+  it("finds a described bug even when the record does not contain the word bug", () => {
+    const reportedBug = [
+      "После транскрибации файла отобразился спикер 1, хотя это я.",
+      "Название спикера редактировать очень сложно: курсор прыгает туда-сюда и не даёт удалить слово.",
+    ].join(" ");
+    const result = buildDevChatHistoryContext(
+      "найди все записи, в которых я описывал баги",
+      [
+        historyEntry("reported-bug", "2026-07-16T19:34:34.691Z", reportedBug),
+        historyEntry("unrelated", "2026-07-16T20:00:00.000Z", "Обсудили планы публикации новой версии."),
+      ],
+      "ru",
+    );
+
+    expect(result.directAnswer).toBeUndefined();
+    expect(result.contextText).toContain("курсор прыгает");
+    expect(result.contextText).not.toContain("планы публикации");
+    expect(result.sources?.map((source) => source.entryId)).toEqual(["reported-bug"]);
+  });
+
+  it("does not limit an explicit all-records search to six matches", () => {
+    const history = Array.from({ length: 9 }, (_, index) =>
+      historyEntry(
+        `bug-${index}`,
+        `2026-07-${String(index + 1).padStart(2, "0")}T10:00:00.000Z`,
+        `В этой записи кнопка ${index + 1} не работает.`,
+      ),
+    );
+    const result = buildDevChatHistoryContext(
+      "найди все записи, в которых я описывал баги",
+      history,
+      "ru",
+    );
+
+    expect(result.sources).toHaveLength(9);
+    expect(result.contextText).toContain("кнопка 1 не работает");
+    expect(result.contextText).toContain("кнопка 9 не работает");
+  });
+
+  it("expands issue queries before cloud embedding", () => {
+    const expanded = historySearchEmbeddingQuery("найди записи про баги");
+
+    expect(expanded).toContain("найди записи про баги");
+    expect(expanded).toContain("не работает");
+    expect(historySearchEmbeddingQuery("что было про оплату?")).toBe("что было про оплату?");
+  });
+
+  it("uses offline concept templates for common history intents", () => {
+    const cases = [
+      {
+        question: "найди все записи с поручениями",
+        text: "Нужно подготовить договор и отправить его клиенту.",
+        hint: "Задачи, поручения",
+      },
+      {
+        question: "покажи, о чём мы договорились",
+        text: "Мы решили и согласовали запуск новой версии в пятницу.",
+        hint: "Принятые решения",
+      },
+      {
+        question: "где я предлагал варианты реализации?",
+        text: "Как вариант, можно было бы вынести обработку в отдельный сервис.",
+        hint: "Идеи, предложения",
+      },
+      {
+        question: "найди, что я обещал сделать",
+        text: "Я возьму на себя проверку релизной сборки.",
+        hint: "Обещания и обязательства",
+      },
+      {
+        question: "покажи все упомянутые риски",
+        text: "Есть риск, что поставка задержится и заблокирует производство.",
+        hint: "Риски, блокеры",
+      },
+    ];
+
+    for (const [index, item] of cases.entries()) {
+      const result = buildDevChatHistoryContext(
+        item.question,
+        [
+          historyEntry(`match-${index}`, "2026-07-16T10:00:00.000Z", item.text),
+          historyEntry(`other-${index}`, "2026-07-16T11:00:00.000Z", "Обсуждали расписание отпуска."),
+        ],
+        "ru",
+      );
+
+      expect(result.contextText).toContain(item.text.slice(0, 40));
+      expect(result.contextText).not.toContain("расписание отпуска");
+      expect(result.sources?.map((source) => source.entryId)).toEqual([`match-${index}`]);
+      expect(historySearchEmbeddingQuery(item.question)).toContain(item.hint);
+    }
+  });
+
+  it("does not turn an ordinary request for new ideas into a history search", () => {
+    const result = buildDevChatHistoryContext(
+      "предложи идеи для нового интерфейса",
+      [historyEntry("old-idea", "2026-07-16T10:00:00.000Z", "Есть идея изменить меню.")],
+      "ru",
+    );
+
+    expect(result.contextText).toBeUndefined();
+    expect(result.sources).toBeUndefined();
+  });
+
+  it("does not substitute unrelated recent records when an offline concept has no matches", () => {
+    const result = buildDevChatHistoryContext(
+      "найди все записи с поручениями",
+      [historyEntry("unrelated", "2026-07-16T11:00:00.000Z", "Обсуждали расписание отпуска.")],
+      "ru",
+    );
+
+    expect(result.directAnswer).toBe("Я не нашёл подходящих записей транскрибации.");
+    expect(result.contextText).toBeUndefined();
+    expect(result.sources).toBeUndefined();
   });
 
   it("does not search history for ordinary small talk", () => {

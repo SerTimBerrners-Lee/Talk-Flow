@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import {
+  historySearchEmbeddingQuery,
   saveCachedHistorySearchIndex,
   type HistorySearchChunk,
 } from "./devChatHistoryContext";
@@ -94,7 +95,7 @@ export async function embedHistoryQuery(
   if (!backend) return undefined;
 
   try {
-    const [embedding] = await embedTexts([query], backend);
+    const [embedding] = await embedTexts([historySearchEmbeddingQuery(query)], backend);
     return embedding;
   } catch {
     return undefined;

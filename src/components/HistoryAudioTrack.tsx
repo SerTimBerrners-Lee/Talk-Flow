@@ -1,10 +1,4 @@
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactElement,
-} from "react";
+import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
 import { IconLoader2, IconPause, IconPlayerPlay } from "../lib/icons";
 import { logError } from "../lib/logger";
@@ -207,8 +201,10 @@ export function buildHistoryAudioTrackSources(
       id: track.kind,
       label: track.label,
       path: track.path,
-      mimeType: "audio/wav",
-      fileName: `${track.kind}.wav`,
+      mimeType: track.path.toLowerCase().endsWith(".webm")
+        ? "audio/webm"
+        : "audio/wav",
+      fileName: track.path.split(/[\\/]/).pop() || `${track.kind}.wav`,
     }));
   }
 
@@ -244,8 +240,8 @@ export function HistoryAudioTrack({
   activeAudioId,
   onActiveAudioChange,
 }: HistoryAudioTrackProps): ReactElement | null {
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const objectUrlRef = useRef<string | null>(null);
+  const audioRefs = useRef<Array<HTMLAudioElement | null>>([]);
+  const objectUrlRefs = useRef<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const [playing, setPlaying] = useState(false);
@@ -253,51 +249,58 @@ export function HistoryAudioTrack({
   const [duration, setDuration] = useState(0);
 
   const sources = useMemo(() => buildHistoryAudioTrackSources(entry), [entry]);
-  const selectedSource = sources[0] ?? null;
-  const ownAudioId = selectedSource ? `${entry.id}:${selectedSource.id}` : null;
+  const sourceIds = sources.map((source) => source.id).join("+");
+  const ownAudioId = sources.length > 0 ? `${entry.id}:${sourceIds}` : null;
+
+  const revokeObjectUrls = (): void => {
+    for (const url of objectUrlRefs.current) {
+      URL.revokeObjectURL(url);
+    }
+    objectUrlRefs.current = [];
+  };
+
+  const pauseAllTracks = (): void => {
+    for (const audio of audioRefs.current) {
+      audio?.pause();
+    }
+  };
 
   useEffect(() => {
     return () => {
-      if (objectUrlRef.current) {
-        URL.revokeObjectURL(objectUrlRef.current);
-        objectUrlRef.current = null;
-      }
+      revokeObjectUrls();
     };
   }, []);
 
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    if (activeAudioId !== ownAudioId && !audio.paused) {
-      audio.pause();
+    if (activeAudioId !== ownAudioId) {
+      pauseAllTracks();
     }
   }, [activeAudioId, ownAudioId]);
 
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    audio.pause();
-    audio.removeAttribute("src");
-    audio.load();
+    for (const audio of audioRefs.current) {
+      if (!audio) continue;
+      audio.pause();
+      audio.removeAttribute("src");
+      audio.load();
+    }
     setPlaying(false);
     setCurrentTime(0);
     setDuration(0);
     setError(false);
+    revokeObjectUrls();
+  }, [entry.id, sourceIds]);
 
-    if (objectUrlRef.current) {
-      URL.revokeObjectURL(objectUrlRef.current);
-      objectUrlRef.current = null;
-    }
-  }, [entry.id, selectedSource?.id]);
-
-  if (!selectedSource || !ownAudioId) {
+  if (sources.length === 0 || !ownAudioId) {
     return null;
   }
 
-  const loadSource = async (): Promise<boolean> => {
-    if (objectUrlRef.current && audioRef.current?.src) {
+  const loadSources = async (): Promise<boolean> => {
+    const audioElements = audioRefs.current.slice(0, sources.length);
+    if (
+      objectUrlRefs.current.length === sources.length &&
+      audioElements.every((audio) => Boolean(audio?.src))
+    ) {
       return true;
     }
 
@@ -305,31 +308,36 @@ export function HistoryAudioTrack({
     setError(false);
 
     try {
-      const audioData = selectedSource.path
-        ? await readHistoryAudio(selectedSource.path)
-        : {
-            audioBase64: selectedSource.audioBase64 || "",
-            mimeType: selectedSource.mimeType || "audio/webm",
-          };
-
-      if (!audioData.audioBase64) {
+      const audioData = await Promise.all(
+        sources.map((source) =>
+          source.path
+            ? readHistoryAudio(source.path)
+            : Promise.resolve({
+                audioBase64: source.audioBase64 || "",
+                mimeType: source.mimeType || "audio/webm",
+              }),
+        ),
+      );
+      if (audioData.some((data) => !data.audioBase64)) {
         throw new Error("Audio data is empty");
       }
 
-      const blob = base64ToBlob(
-        audioData.audioBase64,
-        audioData.mimeType || selectedSource.mimeType || "audio/webm",
+      const nextUrls = audioData.map((data, index) =>
+        URL.createObjectURL(
+          base64ToBlob(
+            data.audioBase64,
+            data.mimeType || sources[index]?.mimeType || "audio/webm",
+          ),
+        ),
       );
-      const objectUrl = URL.createObjectURL(blob);
+      revokeObjectUrls();
+      objectUrlRefs.current = nextUrls;
 
-      if (objectUrlRef.current) {
-        URL.revokeObjectURL(objectUrlRef.current);
-      }
-      objectUrlRef.current = objectUrl;
-
-      if (audioRef.current) {
-        audioRef.current.src = objectUrl;
-        audioRef.current.load();
+      for (let index = 0; index < nextUrls.length; index += 1) {
+        const audio = audioRefs.current[index];
+        if (!audio) continue;
+        audio.src = nextUrls[index];
+        audio.load();
       }
       return true;
     } catch (loadError) {
@@ -345,24 +353,35 @@ export function HistoryAudioTrack({
   };
 
   const togglePlayback = async (): Promise<void> => {
-    const audio = audioRef.current;
-    if (!audio) return;
+    const primaryAudio = audioRefs.current[0];
+    if (!primaryAudio) return;
 
-    if (!audio.paused) {
-      audio.pause();
+    if (!primaryAudio.paused) {
+      pauseAllTracks();
       onActiveAudioChange(null);
       return;
     }
 
-    const loaded = await loadSource();
-    if (!loaded || !audioRef.current?.src) {
+    const loaded = await loadSources();
+    const tracks = audioRefs.current
+      .slice(0, sources.length)
+      .filter((audio): audio is HTMLAudioElement => Boolean(audio?.src));
+    if (!loaded || tracks.length !== sources.length) {
       return;
     }
 
     try {
+      const startTime = tracks[0].currentTime || 0;
+      for (const audio of tracks.slice(1)) {
+        audio.currentTime = Math.min(
+          startTime,
+          Number.isFinite(audio.duration) ? audio.duration : startTime,
+        );
+      }
       onActiveAudioChange(ownAudioId);
-      await audioRef.current.play();
+      await Promise.all(tracks.map((audio) => audio.play()));
     } catch (playError) {
+      pauseAllTracks();
       onActiveAudioChange(null);
       setError(true);
       void logError(
@@ -391,37 +410,81 @@ export function HistoryAudioTrack({
           void togglePlayback();
         }}
         onSeek={(nextTime) => {
-          const audio = audioRef.current;
-          if (!audio) return;
-          audio.currentTime = nextTime;
+          for (const audio of audioRefs.current) {
+            if (!audio) continue;
+            audio.currentTime = Math.min(
+              nextTime,
+              Number.isFinite(audio.duration) ? audio.duration : nextTime,
+            );
+          }
           setCurrentTime(nextTime);
         }}
       />
 
-      <audio
-        ref={audioRef}
-        preload="metadata"
-        onLoadedMetadata={(event) => {
-          setDuration(event.currentTarget.duration || 0);
-        }}
-        onTimeUpdate={(event) => {
-          setCurrentTime(event.currentTarget.currentTime || 0);
-        }}
-        onPlay={() => {
-          setPlaying(true);
-          onActiveAudioChange(ownAudioId);
-        }}
-        onPause={() => {
-          setPlaying(false);
-          setCurrentTime(audioRef.current?.currentTime || 0);
-        }}
-        onEnded={() => {
-          setPlaying(false);
-          setCurrentTime(0);
-          onActiveAudioChange(null);
-        }}
-        style={{ display: "none" }}
-      />
+      {sources.map((source, index) => (
+        <audio
+          key={source.id}
+          ref={(audio) => {
+            audioRefs.current[index] = audio;
+          }}
+          preload="metadata"
+          onLoadedMetadata={
+            index === 0
+              ? (event) => {
+                  setDuration(event.currentTarget.duration || 0);
+                }
+              : undefined
+          }
+          onTimeUpdate={
+            index === 0
+              ? (event) => {
+                  const nextTime = event.currentTarget.currentTime || 0;
+                  setCurrentTime(nextTime);
+                  for (const audio of audioRefs.current.slice(1)) {
+                    if (
+                      audio &&
+                      !audio.paused &&
+                      Math.abs(audio.currentTime - nextTime) > 0.25
+                    ) {
+                      audio.currentTime = nextTime;
+                    }
+                  }
+                }
+              : undefined
+          }
+          onPlay={
+            index === 0
+              ? () => {
+                  setPlaying(true);
+                  onActiveAudioChange(ownAudioId);
+                }
+              : undefined
+          }
+          onPause={
+            index === 0
+              ? () => {
+                  pauseAllTracks();
+                  setPlaying(false);
+                  setCurrentTime(audioRefs.current[0]?.currentTime || 0);
+                }
+              : undefined
+          }
+          onEnded={
+            index === 0
+              ? () => {
+                  pauseAllTracks();
+                  for (const audio of audioRefs.current) {
+                    if (audio) audio.currentTime = 0;
+                  }
+                  setPlaying(false);
+                  setCurrentTime(0);
+                  onActiveAudioChange(null);
+                }
+              : undefined
+          }
+          style={{ display: "none" }}
+        />
+      ))}
     </div>
   );
 }

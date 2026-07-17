@@ -33,4 +33,37 @@ describe("history audio track sources", () => {
       },
     ]);
   });
+
+  it("keeps both call tracks for synchronized playback", () => {
+    const callEntry = entry("call");
+    callEntry.callTracks = [
+      {
+        kind: "mic",
+        label: "Вы",
+        path: "/tmp/mic.webm",
+      },
+      {
+        kind: "system",
+        label: "Созвон",
+        path: "/tmp/system.wav",
+      },
+    ];
+
+    expect(buildHistoryAudioTrackSources(callEntry)).toEqual([
+      {
+        id: "system",
+        label: "Созвон",
+        path: "/tmp/system.wav",
+        mimeType: "audio/wav",
+        fileName: "system.wav",
+      },
+      {
+        id: "mic",
+        label: "Вы",
+        path: "/tmp/mic.webm",
+        mimeType: "audio/webm",
+        fileName: "mic.webm",
+      },
+    ]);
+  });
 });

@@ -114,8 +114,12 @@ struct LiveTranslationRuntime {
 struct LiveTranslationMicRuntime {
     mic_stop_tx: mpsc::Sender<()>,
     mic_stopped_rx: mpsc::Receiver<Result<(), String>>,
-    mic_audio_tx: tokio::sync::mpsc::Sender<RealtimeAudioCommand>,
-    mic_worker_rx: mpsc::Receiver<Result<(), String>>,
+    mic_audio_tx: Option<tokio::sync::mpsc::Sender<RealtimeAudioCommand>>,
+    mic_worker_rx: Option<mpsc::Receiver<Result<(), String>>>,
+}
+
+fn should_capture_live_microphone(include_microphone: bool, save_audio: bool) -> bool {
+    include_microphone || save_audio
 }
 
 enum PlaybackCommand {
@@ -775,7 +779,7 @@ fn feed_mic_samples<T, F>(
     data: &[T],
     channels: usize,
     encoder: &Arc<Mutex<PcmEncoder>>,
-    sender: &tokio::sync::mpsc::Sender<RealtimeAudioCommand>,
+    sender: Option<&tokio::sync::mpsc::Sender<RealtimeAudioCommand>>,
     writer: &Arc<Mutex<Option<hound::WavWriter<BufWriter<File>>>>>,
     mut to_f32: F,
 ) where
@@ -802,13 +806,15 @@ fn feed_mic_samples<T, F>(
                 }
             }
         }
-        let _ = sender.try_send(RealtimeAudioCommand::Pcm(chunk));
+        if let Some(sender) = sender {
+            let _ = sender.try_send(RealtimeAudioCommand::Pcm(chunk));
+        }
     }
 }
 
 fn start_mic_capture(
     label: Option<String>,
-    audio_tx: tokio::sync::mpsc::Sender<RealtimeAudioCommand>,
+    audio_tx: Option<tokio::sync::mpsc::Sender<RealtimeAudioCommand>>,
     wav_path: Option<PathBuf>,
 ) -> Result<(mpsc::Sender<()>, mpsc::Receiver<Result<(), String>>), String> {
     let (stop_tx, stop_rx) = mpsc::channel();
@@ -828,9 +834,9 @@ fn start_mic_capture(
             }));
             let error_fn = |error| logger::log_error("LIVE_TRANSLATION", &format!("Microphone stream error: {}", error));
             let stream = match format {
-                cpal::SampleFormat::F32 => { let e=encoder.clone(); let s=audio_tx.clone(); let w=writer.clone(); device.build_input_stream(&config, move |d:&[f32],_| feed_mic_samples(d,channels,&e,&s,&w,|v|v), error_fn, None) },
-                cpal::SampleFormat::I16 => { let e=encoder.clone(); let s=audio_tx.clone(); let w=writer.clone(); device.build_input_stream(&config, move |d:&[i16],_| feed_mic_samples(d,channels,&e,&s,&w,|v|v as f32/i16::MAX as f32), error_fn, None) },
-                cpal::SampleFormat::U16 => { let e=encoder.clone(); let s=audio_tx.clone(); let w=writer.clone(); device.build_input_stream(&config, move |d:&[u16],_| feed_mic_samples(d,channels,&e,&s,&w,|v|(v as f32-32768.0)/32768.0), error_fn, None) },
+                cpal::SampleFormat::F32 => { let e=encoder.clone(); let s=audio_tx.clone(); let w=writer.clone(); device.build_input_stream(&config, move |d:&[f32],_| feed_mic_samples(d,channels,&e,s.as_ref(),&w,|v|v), error_fn, None) },
+                cpal::SampleFormat::I16 => { let e=encoder.clone(); let s=audio_tx.clone(); let w=writer.clone(); device.build_input_stream(&config, move |d:&[i16],_| feed_mic_samples(d,channels,&e,s.as_ref(),&w,|v|v as f32/i16::MAX as f32), error_fn, None) },
+                cpal::SampleFormat::U16 => { let e=encoder.clone(); let s=audio_tx.clone(); let w=writer.clone(); device.build_input_stream(&config, move |d:&[u16],_| feed_mic_samples(d,channels,&e,s.as_ref(),&w,|v|(v as f32-32768.0)/32768.0), error_fn, None) },
                 other => return Err(format!("Unsupported microphone sample format: {:?}", other)),
             }.map_err(|error| format!("Failed to open microphone: {}", error))?;
             stream.play().map_err(|error| format!("Failed to start microphone: {}", error))?;
@@ -841,7 +847,7 @@ fn start_mic_capture(
         let _ = stop_rx.recv();
         drop(stream);
         if let Ok(mut encoder) = encoder.lock() {
-            if let Some(chunk) = encoder.flush() { let _ = audio_tx.blocking_send(RealtimeAudioCommand::Pcm(chunk)); }
+            if let (Some(chunk), Some(audio_tx)) = (encoder.flush(), audio_tx.as_ref()) { let _ = audio_tx.blocking_send(RealtimeAudioCommand::Pcm(chunk)); }
         }
         if let Ok(mut guard) = writer.lock() {
             if let Some(writer) = guard.take() { let _ = writer.finalize(); }
@@ -940,11 +946,12 @@ pub async fn start_live_translation(
     } else {
         None
     });
+    let capture_microphone = should_capture_live_microphone(req.include_microphone, req.save_audio);
     let call_session = match call_capture::start_call_capture(
         app.clone(),
         StartCallCaptureRequest {
             target_id: None,
-            include_mic: req.include_microphone,
+            include_mic: capture_microphone,
             include_system: true,
             mic_device_id: None,
             sample_rate: Some(SAMPLE_RATE),
@@ -965,55 +972,23 @@ pub async fn start_live_translation(
             return Err(error);
         }
     };
-    let mic = if req.include_microphone {
-        let (mic_tx, mic_rx) = tokio::sync::mpsc::channel(QUEUE_CHUNKS);
-        let mut mic_connection = connection;
-        mic_connection.voice_output = false;
-        mic_connection.voice = None;
-        mic_connection.voice_speed = None;
-        let mic_worker = match spawn_translation_worker(
-            app.clone(),
-            id.clone(),
-            "mic",
-            started_at_ms,
-            mic_connection,
-            mic_rx,
-            None,
-        ) {
-            Ok(worker) => worker,
-            Err(error) => {
-                let _ = call_capture::stop_call_capture(call_session.id.clone()).await;
-                call_capture::set_system_audio_sink(None);
-                reset_system_audio_policy();
-                let _ = system_tx.send(RealtimeAudioCommand::Cancel).await;
-                if let Some(playback) = playback.as_ref() {
-                    let _ = playback.command_tx.send(PlaybackCommand::Cancel);
-                }
-                return Err(error);
-            }
-        };
-        let mic_worker_rx = mic_worker.result_rx;
-        if let Err(error) = wait_for_translation_worker("mic", mic_worker.started_rx).await {
-            let _ = call_capture::stop_call_capture(call_session.id.clone()).await;
-            call_capture::set_system_audio_sink(None);
-            reset_system_audio_policy();
-            let _ = system_tx.send(RealtimeAudioCommand::Cancel).await;
-            let _ = mic_tx.send(RealtimeAudioCommand::Cancel).await;
-            if let Some(playback) = playback.as_ref() {
-                let _ = playback.command_tx.send(PlaybackCommand::Cancel);
-            }
-            logger::log_error(
-                "LIVE_TRANSLATION",
-                &format!("channel=mic stage=startup_failed error={}", error),
-            );
-            return Err(error);
-        }
-        let mic_path = req
-            .save_audio
-            .then(|| PathBuf::from(&call_session.directory).join("mic.wav"));
-        let (mic_stop_tx, mic_stopped_rx) =
-            match start_mic_capture(req.mic_device_label, mic_tx.clone(), mic_path) {
-                Ok(value) => value,
+    let mic = if capture_microphone {
+        let (mic_audio_tx, mic_worker_rx) = if req.include_microphone {
+            let (mic_tx, mic_rx) = tokio::sync::mpsc::channel(QUEUE_CHUNKS);
+            let mut mic_connection = connection;
+            mic_connection.voice_output = false;
+            mic_connection.voice = None;
+            mic_connection.voice_speed = None;
+            let mic_worker = match spawn_translation_worker(
+                app.clone(),
+                id.clone(),
+                "mic",
+                started_at_ms,
+                mic_connection,
+                mic_rx,
+                None,
+            ) {
+                Ok(worker) => worker,
                 Err(error) => {
                     let _ = call_capture::stop_call_capture(call_session.id.clone()).await;
                     call_capture::set_system_audio_sink(None);
@@ -1025,10 +1000,50 @@ pub async fn start_live_translation(
                     return Err(error);
                 }
             };
+            let mic_worker_rx = mic_worker.result_rx;
+            if let Err(error) = wait_for_translation_worker("mic", mic_worker.started_rx).await {
+                let _ = call_capture::stop_call_capture(call_session.id.clone()).await;
+                call_capture::set_system_audio_sink(None);
+                reset_system_audio_policy();
+                let _ = system_tx.send(RealtimeAudioCommand::Cancel).await;
+                let _ = mic_tx.send(RealtimeAudioCommand::Cancel).await;
+                if let Some(playback) = playback.as_ref() {
+                    let _ = playback.command_tx.send(PlaybackCommand::Cancel);
+                }
+                logger::log_error(
+                    "LIVE_TRANSLATION",
+                    &format!("channel=mic stage=startup_failed error={}", error),
+                );
+                return Err(error);
+            }
+            (Some(mic_tx), Some(mic_worker_rx))
+        } else {
+            (None, None)
+        };
+        let mic_path = req
+            .save_audio
+            .then(|| PathBuf::from(&call_session.directory).join("mic.wav"));
+        let (mic_stop_tx, mic_stopped_rx) =
+            match start_mic_capture(req.mic_device_label, mic_audio_tx.clone(), mic_path) {
+                Ok(value) => value,
+                Err(error) => {
+                    let _ = call_capture::stop_call_capture(call_session.id.clone()).await;
+                    call_capture::set_system_audio_sink(None);
+                    reset_system_audio_policy();
+                    let _ = system_tx.send(RealtimeAudioCommand::Cancel).await;
+                    if let Some(mic_audio_tx) = mic_audio_tx.as_ref() {
+                        let _ = mic_audio_tx.send(RealtimeAudioCommand::Cancel).await;
+                    }
+                    if let Some(playback) = playback.as_ref() {
+                        let _ = playback.command_tx.send(PlaybackCommand::Cancel);
+                    }
+                    return Err(error);
+                }
+            };
         Some(LiveTranslationMicRuntime {
             mic_stop_tx,
             mic_stopped_rx,
-            mic_audio_tx: mic_tx,
+            mic_audio_tx,
             mic_worker_rx,
         })
     } else {
@@ -1049,12 +1064,13 @@ pub async fn start_live_translation(
     logger::log_info(
         "LIVE_TRANSLATION",
         &format!(
-            "Started session={} provider={} model={} target={} sources=system{} voice={}",
+            "Started session={} provider={} model={} target={} translation_sources=system{} saved_audio={} voice={}",
             id,
             req.provider,
             req.model,
             req.target_language,
             if req.include_microphone { "+mic" } else { "" },
+            if req.save_audio { "system+mic" } else { "off" },
             req.voice_enabled
         ),
     );
@@ -1076,16 +1092,18 @@ pub async fn stop_live_translation() -> Result<StopLiveTranslationResult, String
     let call_capture_result = call_capture::stop_call_capture(runtime.call_session_id).await;
     reset_system_audio_policy();
     if let Some(mic) = runtime.mic.as_ref() {
-        let _ = mic.mic_audio_tx.send(RealtimeAudioCommand::Finish).await;
+        if let Some(mic_audio_tx) = mic.mic_audio_tx.as_ref() {
+            let _ = mic_audio_tx.send(RealtimeAudioCommand::Finish).await;
+        }
     }
     let _ = runtime
         .system_audio_tx
         .send(RealtimeAudioCommand::Finish)
         .await;
-    let mic_result = if let Some(mic) = runtime.mic {
+    let mic_result = if let Some(mic_worker_rx) = runtime.mic.and_then(|mic| mic.mic_worker_rx) {
         Some(
             tokio::task::spawn_blocking(move || {
-                mic.mic_worker_rx.recv_timeout(Duration::from_secs(15))
+                mic_worker_rx.recv_timeout(Duration::from_secs(15))
             })
             .await
             .map_err(|error| format!("Mic translation worker failed: {}", error))?,
@@ -1169,6 +1187,13 @@ mod tests {
         assert!(request.voice_volume.is_none());
         assert!(request.voice_speed.is_none());
         assert!(!request.mute_original);
+    }
+
+    #[test]
+    fn saved_live_audio_always_captures_both_sides() {
+        assert!(should_capture_live_microphone(false, true));
+        assert!(should_capture_live_microphone(true, false));
+        assert!(!should_capture_live_microphone(false, false));
     }
 
     #[test]

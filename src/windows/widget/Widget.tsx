@@ -985,6 +985,7 @@ export function Widget() {
         onStatus: setFileStatus,
         onProgress: setFileProgress,
         speakerDiarization: settings.fileSpeakerDiarization === true,
+        identifyFirstSpeakerAsUser: true,
       });
 
       if (handle.isCancelled()) {
@@ -1290,7 +1291,10 @@ export function Widget() {
         callSystemAudioPermissionReadyRef.current = true;
       }
       let micLabel: string | null = null;
-      if (settings.translation.liveMicrophoneEnabled) {
+      if (
+        settings.translation.liveMicrophoneEnabled ||
+        settings.saveRecordingAudio
+      ) {
         const devices = await navigator.mediaDevices.enumerateDevices().catch(() => []);
         micLabel =
           devices.find(

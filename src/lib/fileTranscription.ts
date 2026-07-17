@@ -72,6 +72,67 @@ export interface SpeakerTranscriptSegment {
   text: string;
 }
 
+function formatSpeakerTimestamp(seconds: number): string {
+  const total = Math.max(0, Math.round(seconds));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const rest = total % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;
+}
+
+export function identifyFirstFileSpeakerAsUser(
+  result: FileTranscriptionResult,
+): FileTranscriptionResult {
+  if (!result.segments?.length) {
+    return result;
+  }
+
+  const orderedIds: string[] = [];
+  for (const segment of result.segments) {
+    if (!orderedIds.includes(segment.speakerId)) {
+      orderedIds.push(segment.speakerId);
+    }
+  }
+  for (const speaker of result.speakers || []) {
+    if (!orderedIds.includes(speaker.id)) {
+      orderedIds.push(speaker.id);
+    }
+  }
+
+  const labels = new Map<string, string>();
+  orderedIds.forEach((speakerId, index) => {
+    labels.set(
+      speakerId,
+      index === 0
+        ? tn("callCapture.speakerYou")
+        : tn("callCapture.speakerGuestN", { index }),
+    );
+  });
+  const speakers = orderedIds.map((id) => ({
+    id,
+    label: labels.get(id) || tn("callCapture.speakerGuestN", { index: 1 }),
+  }));
+  const segments = result.segments.map((segment) => ({
+    ...segment,
+    speakerLabel:
+      labels.get(segment.speakerId) ||
+      tn("callCapture.speakerGuestN", { index: 1 }),
+  }));
+  const text = segments
+    .map(
+      (segment) =>
+        `[${formatSpeakerTimestamp(segment.start)}] ${segment.speakerLabel}: ${segment.text.trim()}`,
+    )
+    .join("\n");
+
+  return {
+    ...result,
+    text,
+    speakers,
+    segments,
+  };
+}
+
 interface NativeTranscriptionResult {
   raw: string;
   cleaned: string;
@@ -623,12 +684,14 @@ export async function transcribeFilePathOnly({
   onStatus,
   onProgress,
   speakerDiarization = false,
+  identifyFirstSpeakerAsUser = false,
 }: {
   filePath: string;
   settings: AppSettings;
   onStatus?: (status: FileTranscriptionStatus) => void;
   onProgress?: (progress: FileTranscriptionProgress) => void;
   speakerDiarization?: boolean;
+  identifyFirstSpeakerAsUser?: boolean;
 }): Promise<FileTranscriptionResult> {
   const requestId = crypto.randomUUID();
   const fileName = fileNameFromPath(filePath);
@@ -692,7 +755,7 @@ export async function transcribeFilePathOnly({
       throw new Error(tn("fileTranscription.errNoSpeech"));
     }
 
-    return {
+    const transcription: FileTranscriptionResult = {
       text,
       converted: true,
       uploadedFileName: fileName,
@@ -701,6 +764,9 @@ export async function transcribeFilePathOnly({
       speakers: result.speakers,
       segments: result.segments,
     };
+    return identifyFirstSpeakerAsUser
+      ? identifyFirstFileSpeakerAsUser(transcription)
+      : transcription;
   } finally {
     unlisten();
   }
@@ -727,6 +793,7 @@ export async function retryFileHistoryEntry(
       filePath: entry.filePath,
       settings,
       speakerDiarization: settings.fileSpeakerDiarization === true,
+      identifyFirstSpeakerAsUser: true,
     });
 
     if (handle.isCancelled()) {

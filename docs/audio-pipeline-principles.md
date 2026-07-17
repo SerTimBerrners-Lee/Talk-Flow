@@ -116,9 +116,12 @@ updates to at most one render per 100 ms, and serializes overlay commands so an
 older render cannot overwrite a newer one.
 API keys stay in the Rust request path and must never appear in events or logs.
 
-When `saveRecordingAudio` is enabled, `system.wav` is written and `mic.wav` is
-added only when live microphone translation is enabled. When saving is disabled,
-no audio file is created and the
+When `saveRecordingAudio` is enabled, `system.wav` and `mic.wav` are written so
+history playback contains both sides of the conversation. The live microphone
+translation toggle controls whether mic PCM is sent to the realtime translation
+worker; it does not control local mic recording. When saving is disabled and
+live microphone translation is off, no mic capture is started. When saving is
+disabled, no audio file is created and the
 whole session must not be retained in memory. Live translation, call capture, and
 ordinary dictation mutually exclude each other.
 

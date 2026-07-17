@@ -28,6 +28,7 @@ import { HISTORY_UPDATED_EVENT, SETTINGS_UPDATED_EVENT } from "../../../lib/hotk
 import { formatErrorMessage } from "../../../lib/utils";
 import { isSummaryAvailable } from "../../../lib/summarize";
 import { SummaryModal } from "../../../components/SummaryModal";
+import { SpeakerNameInput } from "../../../components/SpeakerNameInput";
 import { useI18n, type TFunc } from "../../../lib/i18n";
 import {
   canUseCloudSpeakerDiarization,
@@ -648,6 +649,7 @@ export function FileTranscriptionTab({
         onStatus: setStatus,
         onProgress: setProgress,
         speakerDiarization: speakerMode,
+        identifyFirstSpeakerAsUser: true,
       });
       const entry: HistoryEntry = {
         id: crypto.randomUUID(),
@@ -1406,24 +1408,13 @@ export function FileTranscriptionTab({
               {resultEntry.speakers?.length ? (
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   {resultEntry.speakers.map((speaker) => (
-                    <input
+                    <SpeakerNameInput
                       key={speaker.id}
-                      className="input"
                       value={speaker.label}
-                      onChange={(event) => {
-                        void renameSpeaker(
-                          speaker.id,
-                          event.target.value || speaker.label,
-                        );
-                      }}
-                      style={{
-                        width: 140,
-                        height: 34,
-                        padding: "7px 10px",
-                        fontSize: 12,
-                        fontWeight: 650,
-                      }}
-                      aria-label={t("fileTab.speaker.nameAria", { name: speaker.label })}
+                      ariaLabel={t("fileTab.speaker.nameAria", {
+                        name: speaker.label,
+                      })}
+                      onCommit={(label) => renameSpeaker(speaker.id, label)}
                     />
                   ))}
                 </div>

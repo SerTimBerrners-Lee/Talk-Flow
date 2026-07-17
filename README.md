@@ -42,7 +42,7 @@ It is designed for practical daily work: IDEs, chats, notes, CRM fields, email, 
 
 ## Latest Changes
 
-### v0.3.13
+### v0.4.0
 
 - Added synchronous system-audio translation through Talkis Cloud or verified OpenAI/Gemini Realtime API adapters; local models remain available for the rest of the app, while live translation requires Cloud or API.
 - Added optional translated voice playback on macOS, with Talkis audio excluded from capture and the original source ducked to prevent feedback loops.
@@ -50,6 +50,9 @@ It is designed for practical daily work: IDEs, chats, notes, CRM fields, email, 
 - Reworked dictation and selected-text hotkey capture into one release-on-complete transaction with conflict checks, rollback, stale-request protection, and runtime registration without restart.
 - Improved the floating text overlay: wider streaming layout, compact speaker turns, dark-theme support, drag-to-move, immediate replacement by a new request, and automatic dismissal ten seconds after terminal results.
 - Fixed selected-text translation, permission recovery after relaunch, widget edge clipping, history action menus near the viewport edge, live-translation audio playback, and persisted widget/streaming settings.
+- File transcripts now present the first detected speaker as `You` and the others as `Guest N`; stable inline renaming updates every segment without moving the caret.
+- Call history now keeps and synchronously plays separate microphone and system-audio tracks so both sides of a conversation remain audible.
+- The experimental development chat now searches local history with general lexical and offline-semantic ranking, while a compatible embedding backend can optionally improve recall.
 - Added a stable signed macOS development app runner so TCC permissions survive local rebuilds when an Apple Development identity is available.
 
 ### v0.3.12
@@ -156,6 +159,17 @@ The repository includes the same GIF demos used on the Talkis website.
 The hotkey, microphone, language, model source, cleanup style, and app appearance are configurable in Settings.
 
 ## Access Modes
+
+| Capability | Cloud | API | Local |
+| --- | --- | --- | --- |
+| Dictation, files, and local history | Yes | Yes | Yes |
+| Streaming dictation | Yes | Verified models | Streaming-capable models |
+| Selected-text translation | Yes | Yes | Yes |
+| Speaker diarization | When the capability is available | Local diarization kit | Local diarization kit |
+| Synchronous translation | Yes | Verified OpenAI/Gemini Realtime | No |
+| Summaries and prompt processing | Yes | With a configured LLM | With a selected local LLM |
+
+The complete data routing, runtime processes, limitations, and failure boundaries are documented in the Russian-language [Cloud/API/Local mode architecture](docs/architecture/processing-modes.md). Verifiable user behavior is collected in the [product business requirements](docs/business-requirements.md).
 
 ### Talkis Cloud
 
@@ -266,6 +280,13 @@ The live text overlay keeps consecutive chunks from the same source together and
 - Call recording cannot start: grant Microphone and the OS system-audio permission, then start the call recording again. On Linux, also make sure PipeWire is running and an output device is active.
 - Need deeper diagnostics: open `~/.talkis/talkis.log` or run `bun run logs` during development.
 
+## Product And Architecture Documentation
+
+- [Cloud/API/Local mode architecture](docs/architecture/processing-modes.md) — technical routing for dictation, files, calls, translation, LLM processing, and history.
+- [Talkis business requirements](docs/business-requirements.md) — user capabilities, expected behavior, limitations, and acceptance criteria.
+- [Audio pipeline principles](docs/audio-pipeline-principles.md) — mandatory engineering rules for recording, STT, files, and call capture.
+- [Local STT runtime](docs/local-stt-runtime.md) — managed local recognition architecture and contract.
+
 ## Development
 
 Requirements:
@@ -309,7 +330,7 @@ src/windows/settings/ Settings window and tabs
 src/lib/              Store, auth, permissions, logging, shared clients
 src-tauri/src/        Rust backend, Tauri commands, audio, paste, STT
 src-tauri/icons/      App icons
-docs/                 Release docs, audio rules, demo media
+docs/                 Architecture, business requirements, release docs, audio rules, demo media
 scripts/              Release and sidecar preparation scripts
 ```
 

@@ -63,6 +63,7 @@ import {
   HistoryAudioTrack,
   HistoryAudioTrackPlaceholder,
 } from "../../../components/HistoryAudioTrack";
+import { SpeakerNameInput } from "../../../components/SpeakerNameInput";
 import { retryHistoryEntry } from "../../widget/services/transcriptionPipeline";
 import { useI18n, type TFunc, type UiLanguage, type MsgKey } from "../../../lib/i18n";
 
@@ -259,7 +260,10 @@ function ExpandableHistoryText({
   expanded: boolean;
   editing: boolean;
   loading?: boolean;
-  onSpeakerRename: (speakerId: string, label: string) => void;
+  onSpeakerRename: (
+    speakerId: string,
+    label: string,
+  ) => Promise<void> | void;
   onToggle: () => void;
 }): ReactElement {
   const { t } = useI18n();
@@ -289,21 +293,11 @@ function ExpandableHistoryText({
           {editing && speakers?.length ? (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {speakers.map((speaker) => (
-                <input
+                <SpeakerNameInput
                   key={speaker.id}
-                  className="input"
                   value={speaker.label}
-                  onChange={(event) =>
-                    onSpeakerRename(speaker.id, event.target.value)
-                  }
-                  style={{
-                    width: 140,
-                    height: 34,
-                    padding: "7px 10px",
-                    fontSize: 12,
-                    fontWeight: 650,
-                  }}
-                  aria-label={t("mainTab.speakerNameAria", { name: speaker.label })}
+                  ariaLabel={t("mainTab.speakerNameAria", { name: speaker.label })}
+                  onCommit={(label) => onSpeakerRename(speaker.id, label)}
                 />
               ))}
             </div>
@@ -748,7 +742,7 @@ export function MainTab({
     const currentSpeaker = entry.speakers.find(
       (speaker) => speaker.id === speakerId,
     );
-    const nextLabel = label || currentSpeaker?.label || "";
+    const nextLabel = label.trim() || currentSpeaker?.label || "";
     const nextSpeakers = entry.speakers.map((speaker) =>
       speaker.id === speakerId ? { ...speaker, label: nextLabel } : speaker,
     );
@@ -1487,7 +1481,7 @@ export function MainTab({
                                       loading={isExpanded && isLoadingFullEntry && !fullEntry}
                                       onSpeakerRename={(speakerId, label) => {
                                         if (fullEntry) {
-                                          void renameSpeaker(
+                                          return renameSpeaker(
                                             fullEntry,
                                             speakerId,
                                             label,

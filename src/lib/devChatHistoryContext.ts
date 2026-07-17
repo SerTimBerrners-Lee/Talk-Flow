@@ -1,5 +1,14 @@
 import type { HistoryEntry } from "./store";
 import { formatDurationMs } from "./utils";
+import {
+  buildOfflineHistoryEmbeddingQuery,
+  filterOfflineHistoryQueryTokens,
+  firstOfflineHistoryConceptMatchIndex,
+  isOfflineConceptHistoryQuestion,
+  matchOfflineHistoryConcepts,
+  scoreOfflineHistoryConcepts,
+  type OfflineHistoryConcept,
+} from "./offlineHistorySearchTemplates";
 
 export interface DevChatHistoryContext {
   directAnswer?: string;
@@ -52,9 +61,12 @@ export interface HistorySearchChunk {
 }
 
 const MAX_CONTEXT_ENTRIES = 6;
+const MAX_ALL_CONTEXT_ENTRIES = 150;
 const MAX_ENTRY_CONTEXT_CHARS = 1600;
+const MAX_ALL_ENTRY_CONTEXT_CHARS = 120;
 const MAX_FOCUSED_ENTRY_CONTEXT_CHARS = 8_000;
 const MAX_TOTAL_CONTEXT_CHARS = 10_000;
+const MAX_ALL_TOTAL_CONTEXT_CHARS = 32_000;
 const SEARCH_CHUNK_MAX_CHARS = 1400;
 const SEARCH_CHUNK_OVERLAP_CHARS = 180;
 const MIN_VECTOR_SIMILARITY = 0.72;
@@ -538,6 +550,12 @@ function mentionsFirst(question: string): boolean {
   return /(первая|первую|первое|самая первая|перв[а-я]*|first|oldest)/i.test(question);
 }
 
+function mentionsAll(question: string): boolean {
+  return /(?:(?:^|[^а-яё])(?:все|кажд[а-яё]*)(?=$|[^а-яё])|\ball\b|\bevery\b)/i.test(question);
+}
+
+export const historySearchEmbeddingQuery = buildOfflineHistoryEmbeddingQuery;
+
 function mentionsHistoryTarget(question: string): boolean {
   return /(запис|транскриб|расшифр|созвон|звонк|диктов|файл|record|transcript|transcription|call|meeting|file)/i.test(question);
 }
@@ -553,7 +571,7 @@ function asksForRecordedSpeech(question: string): boolean {
 function asksToFindInHistory(question: string): boolean {
   return (
     /(найди|найти|покажи|отыщи|find|show)/i.test(question) &&
-    /(задач|задачи|task|tasks|что|про|говор|обсужд|саммари|summary|summar)/i.test(question)
+    /(задач|задачи|task|tasks|что|про|говор|обсужд|саммари|summary|summar|баг|ошиб|проблем|дефект|bug|error|issue|problem)/i.test(question)
   );
 }
 
@@ -593,6 +611,7 @@ function asksAboutHistory(question: string): boolean {
     asksForLatest(question) ||
     asksForFirst(question) ||
     asksForCount(question) ||
+    isOfflineConceptHistoryQuestion(question) ||
     (asksForContextTask(question) && (mentionsLatest(question) || mentionsFirst(question)))
   );
 }
@@ -695,6 +714,29 @@ function tokenize(text: string, lang: UiLanguage): string[] {
     .filter((token) => token.length > 2 && !stopWords.has(token));
 }
 
+function compactMatchExcerpt(
+  text: string,
+  tokens: string[],
+  concepts: OfflineHistoryConcept[],
+): string {
+  if (text.length <= MAX_ALL_ENTRY_CONTEXT_CHARS) {
+    return text;
+  }
+
+  const normalized = text.toLowerCase();
+  const tokenIndex = tokens.reduce((best, token) => {
+    const index = normalized.indexOf(token.toLowerCase());
+    if (index < 0) return best;
+    return best < 0 ? index : Math.min(best, index);
+  }, -1);
+  const conceptIndex = firstOfflineHistoryConceptMatchIndex(text, concepts);
+  const matchIndex = concepts.length > 0 ? conceptIndex : tokenIndex;
+  const start = Math.max(0, matchIndex - 48);
+  const excerpt = text.slice(start, start + MAX_ALL_ENTRY_CONTEXT_CHARS).trim();
+
+  return `${start > 0 ? "..." : ""}${excerpt}${start + MAX_ALL_ENTRY_CONTEXT_CHARS < text.length ? "..." : ""}`;
+}
+
 export function cosineSimilarity(first: number[], second: number[]): number {
   if (first.length === 0 || first.length !== second.length) {
     return 0;
@@ -722,6 +764,7 @@ function scoreChunk(
   chunk: HistorySearchChunk,
   tokens: string[],
   queryEmbedding?: number[],
+  concepts: OfflineHistoryConcept[] = [],
 ): number {
   const searchable = [
     chunk.text,
@@ -733,12 +776,15 @@ function scoreChunk(
   ]
     .join(" ")
     .toLowerCase();
-  let textScore = 0;
+  const conceptScore = scoreOfflineHistoryConcepts(chunk.text, concepts);
+  let textScore = conceptScore;
 
-  for (const token of tokens) {
-    const occurrences = searchable.split(token).length - 1;
-    if (occurrences > 0) {
-      textScore += Math.min(occurrences, 8) * 3;
+  if (concepts.length === 0 || conceptScore > 0) {
+    for (const token of tokens) {
+      const occurrences = searchable.split(token).length - 1;
+      if (occurrences > 0) {
+        textScore += Math.min(occurrences, 8) * 3;
+      }
     }
   }
 
@@ -774,7 +820,11 @@ function relevantEntries(
   const filters = parseFilters(question, history);
   const allowedEntryIds = new Set(filterHistory(history, filters).map((entry) => entry.id));
   const candidates = searchIndex.filter((chunk) => allowedEntryIds.has(chunk.entryId));
-  const tokens = tokenize(question, lang);
+  const concepts = matchOfflineHistoryConcepts(question);
+  const conceptSearch = concepts.length > 0;
+  const allMatches = mentionsAll(question);
+  const resultLimit = allMatches ? MAX_ALL_CONTEXT_ENTRIES : MAX_CONTEXT_ENTRIES;
+  const tokens = filterOfflineHistoryQueryTokens(tokenize(question, lang), concepts);
 
   if (asksForContextTask(question) && (mentionsLatest(question) || mentionsFirst(question))) {
     return uniqueChunksByEntry(candidates, mentionsLatest(question))
@@ -788,16 +838,16 @@ function relevantEntries(
       );
   }
 
-  if (tokens.length === 0 && !queryEmbedding) {
+  if (tokens.length === 0 && !queryEmbedding && !conceptSearch) {
     return uniqueChunksByEntry(candidates, true)
-      .slice(0, MAX_CONTEXT_ENTRIES)
+      .slice(0, resultLimit)
       .map((chunk) => scoredEntryFromChunk(chunk, chunk.text));
   }
 
   const bestByEntry = new Map<string, ScoredHistoryEntry>();
 
   for (const chunk of candidates) {
-    const score = scoreChunk(chunk, tokens, queryEmbedding);
+    const score = scoreChunk(chunk, tokens, queryEmbedding, concepts);
     if (score <= 0) continue;
 
     const current = bestByEntry.get(chunk.entryId);
@@ -817,15 +867,27 @@ function relevantEntries(
   }
 
   const bestEntries = [...bestByEntry.values()]
-    .sort((a, b) => b.score - a.score)
-    .slice(0, MAX_CONTEXT_ENTRIES);
+    .sort((a, b) =>
+      allMatches && conceptSearch
+        ? new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+        : b.score - a.score,
+    )
+    .slice(0, resultLimit)
+    .map((entry) =>
+      allMatches
+        ? {
+            ...entry,
+            text: compactMatchExcerpt(entry.text, tokens, concepts),
+          }
+        : entry,
+    );
   if (bestEntries.length > 0) {
     return bestEntries;
   }
 
-  if (asksForContextTask(question) || asksToFindInHistory(question)) {
+  if ((asksForContextTask(question) || asksToFindInHistory(question)) && !conceptSearch) {
     return uniqueChunksByEntry(candidates, true)
-      .slice(0, MAX_CONTEXT_ENTRIES)
+      .slice(0, resultLimit)
       .map((chunk) => scoredEntryFromChunk(chunk, chunk.text));
   }
 
@@ -884,6 +946,7 @@ function sourceReferenceFromEntry(
 function buildContextText(
   items: ScoredHistoryEntry[],
   lang: UiLanguage,
+  allowAllMatches = false,
 ): string | undefined {
   if (items.length === 0) return undefined;
 
@@ -893,6 +956,9 @@ function buildContextText(
       : "Контекст из истории транскрибаций Talkis. Используй только эти записи для ответов об истории транскрибаций. Если ответа нет в этих записях, скажи, что подходящая запись не найдена.";
 
   let total = intro.length;
+  const maxTotalChars = allowAllMatches
+    ? MAX_ALL_TOTAL_CONTEXT_CHARS
+    : MAX_TOTAL_CONTEXT_CHARS;
   const lines: string[] = [intro];
 
   for (const [index, item] of items.entries()) {
@@ -908,7 +974,7 @@ function buildContextText(
     );
     const block = `\n[${index + 1}] ${date}; ${lang === "en" ? "source" : "источник"}: ${source}${duration}\n${text}`;
 
-    if (total + block.length > MAX_TOTAL_CONTEXT_CHARS) {
+    if (total + block.length > maxTotalChars) {
       break;
     }
 
@@ -945,7 +1011,7 @@ export function buildDevChatHistoryContext(
   }
 
   const entries = relevantEntries(history, question, lang, searchIndex, queryEmbedding);
-  const contextText = buildContextText(entries, lang);
+  const contextText = buildContextText(entries, lang, mentionsAll(question));
   if (!contextText && asksAboutHistory(question)) {
     return { directAnswer: noMatchingContextAnswer(lang) };
   }

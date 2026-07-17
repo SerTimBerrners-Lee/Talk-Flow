@@ -1,7 +1,10 @@
 import { describe, expect, it } from "bun:test";
 
 import type { AppSettings } from "./store";
-import { toFileTranscriptionErrorMessage } from "./fileTranscription";
+import {
+  identifyFirstFileSpeakerAsUser,
+  toFileTranscriptionErrorMessage,
+} from "./fileTranscription";
 
 function settings(overrides: Partial<AppSettings>): AppSettings {
   return {
@@ -64,5 +67,47 @@ describe("file transcription error messages", () => {
     );
 
     expect(message).toBe("Не удалось авторизоваться в API. Проверьте ключ доступа.");
+  });
+});
+
+describe("file speaker identity", () => {
+  it("labels the first detected file speaker as the user", () => {
+    const result = identifyFirstFileSpeakerAsUser({
+      text: "old",
+      converted: true,
+      uploadedFileName: "call.webm",
+      uploadedSizeBytes: 0,
+      mode: "speakers",
+      speakers: [
+        { id: "speaker_0", label: "Speaker 1" },
+        { id: "speaker_1", label: "Speaker 2" },
+      ],
+      segments: [
+        {
+          start: 0,
+          end: 2,
+          speakerId: "speaker_0",
+          speakerLabel: "Speaker 1",
+          text: "Здравствуйте",
+        },
+        {
+          start: 3,
+          end: 5,
+          speakerId: "speaker_1",
+          speakerLabel: "Speaker 2",
+          text: "Добрый день",
+        },
+      ],
+    });
+
+    expect(result.speakers).toEqual([
+      { id: "speaker_0", label: "Вы" },
+      { id: "speaker_1", label: "Гость 1" },
+    ]);
+    expect(result.segments?.map((segment) => segment.speakerLabel)).toEqual([
+      "Вы",
+      "Гость 1",
+    ]);
+    expect(result.text).toContain("[00:00:00] Вы: Здравствуйте");
   });
 });
