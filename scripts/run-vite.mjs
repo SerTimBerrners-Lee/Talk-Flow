@@ -107,10 +107,16 @@ try {
   process.exit(1);
 }
 
-const child = spawn(process.execPath, [resolveViteScript(), ...viteArgs], {
+const nodeBinary = process.env.TALKIS_NODE_BINARY || "node";
+const child = spawn(nodeBinary, [resolveViteScript(), ...viteArgs], {
   cwd: rootDir,
   env,
   stdio: "inherit",
+});
+
+child.on("error", (error) => {
+  console.error(`Failed to start Vite with ${nodeBinary}: ${error.message}`);
+  process.exit(1);
 });
 
 child.on("exit", (code, signal) => {
