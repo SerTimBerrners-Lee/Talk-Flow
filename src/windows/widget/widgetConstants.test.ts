@@ -1,22 +1,41 @@
 import { describe, expect, test } from "bun:test";
 
 import {
-  CALL_BUBBLE_GAP,
   CALL_BUBBLE_SIZE,
   CALL_STACK_WIDGET_HEIGHT,
   CALL_STACK_WIDGET_WIDTH,
   FILE_DROP_STACK_WIDGET_HEIGHT,
   FILE_DROP_STACK_WIDGET_WIDTH,
+  IDLE_WIDGET_WIDTH,
   shouldAutoDismissTextOverlay,
   TEXT_OVERLAY_AUTO_DISMISS_MS,
+  WIDGET_CONTROL_GAP,
+  WIDGET_PRIMARY_INLINE_INSET,
+  WIDGET_SHELL_WIDTH,
   WIDGET_STACK_EDGE_PADDING,
   widgetStackHeight,
   widgetStackWidth,
 } from "./widgetConstants";
 
-const BUTTON_SLOT_WIDTH = CALL_BUBBLE_GAP + CALL_BUBBLE_SIZE;
+const BUTTON_SLOT_WIDTH = WIDGET_CONTROL_GAP + CALL_BUBBLE_SIZE;
 
 describe("widgetStackWidth", () => {
+  test("keeps equal visual gaps between status, call and translation", () => {
+    const statusVisibleRight =
+      WIDGET_PRIMARY_INLINE_INSET + WIDGET_SHELL_WIDTH;
+    const callVisibleLeft =
+      IDLE_WIDGET_WIDTH -
+      WIDGET_PRIMARY_INLINE_INSET +
+      WIDGET_CONTROL_GAP;
+    const translationVisibleLeft =
+      callVisibleLeft + CALL_BUBBLE_SIZE + WIDGET_CONTROL_GAP;
+
+    expect(callVisibleLeft - statusVisibleRight).toBe(WIDGET_CONTROL_GAP);
+    expect(
+      translationVisibleLeft - (callVisibleLeft + CALL_BUBBLE_SIZE),
+    ).toBe(WIDGET_CONTROL_GAP);
+  });
+
   test("keeps edge padding around the base widget stack", () => {
     expect(widgetStackWidth(false, false)).toBe(
       CALL_STACK_WIDGET_WIDTH + WIDGET_STACK_EDGE_PADDING * 2,

@@ -75,7 +75,6 @@ import {
 import {
   ACTIVE_WIDGET_SHELL_HEIGHT,
   ACTIVE_WIDGET_SHELL_WIDTH,
-  CALL_BUBBLE_GAP,
   CALL_BUBBLE_SIZE,
   FILE_DROP_WIDGET_HEIGHT,
   FILE_DROP_WIDGET_WIDTH,
@@ -83,6 +82,8 @@ import {
   IDLE_HOVER_WIDGET_WIDTH,
   IDLE_HOVER_SCALE,
   NOTICE_TIMEOUT_MS,
+  WIDGET_CONTROL_GAP,
+  WIDGET_PRIMARY_INLINE_INSET,
   WIDGET_SHELL_HEIGHT,
   WIDGET_SHELL_WIDTH,
   widgetStackHeight,
@@ -1495,7 +1496,7 @@ export function Widget() {
             flexDirection: "row",
             alignItems: "center",
             justifyContent: "center",
-            gap: CALL_BUBBLE_GAP,
+            gap: WIDGET_CONTROL_GAP,
             pointerEvents: "none",
             zoom: widgetScale,
           }}
@@ -1513,36 +1514,45 @@ export function Widget() {
               onPointerCancel={handleDragPointerUp}
             />
           )}
-          {!fileDropActive && displayWidgetState === "idle" && (
-            <IdlePill
-              latestCopyText={latestCopyText}
-              onToggleRecording={toggleManualRecording}
-              onClick={openLatestFileResult}
-              onRememberPasteTarget={rememberPasteTargetWindow}
-              onPointerDown={handleDragPointerDown}
-              onPointerMove={handleDragPointerMove}
-              onPointerUp={handleDragPointerUp}
-              onPointerCancel={handleDragPointerUp}
-            />
-          )}
-          {!fileDropActive && displayWidgetState === "recording" && (
-            <RecordingPill
-              stream={stream}
-              locked={lockedRecording}
-              onToggleRecording={toggleManualRecording}
-              onPointerDown={handleDragPointerDown}
-              onPointerMove={handleDragPointerMove}
-              onPointerUp={handleDragPointerUp}
-              onPointerCancel={handleDragPointerUp}
-            />
-          )}
-          {!fileDropActive && displayWidgetState === "processing" && (
-            <ProcessingPill
-              onPointerDown={handleDragPointerDown}
-              onPointerMove={handleDragPointerMove}
-              onPointerUp={handleDragPointerUp}
-              onPointerCancel={handleDragPointerUp}
-            />
+          {!fileDropActive && (
+            <div
+              style={{
+                marginInlineEnd: -WIDGET_PRIMARY_INLINE_INSET,
+                pointerEvents: "none",
+              }}
+            >
+              {displayWidgetState === "idle" && (
+                <IdlePill
+                  latestCopyText={latestCopyText}
+                  onToggleRecording={toggleManualRecording}
+                  onClick={openLatestFileResult}
+                  onRememberPasteTarget={rememberPasteTargetWindow}
+                  onPointerDown={handleDragPointerDown}
+                  onPointerMove={handleDragPointerMove}
+                  onPointerUp={handleDragPointerUp}
+                  onPointerCancel={handleDragPointerUp}
+                />
+              )}
+              {displayWidgetState === "recording" && (
+                <RecordingPill
+                  stream={stream}
+                  locked={lockedRecording}
+                  onToggleRecording={toggleManualRecording}
+                  onPointerDown={handleDragPointerDown}
+                  onPointerMove={handleDragPointerMove}
+                  onPointerUp={handleDragPointerUp}
+                  onPointerCancel={handleDragPointerUp}
+                />
+              )}
+              {displayWidgetState === "processing" && (
+                <ProcessingPill
+                  onPointerDown={handleDragPointerDown}
+                  onPointerMove={handleDragPointerMove}
+                  onPointerUp={handleDragPointerUp}
+                  onPointerCancel={handleDragPointerUp}
+                />
+              )}
+            </div>
           )}
           <div
             style={{
