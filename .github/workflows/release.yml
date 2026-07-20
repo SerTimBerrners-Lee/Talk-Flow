@@ -137,15 +137,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Run release checks
-        run: |
-          bun run check:versions
-          bun run prepare:sidecars
-          bunx tsc --noEmit
-          cargo check --manifest-path src-tauri/Cargo.toml
-          bun run smoke:hotkey
-
-      - name: Build frontend
-        run: bun run build
+        run: bun run check:release
 
       - name: Build bundles
         run: bun run tauri build --bundles ${{ matrix.bundle_targets }}

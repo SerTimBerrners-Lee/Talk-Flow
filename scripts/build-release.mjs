@@ -35,6 +35,12 @@ const env = {
   TALKIS_SKIP_BEFORE_BUILD: "1",
 };
 
+if (platform === "windows" && !(env.RUSTFLAGS || "").includes("+crt-static")) {
+  env.RUSTFLAGS = [env.RUSTFLAGS, "-C target-feature=+crt-static"]
+    .filter(Boolean)
+    .join(" ");
+}
+
 if (platform === "macos") {
   env.MACOSX_DEPLOYMENT_TARGET = process.env.MACOSX_DEPLOYMENT_TARGET || "11.0";
 

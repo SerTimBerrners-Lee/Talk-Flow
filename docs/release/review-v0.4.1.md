@@ -67,9 +67,10 @@
   - Final SHA-256: DMG `0a9b0732997b711e3510e987454f24aa42d83285e4ef5c25569ca1d337b96d40`; updater archive `ee5abff3291dc7f8618510cf3472fe6abc184f2a5f63f8a311887148c604fa4c`.
   - GitHub preflight and release workflows now pass updater signing credentials to the macOS postprocess step.
   - GitHub preflight and release workflows now run the Windows x64 architecture verifier after bundling; the published stable Windows installer also receives a `.sha256` file.
-- GitHub Release Preflight: pending; release branch has not been published yet.
-- Native/GitHub Windows build: pending Release Preflight.
-- Native/GitHub Linux build: pending Release Preflight.
+- GitHub Release Preflight run `29779118499` on commit `8e2a40a`: Linux and macOS passed; Windows failed at the new PE architecture gate because `talkis-stt.exe` was still a placeholder after its static-CRT link failed.
+  - The gate prevented the invalid Windows payload from being published.
+  - The corrective patch aligns transcribe.cpp's MSVC runtime with Rust/CTranslate2 `/MT`, removes placeholders after failed sidecar builds, and runs release checks through one fail-fast command so PowerShell cannot mask an earlier native-command failure.
+- Exact-commit Release Preflight after the Windows corrective patch: pending.
 - Additional manual checks:
   - The exact reported multi-sentence translation regression was reproduced as an installed-model integration test and now passes.
   - The configured GigaAM GGUF URL responds and reports the expected 183,948,704-byte artifact.
@@ -86,7 +87,7 @@
 ## Findings
 
 - Blockers:
-  - Publish `release/v0.4.1` and require green `Preflight macos`, `Preflight windows`, and `Preflight linux` checks on the exact release commit before merging or tagging.
+  - Require green `Preflight macos`, `Preflight windows`, and `Preflight linux` checks on the exact corrected release commit before merging or tagging.
 - Accepted release risk:
   - The existing P1 cloud-recognition incident `talkis-pc-5vt` remains open: realtime returns HTTP 400 and batch currently reaches a cloud-billing 503. The user explicitly accepted this known risk for `v0.4.1`; the release does not claim a cloud-STT fix.
 - Non-blocking issues:
