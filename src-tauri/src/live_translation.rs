@@ -956,9 +956,12 @@ pub async fn start_live_translation(
             include_mic: capture_microphone,
             include_system: true,
             mic_device_id: None,
+            mic_device_label: None,
             sample_rate: Some(SAMPLE_RATE),
             storage_dir: req.storage_dir.clone(),
             save_audio: req.save_audio,
+            native_mic_capture: false,
+            live_transcription: None,
         },
     )
     .await

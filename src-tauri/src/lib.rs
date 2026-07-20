@@ -17,6 +17,8 @@ mod native_voice_recorder;
 mod paste;
 mod prompt_config;
 pub mod realtime;
+mod shutdown;
+mod tray;
 
 use commands::{
     accessibility, runtime_info, settings_window,
@@ -73,6 +75,7 @@ pub fn run() {
         .setup(|app| {
             logger::log_info("INIT", "Application starting...");
             hotkey_manager::init(app);
+            tray::setup(app)?;
 
             #[cfg(desktop)]
             app.handle().plugin(tauri_plugin_autostart::init(
@@ -171,6 +174,10 @@ pub fn run() {
             call_capture::start_call_capture,
             call_capture::stop_call_capture,
             call_capture::save_call_capture_mic_track,
+            call_capture::pause_call_capture_mic,
+            call_capture::resume_call_capture_mic,
+            call_capture::checkpoint_call_transcription,
+            call_capture::recover_call_capture_sessions,
             call_capture::get_call_capture_status,
             call_capture::get_call_capture_duration_ms,
             live_translation::start_live_translation,

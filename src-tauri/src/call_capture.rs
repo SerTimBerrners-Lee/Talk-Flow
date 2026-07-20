@@ -1,3 +1,8 @@
+mod microphone;
+
+use crate::live_dictation::{
+    self, LiveDictationFinal, LiveDictationSession, LiveDictationStartRequest,
+};
 use crate::logger;
 use crate::realtime::RealtimeAudioCommand;
 use base64::Engine;
@@ -6,14 +11,11 @@ use chrono::{DateTime, Utc};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs;
-#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-use std::fs::File;
+use std::fs::{self, File, OpenOptions};
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 use std::io::BufWriter;
-#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux", test))]
-use std::io::{Seek, Write};
-use std::path::PathBuf;
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
 #[cfg(target_os = "macos")]
 use std::ptr::NonNull;
 #[cfg(target_os = "macos")]
@@ -56,6 +58,7 @@ use pipewire as pw;
 use pw::{properties::properties, spa};
 
 static SESSIONS: OnceLock<Mutex<HashMap<String, StoredCallCaptureSession>>> = OnceLock::new();
+static SESSION_DIRECTORIES: OnceLock<Mutex<HashMap<String, PathBuf>>> = OnceLock::new();
 static SYSTEM_AUDIO_SINK: OnceLock<Mutex<Option<tokio::sync::mpsc::Sender<RealtimeAudioCommand>>>> =
     OnceLock::new();
 static SYSTEM_AUDIO_MONITOR_SINK: OnceLock<Mutex<Option<mpsc::SyncSender<Vec<u8>>>>> =
@@ -68,6 +71,8 @@ const CALL_SYSTEM_CAPTURE_SAMPLE_RATE: u32 = 16_000;
 const CALL_SYSTEM_CAPTURE_CHANNELS: u16 = 1;
 const CALL_SYSTEM_CAPTURE_BITS_PER_SAMPLE: u16 = 16;
 const LIVE_PCM_CHUNK_BYTES: usize = (CALL_SYSTEM_CAPTURE_SAMPLE_RATE as usize / 10) * 2;
+const AUDIO_CHECKPOINT_SAMPLES: u64 = CALL_SYSTEM_CAPTURE_SAMPLE_RATE as u64 * 5;
+const TRANSCRIPT_CHECKPOINT_FILE: &str = "transcript.jsonl";
 
 fn system_audio_sink() -> &'static Mutex<Option<tokio::sync::mpsc::Sender<RealtimeAudioCommand>>> {
     SYSTEM_AUDIO_SINK.get_or_init(|| Mutex::new(None))
@@ -109,6 +114,10 @@ fn sessions() -> &'static Mutex<HashMap<String, StoredCallCaptureSession>> {
     SESSIONS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+fn session_directories() -> &'static Mutex<HashMap<String, PathBuf>> {
+    SESSION_DIRECTORIES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 pub fn has_active_sessions() -> bool {
     sessions()
         .lock()
@@ -133,7 +142,7 @@ pub enum CaptureTargetKind {
     Window,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartCallCaptureRequest {
     pub target_id: Option<String>,
@@ -142,10 +151,32 @@ pub struct StartCallCaptureRequest {
     #[serde(default = "default_true")]
     pub include_system: bool,
     pub mic_device_id: Option<String>,
+    pub mic_device_label: Option<String>,
     pub sample_rate: Option<u32>,
     pub storage_dir: Option<String>,
     #[serde(default = "default_true")]
     pub save_audio: bool,
+    #[serde(default = "default_true")]
+    pub native_mic_capture: bool,
+    pub live_transcription: Option<CallLiveTranscriptionRequest>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CallLiveTranscriptionRequest {
+    pub mic: Option<LiveDictationStartRequest>,
+    pub system: Option<LiveDictationStartRequest>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CallLiveTranscriptionState {
+    pub mic_request_id: Option<String>,
+    pub system_request_id: Option<String>,
+    pub mic_text: Option<String>,
+    pub system_text: Option<String>,
+    #[serde(default)]
+    pub errors: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -158,6 +189,10 @@ pub struct CallCaptureSession {
     pub ended_at: Option<String>,
     pub directory: String,
     pub tracks: Vec<CallCaptureTrack>,
+    #[serde(default)]
+    pub native_mic_active: bool,
+    #[serde(default)]
+    pub live_transcription: Option<CallLiveTranscriptionState>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -185,7 +220,7 @@ pub enum CallCaptureTrackKind {
     System,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CallCaptureStatus {
     Starting,
@@ -196,6 +231,8 @@ pub enum CallCaptureStatus {
 
 struct StoredCallCaptureSession {
     session: CallCaptureSession,
+    mic: Option<microphone::CallMicrophoneCapture>,
+    system_live_session: Option<LiveDictationSession>,
     #[cfg(target_os = "macos")]
     macos: Option<MacosCallCaptureState>,
     #[cfg(target_os = "windows")]
@@ -371,6 +408,7 @@ where
     writer: hound::WavWriter<W>,
     resampler: SystemAudioResampler,
     live_pcm: Vec<u8>,
+    samples_since_checkpoint: u64,
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux", test))]
@@ -383,11 +421,28 @@ where
             writer,
             resampler: SystemAudioResampler::new(source_sample_rate),
             live_pcm: Vec::with_capacity(LIVE_PCM_CHUNK_BYTES * 2),
+            samples_since_checkpoint: 0,
         }
     }
 
     fn write_output_sample(&mut self, sample: i16) {
-        let _ = self.writer.write_sample(sample);
+        if let Err(error) = self.writer.write_sample(sample) {
+            logger::log_error(
+                "CALL_CAPTURE",
+                &format!("Failed to write system audio sample: {}", error),
+            );
+            return;
+        }
+        self.samples_since_checkpoint = self.samples_since_checkpoint.saturating_add(1);
+        if self.samples_since_checkpoint >= AUDIO_CHECKPOINT_SAMPLES {
+            self.samples_since_checkpoint = 0;
+            if let Err(error) = self.writer.flush() {
+                logger::log_error(
+                    "CALL_CAPTURE",
+                    &format!("Failed to checkpoint system audio WAV: {}", error),
+                );
+            }
+        }
         self.live_pcm.extend_from_slice(&sample.to_le_bytes());
         if self.live_pcm.len() < LIVE_PCM_CHUNK_BYTES {
             return;
@@ -505,7 +560,67 @@ fn write_manifest(session: &CallCaptureSession) -> Result<(), String> {
     let path = PathBuf::from(&session.directory).join("manifest.json");
     let json = serde_json::to_string_pretty(session)
         .map_err(|err| format!("Не удалось подготовить manifest созвона: {}", err))?;
-    fs::write(path, json).map_err(|err| format!("Не удалось сохранить manifest созвона: {}", err))
+    let temp_path = path.with_extension("json.tmp");
+    let mut file = File::create(&temp_path)
+        .map_err(|err| format!("Не удалось создать manifest созвона: {}", err))?;
+    file.write_all(json.as_bytes())
+        .and_then(|_| file.write_all(b"\n"))
+        .and_then(|_| file.sync_all())
+        .map_err(|err| format!("Не удалось сохранить manifest созвона: {}", err))?;
+    drop(file);
+    replace_file(&temp_path, &path).map_err(|err| {
+        let _ = fs::remove_file(&temp_path);
+        format!("Не удалось заменить manifest созвона: {}", err)
+    })?;
+    #[cfg(unix)]
+    File::open(
+        path.parent()
+            .ok_or_else(|| "Не удалось найти папку manifest созвона.".to_string())?,
+    )
+    .and_then(|directory| directory.sync_all())
+    .map_err(|err| {
+        format!(
+            "Не удалось синхронизировать папку manifest созвона: {}",
+            err
+        )
+    })?;
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
+    fs::rename(source, destination)
+}
+
+#[cfg(windows)]
+fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let destination = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let result = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if result == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
 }
 
 fn build_session(
@@ -549,6 +664,17 @@ fn build_session(
         ended_at: None,
         directory: dir.to_string_lossy().to_string(),
         tracks,
+        native_mic_active: false,
+        live_transcription: req.live_transcription.as_ref().map(|live| {
+            CallLiveTranscriptionState {
+                mic_request_id: live.mic.as_ref().map(|request| request.request_id.clone()),
+                system_request_id: live
+                    .system
+                    .as_ref()
+                    .map(|request| request.request_id.clone()),
+                ..CallLiveTranscriptionState::default()
+            }
+        }),
     })
 }
 
@@ -565,6 +691,85 @@ fn parse_started_at(value: &str) -> Option<DateTime<Utc>> {
         .map(|date| date.with_timezone(&Utc))
 }
 
+fn finish_live_transcription(
+    state: Option<&mut CallLiveTranscriptionState>,
+    mic_session: Option<LiveDictationSession>,
+    system_session: Option<LiveDictationSession>,
+) {
+    let mic = mic_session.map(|session| {
+        std::thread::spawn(move || live_dictation::finish_live_dictation_session(session))
+    });
+    let system = system_session.map(|session| {
+        std::thread::spawn(move || live_dictation::finish_live_dictation_session(session))
+    });
+
+    let Some(state) = state else {
+        if let Some(handle) = mic {
+            let _ = handle.join();
+        }
+        if let Some(handle) = system {
+            let _ = handle.join();
+        }
+        return;
+    };
+
+    apply_live_finish_result(state, "mic", mic.map(|handle| handle.join()));
+    apply_live_finish_result(state, "system", system.map(|handle| handle.join()));
+}
+
+fn apply_live_finish_result(
+    state: &mut CallLiveTranscriptionState,
+    channel: &str,
+    result: Option<std::thread::Result<Result<LiveDictationFinal, String>>>,
+) {
+    let Some(result) = result else {
+        return;
+    };
+    match result {
+        Ok(Ok(final_text)) => {
+            let text = final_text.text.trim().to_string();
+            if text.is_empty() {
+                return;
+            }
+            if channel == "mic" {
+                state.mic_text = Some(text);
+            } else {
+                state.system_text = Some(text);
+            }
+        }
+        Ok(Err(error)) => state.errors.push(format!("{}: {}", channel, error)),
+        Err(_) => state
+            .errors
+            .push(format!("{}: realtime worker завершился аварийно", channel)),
+    }
+}
+
+fn stop_capture_components(stored: &mut StoredCallCaptureSession) {
+    let mic_live_session = stored.mic.take().and_then(|capture| {
+        let (session, result) = capture.stop();
+        if let Err(error) = result {
+            logger::log_error("CALL_CAPTURE", &error);
+            if let Some(live) = stored.session.live_transcription.as_mut() {
+                live.errors.push(error);
+            }
+        }
+        session
+    });
+
+    if let Err(error) = stop_platform_capture(stored) {
+        logger::log_error("CALL_CAPTURE", &error);
+        if let Some(live) = stored.session.live_transcription.as_mut() {
+            live.errors.push(error);
+        }
+    }
+    set_system_audio_sink(None);
+    finish_live_transcription(
+        stored.session.live_transcription.as_mut(),
+        mic_live_session,
+        stored.system_live_session.take(),
+    );
+}
+
 #[tauri::command]
 pub async fn list_call_capture_targets() -> Result<Vec<CaptureTarget>, String> {
     Ok(platform_targets())
@@ -575,6 +780,9 @@ pub async fn start_call_capture(
     app: AppHandle,
     req: StartCallCaptureRequest,
 ) -> Result<CallCaptureSession, String> {
+    if has_active_sessions() {
+        return Err("Запись созвона уже запущена.".to_string());
+    }
     if crate::live_translation::is_active() {
         return Err("Сначала остановите синхронный перевод.".to_string());
     }
@@ -582,30 +790,172 @@ pub async fn start_call_capture(
     logger::log_info(
         "CALL_CAPTURE",
         &format!(
-            "Starting call capture session={}, platform={}, target={:?}",
-            session.id, session.platform, req.target_id
+            "Starting call capture session={}, platform={}, target={:?}, preferred_mic_selected={}",
+            session.id,
+            session.platform,
+            req.target_id,
+            req.mic_device_id
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
         ),
     );
 
-    let platform_state = start_platform_capture(&session, &req)?;
-    session.status = CallCaptureStatus::Recording;
+    session_directories()
+        .lock()
+        .map_err(|_| "Не удалось сохранить папку записи созвона.".to_string())?
+        .insert(session.id.clone(), PathBuf::from(&session.directory));
     write_manifest(&session)?;
 
-    sessions()
-        .lock()
-        .map_err(|_| "Не удалось заблокировать менеджер записи созвона.".to_string())?
-        .insert(
-            session.id.clone(),
-            StoredCallCaptureSession {
-                session: session.clone(),
-                #[cfg(target_os = "macos")]
-                macos: platform_state,
-                #[cfg(target_os = "windows")]
-                windows: platform_state,
-                #[cfg(target_os = "linux")]
-                linux: platform_state,
+    let system_live_session = if req.include_system {
+        req.live_transcription
+            .as_ref()
+            .and_then(|live| live.system.clone())
+            .and_then(|request| {
+                live_dictation::start_live_dictation_session(
+                    app.clone(),
+                    Some(request),
+                    CALL_SYSTEM_CAPTURE_SAMPLE_RATE,
+                )
+            })
+    } else {
+        None
+    };
+    if req
+        .live_transcription
+        .as_ref()
+        .and_then(|live| live.system.as_ref())
+        .is_some()
+        && system_live_session.is_none()
+    {
+        if let Some(live) = session.live_transcription.as_mut() {
+            live.errors
+                .push("system: не удалось запустить live-транскрибацию".to_string());
+        }
+    }
+    if let Some(live_session) = system_live_session.as_ref() {
+        set_system_audio_sink(Some(live_session.command_sender()));
+    }
+
+    let platform_state = match start_platform_capture(&session, &req) {
+        Ok(state) => state,
+        Err(error) => {
+            set_system_audio_sink(None);
+            if let Some(live_session) = system_live_session {
+                live_dictation::cancel_live_dictation_session(live_session);
+            }
+            session.status = CallCaptureStatus::Failed;
+            session.ended_at = Some(Utc::now().to_rfc3339());
+            if let Some(live) = session.live_transcription.as_mut() {
+                live.errors.push(error.clone());
+            }
+            let _ = write_manifest(&session);
+            return Err(error);
+        }
+    };
+
+    let mic = if req.include_mic && req.native_mic_capture {
+        let mic_path = session
+            .tracks
+            .iter()
+            .find(|track| matches!(track.kind, CallCaptureTrackKind::Mic))
+            .map(|track| PathBuf::from(&track.path));
+        match mic_path {
+            Some(path) => match microphone::start(
+                app,
+                path,
+                req.mic_device_label.clone(),
+                req.live_transcription
+                    .as_ref()
+                    .and_then(|live| live.mic.clone()),
+            ) {
+                Ok(capture) => {
+                    if req
+                        .live_transcription
+                        .as_ref()
+                        .and_then(|live| live.mic.as_ref())
+                        .is_some()
+                        && !capture.has_live_session()
+                    {
+                        if let Some(live) = session.live_transcription.as_mut() {
+                            live.errors
+                                .push("mic: не удалось запустить live-транскрибацию".to_string());
+                        }
+                    }
+                    if let Some(track) = session
+                        .tracks
+                        .iter_mut()
+                        .find(|track| matches!(track.kind, CallCaptureTrackKind::Mic))
+                    {
+                        track.sample_rate = capture.sample_rate;
+                    }
+                    session.native_mic_active = true;
+                    logger::log_info(
+                        "CALL_CAPTURE",
+                        &format!(
+                            "Native call microphone ready: device={}, sample_rate={}",
+                            capture.device_name, capture.sample_rate
+                        ),
+                    );
+                    Some(capture)
+                }
+                Err(error) => {
+                    logger::log_error(
+                        "CALL_CAPTURE",
+                        &format!(
+                            "Native call microphone unavailable; WebView fallback required: {}",
+                            error
+                        ),
+                    );
+                    session
+                        .tracks
+                        .retain(|track| !matches!(track.kind, CallCaptureTrackKind::Mic));
+                    if let Some(live) = session.live_transcription.as_mut() {
+                        live.errors.push(format!(
+                            "Микрофон записывается резервным способом: {}",
+                            error
+                        ));
+                    }
+                    None
+                }
             },
-        );
+            None => None,
+        }
+    } else {
+        None
+    };
+
+    session.status = CallCaptureStatus::Recording;
+    let mut pending = Some(StoredCallCaptureSession {
+        session: session.clone(),
+        mic,
+        system_live_session,
+        #[cfg(target_os = "macos")]
+        macos: platform_state,
+        #[cfg(target_os = "windows")]
+        windows: platform_state,
+        #[cfg(target_os = "linux")]
+        linux: platform_state,
+    });
+    match sessions().lock() {
+        Ok(mut guard) => {
+            guard.insert(
+                session.id.clone(),
+                pending.take().expect("stored call session"),
+            );
+        }
+        Err(_) => {
+            let mut stored = pending.take().expect("pending call session");
+            stop_capture_components(&mut stored);
+            stored.session.status = CallCaptureStatus::Failed;
+            stored.session.ended_at = Some(Utc::now().to_rfc3339());
+            let _ = write_manifest(&stored.session);
+            return Err("Не удалось заблокировать менеджер записи созвона.".to_string());
+        }
+    }
+    if let Err(error) = write_manifest(&session) {
+        let _ = stop_call_capture(session.id.clone()).await;
+        return Err(error);
+    }
 
     Ok(session)
 }
@@ -623,7 +973,8 @@ pub async fn stop_call_capture(session_id: String) -> Result<CallCaptureSession,
         &format!("Stopping call capture session={}", session_id),
     );
 
-    stop_platform_capture(&mut stored)?;
+    stop_capture_components(&mut stored);
+    stored.session.native_mic_active = false;
     stored.session.status = CallCaptureStatus::Stopped;
     stored.session.ended_at = Some(Utc::now().to_rfc3339());
     write_manifest(&stored.session)?;
@@ -677,6 +1028,346 @@ pub async fn save_call_capture_mic_track(
 
     write_manifest(&stored.session)?;
     Ok(track)
+}
+
+#[tauri::command]
+pub fn pause_call_capture_mic(session_id: String) -> Result<bool, String> {
+    let guard = sessions()
+        .lock()
+        .map_err(|_| "Не удалось заблокировать менеджер записи созвона.".to_string())?;
+    let stored = guard
+        .get(&session_id)
+        .ok_or_else(|| "Активная запись созвона не найдена.".to_string())?;
+    let Some(mic) = stored.mic.as_ref() else {
+        return Ok(false);
+    };
+    mic.pause();
+    logger::log_info("CALL_CAPTURE", "Paused native call microphone");
+    Ok(true)
+}
+
+#[tauri::command]
+pub fn resume_call_capture_mic(session_id: String) -> Result<bool, String> {
+    let guard = sessions()
+        .lock()
+        .map_err(|_| "Не удалось заблокировать менеджер записи созвона.".to_string())?;
+    let stored = guard
+        .get(&session_id)
+        .ok_or_else(|| "Активная запись созвона не найдена.".to_string())?;
+    let Some(mic) = stored.mic.as_ref() else {
+        return Ok(false);
+    };
+    mic.resume();
+    logger::log_info("CALL_CAPTURE", "Resumed native call microphone");
+    Ok(true)
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CallTranscriptCheckpoint {
+    session_id: String,
+    channel: String,
+    status: String,
+    text: String,
+    started_at_ms: u64,
+    written_at: String,
+}
+
+fn update_live_transcription_state(
+    session: &mut CallCaptureSession,
+    channel: &str,
+    status: &str,
+    text: &str,
+    message: Option<&str>,
+) {
+    let state = session
+        .live_transcription
+        .get_or_insert_with(CallLiveTranscriptionState::default);
+    if (status == "final" || status == "draft") && !text.trim().is_empty() {
+        if channel == "mic" {
+            state.mic_text = Some(text.trim().to_string());
+        } else {
+            state.system_text = Some(text.trim().to_string());
+        }
+    }
+    if status == "error" {
+        let error = message
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("Realtime-транскрибация недоступна");
+        let formatted = format!("{}: {}", channel, error);
+        if !state.errors.iter().any(|known| known == &formatted) {
+            state.errors.push(formatted);
+        }
+    }
+}
+
+fn session_directory(session_id: &str) -> Result<PathBuf, String> {
+    session_directories()
+        .lock()
+        .map_err(|_| "Не удалось прочитать папку записи созвона.".to_string())?
+        .get(session_id)
+        .cloned()
+        .ok_or_else(|| "Папка записи созвона не найдена.".to_string())
+}
+
+fn read_manifest(directory: &PathBuf) -> Result<CallCaptureSession, String> {
+    let path = directory.join("manifest.json");
+    let json = fs::read_to_string(&path)
+        .map_err(|error| format!("Не удалось прочитать manifest созвона: {}", error))?;
+    serde_json::from_str(&json)
+        .map_err(|error| format!("Не удалось разобрать manifest созвона: {}", error))
+}
+
+fn append_transcript_checkpoint(
+    directory: &PathBuf,
+    checkpoint: &CallTranscriptCheckpoint,
+) -> Result<(), String> {
+    let path = directory.join(TRANSCRIPT_CHECKPOINT_FILE);
+    let json = serde_json::to_string(checkpoint)
+        .map_err(|error| format!("Не удалось подготовить checkpoint транскрипта: {}", error))?;
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|error| format!("Не удалось открыть журнал транскрипта: {}", error))?;
+    file.write_all(json.as_bytes())
+        .and_then(|_| file.write_all(b"\n"))
+        .and_then(|_| file.sync_data())
+        .map_err(|error| format!("Не удалось сохранить checkpoint транскрипта: {}", error))
+}
+
+#[tauri::command]
+pub fn checkpoint_call_transcription(
+    session_id: String,
+    channel: String,
+    status: String,
+    text: String,
+    started_at_ms: u64,
+    message: Option<String>,
+) -> Result<(), String> {
+    if channel != "mic" && channel != "system" {
+        return Err("Некорректная дорожка live-транскрибации.".to_string());
+    }
+    if status != "final" && status != "draft" && status != "error" {
+        return Ok(());
+    }
+
+    let directory = session_directory(&session_id)?;
+    let checkpoint = CallTranscriptCheckpoint {
+        session_id: session_id.clone(),
+        channel: channel.clone(),
+        status: status.clone(),
+        text: text.trim().to_string(),
+        started_at_ms,
+        written_at: Utc::now().to_rfc3339(),
+    };
+    append_transcript_checkpoint(&directory, &checkpoint)?;
+
+    let active_manifest = {
+        let mut guard = sessions()
+            .lock()
+            .map_err(|_| "Не удалось заблокировать менеджер записи созвона.".to_string())?;
+        guard.get_mut(&session_id).map(|stored| {
+            update_live_transcription_state(
+                &mut stored.session,
+                &channel,
+                &status,
+                &text,
+                message.as_deref(),
+            );
+            stored.session.clone()
+        })
+    };
+    let session = match active_manifest {
+        Some(session) => session,
+        None => {
+            let mut session = read_manifest(&directory)?;
+            update_live_transcription_state(
+                &mut session,
+                &channel,
+                &status,
+                &text,
+                message.as_deref(),
+            );
+            session
+        }
+    };
+    write_manifest(&session)
+}
+
+fn restore_transcript_checkpoints(directory: &PathBuf, state: &mut CallLiveTranscriptionState) {
+    let path = directory.join(TRANSCRIPT_CHECKPOINT_FILE);
+    let Ok(content) = fs::read_to_string(path) else {
+        return;
+    };
+    for line in content.lines().filter(|line| !line.trim().is_empty()) {
+        let Ok(checkpoint) = serde_json::from_str::<CallTranscriptCheckpoint>(line) else {
+            continue;
+        };
+        if (checkpoint.status != "final" && checkpoint.status != "draft")
+            || checkpoint.text.trim().is_empty()
+        {
+            continue;
+        }
+        if checkpoint.channel == "mic" {
+            state.mic_text = Some(checkpoint.text);
+        } else if checkpoint.channel == "system" {
+            state.system_text = Some(checkpoint.text);
+        }
+    }
+}
+
+fn repair_pcm_wav_header(path: &PathBuf, directory: &PathBuf) -> Result<(), String> {
+    if path.extension().and_then(|value| value.to_str()) != Some("wav") || !path.is_file() {
+        return Ok(());
+    }
+    let canonical_directory = directory
+        .canonicalize()
+        .map_err(|error| format!("Не удалось проверить папку созвона: {}", error))?;
+    let canonical_path = path
+        .canonicalize()
+        .map_err(|error| format!("Не удалось проверить WAV созвона: {}", error))?;
+    if !canonical_path.starts_with(canonical_directory) {
+        return Err("WAV созвона находится вне папки сессии.".to_string());
+    }
+
+    let mut file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&canonical_path)
+        .map_err(|error| format!("Не удалось открыть WAV для восстановления: {}", error))?;
+    let file_len = file
+        .metadata()
+        .map_err(|error| format!("Не удалось прочитать размер WAV: {}", error))?
+        .len();
+    if file_len < 44 || file_len > u64::from(u32::MAX) {
+        return Ok(());
+    }
+
+    let mut header = [0u8; 12];
+    file.read_exact(&mut header)
+        .map_err(|error| format!("Не удалось прочитать WAV-заголовок: {}", error))?;
+    if &header[0..4] != b"RIFF" || &header[8..12] != b"WAVE" {
+        return Ok(());
+    }
+
+    let mut chunk_offset = 12u64;
+    let mut data_size_offset = None;
+    let mut data_start = None;
+    while chunk_offset + 8 <= file_len {
+        file.seek(SeekFrom::Start(chunk_offset))
+            .map_err(|error| format!("Не удалось проверить WAV chunk: {}", error))?;
+        let mut chunk_header = [0u8; 8];
+        file.read_exact(&mut chunk_header)
+            .map_err(|error| format!("Не удалось прочитать WAV chunk: {}", error))?;
+        let declared_size = u32::from_le_bytes([
+            chunk_header[4],
+            chunk_header[5],
+            chunk_header[6],
+            chunk_header[7],
+        ]) as u64;
+        if &chunk_header[0..4] == b"data" {
+            data_size_offset = Some(chunk_offset + 4);
+            data_start = Some(chunk_offset + 8);
+            break;
+        }
+        chunk_offset = chunk_offset
+            .saturating_add(8)
+            .saturating_add(declared_size)
+            .saturating_add(declared_size % 2);
+    }
+
+    let (Some(data_size_offset), Some(data_start)) = (data_size_offset, data_start) else {
+        return Ok(());
+    };
+    let riff_size = (file_len - 8) as u32;
+    let data_size = (file_len - data_start) as u32;
+    file.seek(SeekFrom::Start(4))
+        .and_then(|_| file.write_all(&riff_size.to_le_bytes()))
+        .and_then(|_| file.seek(SeekFrom::Start(data_size_offset)))
+        .and_then(|_| file.write_all(&data_size.to_le_bytes()))
+        .and_then(|_| file.sync_all())
+        .map_err(|error| format!("Не удалось восстановить WAV-заголовок: {}", error))
+}
+
+#[tauri::command]
+pub async fn recover_call_capture_sessions(
+    app: AppHandle,
+) -> Result<Vec<CallCaptureSession>, String> {
+    let root = call_capture_root(&app, None)?;
+    if !root.is_dir() {
+        return Ok(Vec::new());
+    }
+    let active_ids = sessions()
+        .lock()
+        .map_err(|_| "Не удалось прочитать активные записи созвонов.".to_string())?
+        .keys()
+        .cloned()
+        .collect::<std::collections::HashSet<_>>();
+    let entries = fs::read_dir(&root)
+        .map_err(|error| format!("Не удалось прочитать записи созвонов: {}", error))?;
+    let mut recovered = Vec::new();
+
+    for entry in entries.flatten() {
+        let directory = entry.path();
+        if !directory.is_dir() {
+            continue;
+        }
+        let Ok(mut session) = read_manifest(&directory) else {
+            continue;
+        };
+        if active_ids.contains(&session.id)
+            || !matches!(
+                session.status,
+                CallCaptureStatus::Starting | CallCaptureStatus::Recording
+            )
+        {
+            continue;
+        }
+
+        session.tracks.retain(|track| {
+            if let Err(error) = repair_pcm_wav_header(&PathBuf::from(&track.path), &directory) {
+                logger::log_error("CALL_CAPTURE", &error);
+                return false;
+            }
+            fs::metadata(&track.path)
+                .map(|metadata| metadata.is_file() && metadata.len() > 44)
+                .unwrap_or(false)
+        });
+        let state = session
+            .live_transcription
+            .get_or_insert_with(CallLiveTranscriptionState::default);
+        restore_transcript_checkpoints(&directory, state);
+        if session.tracks.is_empty()
+            && state.mic_text.as_deref().unwrap_or("").trim().is_empty()
+            && state.system_text.as_deref().unwrap_or("").trim().is_empty()
+        {
+            session.status = CallCaptureStatus::Failed;
+            session.native_mic_active = false;
+            session.ended_at = Some(Utc::now().to_rfc3339());
+            state
+                .errors
+                .push("Незавершённая запись не содержала аудио или текста.".to_string());
+            write_manifest(&session)?;
+            continue;
+        }
+        state
+            .errors
+            .push("Talkis восстановил запись после незавершённого сеанса.".to_string());
+        session.status = CallCaptureStatus::Stopped;
+        session.native_mic_active = false;
+        session.ended_at = Some(Utc::now().to_rfc3339());
+        write_manifest(&session)?;
+        session_directories()
+            .lock()
+            .map_err(|_| "Не удалось сохранить папку восстановленного созвона.".to_string())?
+            .insert(session.id.clone(), directory);
+        recovered.push(session);
+    }
+
+    recovered.sort_by(|left, right| right.started_at.cmp(&left.started_at));
+    Ok(recovered)
 }
 
 #[tauri::command]
@@ -2203,6 +2894,22 @@ fn start_macos_system_audio_capture(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn test_directory(name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "talkis-call-capture-{}-{}-{}",
+            name,
+            std::process::id(),
+            nonce
+        ));
+        fs::create_dir_all(&path).expect("test directory");
+        path
+    }
 
     fn collect_resampled(
         source_sample_rate: u32,
@@ -2267,5 +2974,99 @@ mod tests {
                 float_to_pcm_i16(1.0),
             ]
         );
+    }
+
+    #[test]
+    fn repairs_wav_header_after_unfinalized_tail() {
+        let directory = test_directory("wav-repair");
+        let path = directory.join("mic.wav");
+        let mut writer = hound::WavWriter::create(
+            &path,
+            hound::WavSpec {
+                channels: 1,
+                sample_rate: 16_000,
+                bits_per_sample: 16,
+                sample_format: hound::SampleFormat::Int,
+            },
+        )
+        .expect("wav writer");
+        for sample in [1_i16, 2, 3] {
+            writer.write_sample(sample).expect("wav sample");
+        }
+        writer.finalize().expect("finalize initial wav");
+
+        let mut file = OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .expect("append wav tail");
+        file.write_all(&4_i16.to_le_bytes()).expect("tail sample");
+        file.write_all(&5_i16.to_le_bytes()).expect("tail sample");
+        file.sync_all().expect("sync wav tail");
+
+        repair_pcm_wav_header(&path, &directory).expect("repair wav");
+        let samples = hound::WavReader::open(&path)
+            .expect("repaired wav")
+            .into_samples::<i16>()
+            .collect::<Result<Vec<_>, _>>()
+            .expect("wav samples");
+        assert_eq!(samples, vec![1, 2, 3, 4, 5]);
+
+        fs::remove_dir_all(directory).expect("remove test directory");
+    }
+
+    #[test]
+    fn restores_latest_durable_transcript_per_channel() {
+        let directory = test_directory("transcript-restore");
+        let checkpoint = |channel: &str, status: &str, text: &str, started_at_ms: u64| {
+            append_transcript_checkpoint(
+                &directory,
+                &CallTranscriptCheckpoint {
+                    session_id: "call-test".to_string(),
+                    channel: channel.to_string(),
+                    status: status.to_string(),
+                    text: text.to_string(),
+                    started_at_ms,
+                    written_at: Utc::now().to_rfc3339(),
+                },
+            )
+            .expect("append transcript checkpoint");
+        };
+        checkpoint("mic", "draft", "первая версия", 100);
+        checkpoint("system", "final", "ответ собеседника", 200);
+        checkpoint("mic", "error", "", 300);
+        checkpoint("mic", "final", "последняя версия", 400);
+
+        let mut state = CallLiveTranscriptionState::default();
+        restore_transcript_checkpoints(&directory, &mut state);
+
+        assert_eq!(state.mic_text.as_deref(), Some("последняя версия"));
+        assert_eq!(state.system_text.as_deref(), Some("ответ собеседника"));
+
+        fs::remove_dir_all(directory).expect("remove test directory");
+    }
+
+    #[test]
+    fn atomically_replaces_existing_session_manifest() {
+        let directory = test_directory("manifest-replace");
+        let mut session = CallCaptureSession {
+            id: "call-test".to_string(),
+            platform: "test".to_string(),
+            status: CallCaptureStatus::Starting,
+            started_at: Utc::now().to_rfc3339(),
+            ended_at: None,
+            directory: directory.to_string_lossy().to_string(),
+            tracks: Vec::new(),
+            native_mic_active: false,
+            live_transcription: None,
+        };
+        write_manifest(&session).expect("write initial manifest");
+        session.status = CallCaptureStatus::Recording;
+        write_manifest(&session).expect("replace manifest");
+
+        let restored = read_manifest(&directory).expect("read replaced manifest");
+        assert_eq!(restored.status, CallCaptureStatus::Recording);
+        assert!(!directory.join("manifest.json.tmp").exists());
+
+        fs::remove_dir_all(directory).expect("remove test directory");
     }
 }

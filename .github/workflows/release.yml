@@ -153,9 +153,16 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
+      - name: Verify Windows x64 release architecture
+        if: matrix.platform == 'windows'
+        run: bun run verify:windows-release
+
       - name: Postprocess macOS release
         if: matrix.platform == 'macos'
         run: bun run postprocess:macos-release
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Archive macOS app bundle
         if: matrix.platform == 'macos'
@@ -228,6 +235,11 @@ jobs:
           copy_first "*.exe" "Talkis-windows-x64-setup.exe"
           copy_first "*.AppImage" "Talkis-linux-x64.AppImage"
 
+          (
+            cd "$STABLE_DIR"
+            sha256sum "Talkis-windows-x64-setup.exe" > "Talkis-windows-x64-setup.exe.sha256"
+          )
+
       - name: Publish GitHub release assets
         uses: softprops/action-gh-release@v2
         with:
@@ -257,6 +269,7 @@ jobs:
             release-artifacts/**/*.rpm
             release-artifacts/**/*.zip
             release-artifacts/**/*.sig
+            release-artifacts/**/*.sha256
             release-artifacts/**/latest.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

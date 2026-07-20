@@ -24,8 +24,12 @@ import {
   createNativeLiveDictationOptions,
   isLocalSttStreamingEnabled,
   isSttStreamingEnabled,
+  warmUpLiveDictationRuntime,
 } from "../services/dictationStreamOverlay";
-import type { WidgetAction, WidgetMachineState } from "../services/widgetMachine";
+import type {
+  WidgetAction,
+  WidgetMachineState,
+} from "../services/widgetMachine";
 
 const LOW_MIC_GRACE_MS = 1800;
 const LOW_MIC_SUSTAINED_MS = 2600;
@@ -54,7 +58,8 @@ interface UseWidgetRecordingResult {
 
 function getAudioConstraints(micId: string): MediaTrackConstraints | true {
   const platform = `${navigator.platform} ${navigator.userAgent}`.toLowerCase();
-  const useMicProcessing = platform.includes("linux") || platform.includes("x11");
+  const useMicProcessing =
+    platform.includes("linux") || platform.includes("x11");
   const constraints: MediaTrackConstraints = {
     echoCancellation: useMicProcessing,
     noiseSuppression: useMicProcessing,
@@ -102,14 +107,20 @@ async function resolveSelectedMicLabel(micId: string): Promise<string | null> {
     );
     return selected?.label?.trim() || null;
   } catch (error) {
-    logError("RECORDING", `Failed to resolve selected mic label: ${formatErrorMessage(error)}`);
+    logError(
+      "RECORDING",
+      `Failed to resolve selected mic label: ${formatErrorMessage(error)}`,
+    );
     return null;
   } finally {
     permissionStream?.getTracks().forEach((track) => track.stop());
   }
 }
 
-async function waitForTrackReady(stream: MediaStream, timeoutMs: number): Promise<void> {
+async function waitForTrackReady(
+  stream: MediaStream,
+  timeoutMs: number,
+): Promise<void> {
   const [track] = stream.getAudioTracks();
   if (!track || (!track.muted && track.readyState === "live")) {
     return;
@@ -141,49 +152,6 @@ function waitForWidgetPaint(): Promise<void> {
   });
 }
 
-function isManagedLocalSttEndpoint(endpoint: string): boolean {
-  try {
-    const url = new URL(endpoint);
-    const host = url.hostname.toLowerCase();
-    if (host !== "127.0.0.1" && host !== "localhost") {
-      return false;
-    }
-
-    const port = Number(url.port || "80");
-    return (
-      port === 8000 ||
-      port === 8001 ||
-      port === 8002 ||
-      (port >= 18000 && port <= 18149)
-    );
-  } catch {
-    return false;
-  }
-}
-
-async function warmUpLiveDictationRuntime(settings: AppSettings): Promise<void> {
-  if (!isManagedLocalSttEndpoint(settings.whisperEndpoint || "")) {
-    return;
-  }
-
-  const result = await invoke<{ success: boolean; models: string[]; message: string }>(
-    "list_stt_models",
-    {
-      req: {
-        api_key: settings.apiKey,
-        whisper_api_key: settings.whisperApiKey || null,
-        whisper_endpoint: settings.whisperEndpoint || null,
-        local_models_dir: settings.localModelsDir || null,
-      },
-    },
-  );
-
-  logInfo(
-    "DICTATION_STREAM",
-    `Local STT runtime warm-up before live dictation: success=${result.success}, models=${result.models.length}, message=${result.message}`,
-  );
-}
-
 export function useWidgetRecording({
   settings,
   machineRef,
@@ -207,10 +175,7 @@ export function useWidgetRecording({
   const resizeForSettings = useCallback(
     (currentSettings: AppSettings): Promise<void> =>
       resizeWidget(
-        widgetStackWidth(
-          false,
-          currentSettings.translation.liveWidgetEnabled,
-        ),
+        widgetStackWidth(false, currentSettings.translation.liveWidgetEnabled),
         widgetStackHeight(false),
       ),
     [resizeWidget],
@@ -239,23 +204,26 @@ export function useWidgetRecording({
     recordingLimitTimerRef.current = null;
   }, []);
 
-  const clearDictationStreamSession = useCallback(async (hideOverlay: boolean) => {
-    const session = dictationStreamRef.current;
-    dictationStreamRef.current = null;
-    if (!session) {
-      return;
-    }
+  const clearDictationStreamSession = useCallback(
+    async (hideOverlay: boolean) => {
+      const session = dictationStreamRef.current;
+      dictationStreamRef.current = null;
+      if (!session) {
+        return;
+      }
 
-    if (hideOverlay) {
-      await session.hide().catch((error) => {
-        logError(
-          "DICTATION_STREAM",
-          `Failed to hide live dictation overlay: ${formatErrorMessage(error)}`,
-        );
-      });
-    }
-    session.dispose();
-  }, []);
+      if (hideOverlay) {
+        await session.hide().catch((error) => {
+          logError(
+            "DICTATION_STREAM",
+            `Failed to hide live dictation overlay: ${formatErrorMessage(error)}`,
+          );
+        });
+      }
+      session.dispose();
+    },
+    [],
+  );
 
   const scheduleRecordingLimitTimer = useCallback(() => {
     clearRecordingLimitTimer();
@@ -270,69 +238,79 @@ export function useWidgetRecording({
     }, MAX_RECORDING_DURATION_MS);
   }, [clearRecordingLimitTimer, showNotice, stopAndProcessRef, t]);
 
-  const startLowMicMonitor = useCallback((recordingStream: MediaStream) => {
-    stopLowMicMonitor();
+  const startLowMicMonitor = useCallback(
+    (recordingStream: MediaStream) => {
+      stopLowMicMonitor();
 
-    try {
-      const audioContext = new AudioContext({ latencyHint: "interactive" });
-      const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 512;
-      analyser.smoothingTimeConstant = 0.45;
+      try {
+        const audioContext = new AudioContext({ latencyHint: "interactive" });
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 512;
+        analyser.smoothingTimeConstant = 0.45;
 
-      const source = audioContext.createMediaStreamSource(recordingStream);
-      source.connect(analyser);
+        const source = audioContext.createMediaStreamSource(recordingStream);
+        source.connect(analyser);
 
-      const dataArray = new Uint8Array(analyser.fftSize);
-      const startedAt = Date.now();
-      let lowStartedAt: number | null = null;
-      let noticeShown = false;
-      let normalSignalSamples = 0;
+        const dataArray = new Uint8Array(analyser.fftSize);
+        const startedAt = Date.now();
+        let lowStartedAt: number | null = null;
+        let noticeShown = false;
+        let normalSignalSamples = 0;
 
-      const interval = window.setInterval(() => {
-        analyser.getByteTimeDomainData(dataArray);
+        const interval = window.setInterval(() => {
+          analyser.getByteTimeDomainData(dataArray);
 
-        let sumSquares = 0;
-        for (let index = 0; index < dataArray.length; index += 1) {
-          const normalized = (dataArray[index] - 128) / 128;
-          sumSquares += normalized * normalized;
-        }
+          let sumSquares = 0;
+          for (let index = 0; index < dataArray.length; index += 1) {
+            const normalized = (dataArray[index] - 128) / 128;
+            sumSquares += normalized * normalized;
+          }
 
-        const rms = Math.sqrt(sumSquares / dataArray.length);
-        if (rms >= LOW_MIC_RMS_THRESHOLD) {
-          normalSignalSamples += 1;
-        }
-        const now = Date.now();
+          const rms = Math.sqrt(sumSquares / dataArray.length);
+          if (rms >= LOW_MIC_RMS_THRESHOLD) {
+            normalSignalSamples += 1;
+          }
+          const now = Date.now();
 
-        if (now - startedAt < LOW_MIC_GRACE_MS || noticeShown || normalSignalSamples >= 3) {
+          if (
+            now - startedAt < LOW_MIC_GRACE_MS ||
+            noticeShown ||
+            normalSignalSamples >= 3
+          ) {
+            if (rms >= LOW_MIC_RMS_THRESHOLD) {
+              lowStartedAt = null;
+            }
+            return;
+          }
+
           if (rms >= LOW_MIC_RMS_THRESHOLD) {
             lowStartedAt = null;
+            return;
           }
-          return;
-        }
 
-        if (rms >= LOW_MIC_RMS_THRESHOLD) {
-          lowStartedAt = null;
-          return;
-        }
+          lowStartedAt ??= now;
+          if (now - lowStartedAt >= LOW_MIC_SUSTAINED_MS) {
+            noticeShown = true;
+            showNotice(t("widget.recording.lowMic"), "info");
+          }
+        }, LOW_MIC_SAMPLE_INTERVAL_MS);
 
-        lowStartedAt ??= now;
-        if (now - lowStartedAt >= LOW_MIC_SUSTAINED_MS) {
-          noticeShown = true;
-          showNotice(t("widget.recording.lowMic"), "info");
-        }
-      }, LOW_MIC_SAMPLE_INTERVAL_MS);
+        void audioContext.resume().catch(() => {});
 
-      void audioContext.resume().catch(() => {});
-
-      lowMicMonitorCleanupRef.current = () => {
-        window.clearInterval(interval);
-        source.disconnect();
-        void audioContext.close();
-      };
-    } catch (error) {
-      logError("RECORDING", `Low mic monitor failed: ${formatErrorMessage(error)}`);
-    }
-  }, [showNotice, stopLowMicMonitor, t]);
+        lowMicMonitorCleanupRef.current = () => {
+          window.clearInterval(interval);
+          source.disconnect();
+          void audioContext.close();
+        };
+      } catch (error) {
+        logError(
+          "RECORDING",
+          `Low mic monitor failed: ${formatErrorMessage(error)}`,
+        );
+      }
+    },
+    [showNotice, stopLowMicMonitor, t],
+  );
 
   // ── Start recording ─────────────────────────────────────────────────────
   const startRecording = useCallback(async () => {
@@ -353,7 +331,10 @@ export function useWidgetRecording({
     try {
       activeSettings = await getSettings({ reload: true });
     } catch (error) {
-      logError("SETTINGS", `Failed to refresh settings before recording: ${formatErrorMessage(error)}`);
+      logError(
+        "SETTINGS",
+        `Failed to refresh settings before recording: ${formatErrorMessage(error)}`,
+      );
     }
 
     if (!activeSettings) {
@@ -364,14 +345,20 @@ export function useWidgetRecording({
 
     // Cloud mode must have a device token. Do not silently fall back to direct OpenAI.
     const isCloudMode = !activeSettings.useOwnKey;
-    const isSubscriptionMode = isCloudMode && (activeSettings.deviceToken || "").trim().length > 0;
-    const hasKey = activeSettings.apiKey.trim().length > 0 || activeSettings.whisperApiKey.trim().length > 0 || (activeSettings.llmApiKey || "").trim().length > 0;
+    const isSubscriptionMode =
+      isCloudMode && (activeSettings.deviceToken || "").trim().length > 0;
+    const hasKey =
+      activeSettings.apiKey.trim().length > 0 ||
+      activeSettings.whisperApiKey.trim().length > 0 ||
+      (activeSettings.llmApiKey || "").trim().length > 0;
 
     // In local STT mode the whisper server runs on localhost and requires no API key.
     // Detect this case by the local-looking endpoint; provider can be stale after upgrades.
     const isLocalSttMode =
       activeSettings.useOwnKey &&
-      (activeSettings.whisperEndpoint || "").match(/127\.0\.0\.1|localhost/i) !== null &&
+      (activeSettings.whisperEndpoint || "").match(
+        /127\.0\.0\.1|localhost/i,
+      ) !== null &&
       (activeSettings.whisperApiKey || "").trim().length === 0;
 
     if (isCloudMode && !isSubscriptionMode) {
@@ -396,39 +383,46 @@ export function useWidgetRecording({
       await clearTextOverlayPromise;
 
       const liveStreamingEnabled = isSttStreamingEnabled(activeSettings);
-      const localLiveStreamingEnabled = isLocalSttStreamingEnabled(activeSettings);
-      const startLiveOverlay = (): Promise<DictationStreamOverlaySession | null> =>
-        startDictationStreamOverlaySession(activeSettings).then((session) => {
-          if (session) {
+      const localLiveStreamingEnabled =
+        isLocalSttStreamingEnabled(activeSettings);
+      const startLiveOverlay =
+        (): Promise<DictationStreamOverlaySession | null> =>
+          startDictationStreamOverlaySession(activeSettings)
+            .then((session) => {
+              if (session) {
+                logInfo(
+                  "DICTATION_STREAM",
+                  `Live dictation overlay ready after ${Date.now() - startRequestedAt}ms`,
+                );
+              }
+              return session;
+            })
+            .catch((error) => {
+              logError(
+                "DICTATION_STREAM",
+                `Failed to start live dictation overlay session: ${formatErrorMessage(error)}`,
+              );
+              return null;
+            });
+      const warmUpLiveRuntime = (): Promise<string | null | false> =>
+        warmUpLiveDictationRuntime(activeSettings)
+          .then((runtimeEndpoint) => {
             logInfo(
               "DICTATION_STREAM",
-              `Live dictation overlay ready after ${Date.now() - startRequestedAt}ms`,
+              `Local STT runtime warm-up finished after ${Date.now() - startRequestedAt}ms`,
             );
-          }
-          return session;
-        }).catch((error) => {
-          logError(
-            "DICTATION_STREAM",
-            `Failed to start live dictation overlay session: ${formatErrorMessage(error)}`,
-          );
-          return null;
-        });
-      const warmUpLiveRuntime = (): Promise<boolean> =>
-        warmUpLiveDictationRuntime(activeSettings).then(() => {
-          logInfo(
-            "DICTATION_STREAM",
-            `Local STT runtime warm-up finished after ${Date.now() - startRequestedAt}ms`,
-          );
-          return true;
-        }).catch((warmUpError) => {
-          logError(
-            "DICTATION_STREAM",
-            `Local STT runtime warm-up failed, using post-stop transcription fallback: ${formatErrorMessage(warmUpError)}`,
-          );
-          return false;
-        });
+            return runtimeEndpoint;
+          })
+          .catch((warmUpError) => {
+            logError(
+              "DICTATION_STREAM",
+              `Local STT runtime warm-up failed, using post-stop transcription fallback: ${formatErrorMessage(warmUpError)}`,
+            );
+            return false;
+          });
 
-      let dictationStreamPromise: Promise<DictationStreamOverlaySession | null> | null = null;
+      let dictationStreamPromise: Promise<DictationStreamOverlaySession | null> | null =
+        null;
       const liveWarmUpPromise = localLiveStreamingEnabled
         ? warmUpLiveRuntime()
         : null;
@@ -436,9 +430,14 @@ export function useWidgetRecording({
         dictationStreamPromise = startLiveOverlay();
       }
 
-      const nativeMicLabel = await resolveSelectedMicLabel(activeSettings.micId);
+      const nativeMicLabel = await resolveSelectedMicLabel(
+        activeSettings.micId,
+      );
       if (activeSettings.micId && nativeMicLabel) {
-        logInfo("RECORDING", `Using preferred native mic label: ${nativeMicLabel}`);
+        logInfo(
+          "RECORDING",
+          `Using preferred native mic label: ${nativeMicLabel}`,
+        );
       } else if (activeSettings.micId) {
         logInfo(
           "RECORDING",
@@ -454,19 +453,27 @@ export function useWidgetRecording({
         ? await dictationStreamPromise
         : null;
       let liveDictation = dictationStream
-        ? createNativeLiveDictationOptions(activeSettings, dictationStream.requestId)
+        ? createNativeLiveDictationOptions(
+            activeSettings,
+            dictationStream.requestId,
+          )
         : null;
 
       try {
         if (dictationStream && liveDictation) {
-          const warmUpSucceeded = liveWarmUpPromise
+          const runtimeEndpoint = liveWarmUpPromise
             ? await liveWarmUpPromise
-            : true;
-          if (!warmUpSucceeded) {
+            : null;
+          if (runtimeEndpoint === false) {
             await dictationStream.hide().catch(() => {});
             dictationStream.dispose();
             dictationStream = null;
             liveDictation = null;
+          } else if (runtimeEndpoint && liveDictation.provider === "local") {
+            liveDictation = {
+              ...liveDictation,
+              endpoint: runtimeEndpoint,
+            };
           }
         }
 
@@ -484,7 +491,12 @@ export function useWidgetRecording({
           await dictationStream.hide().catch(() => {});
           dictationStream.dispose();
         }
-        logInfo("RECORDING", codec === "native-wav" ? "Using native wav recorder" : "Using native recorder");
+        logInfo(
+          "RECORDING",
+          codec === "native-wav"
+            ? "Using native wav recorder"
+            : "Using native recorder",
+        );
         setStream(null);
         logInfo("RECORDING", "Recording started successfully");
         dispatch({ type: "RECORDING_STARTED", timestamp: Date.now() });
@@ -512,7 +524,9 @@ export function useWidgetRecording({
       let recordingStream: MediaStream;
       try {
         logInfo("RECORDING", "Requesting microphone access...");
-        recordingStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+        recordingStream = await navigator.mediaDevices.getUserMedia({
+          audio: audioConstraints,
+        });
       } catch (micError) {
         logInfo(
           "RECORDING",
@@ -520,7 +534,9 @@ export function useWidgetRecording({
         );
 
         try {
-          recordingStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          recordingStream = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+          });
         } catch (fallbackError) {
           logError(
             "RECORDING",
@@ -563,7 +579,10 @@ export function useWidgetRecording({
       void clearDictationStreamSession(true);
       recordingSettingsRef.current = null;
       setStream(null);
-      logError("RECORDING", `Start error: ${error instanceof Error ? error.message : "unknown"}`);
+      logError(
+        "RECORDING",
+        `Start error: ${error instanceof Error ? error.message : "unknown"}`,
+      );
       showError(
         t("widget.recording.startError", {
           error:
@@ -573,7 +592,23 @@ export function useWidgetRecording({
         }),
       );
     }
-  }, [clearDictationStreamSession, clearRecordingLimitTimer, dispatch, hideNotice, machineRef, onRecordingStart, onRecordingStartFailed, resizeForSettings, scheduleRecordingLimitTimer, setStream, settings, showError, startLowMicMonitor, stopLowMicMonitor, t]);
+  }, [
+    clearDictationStreamSession,
+    clearRecordingLimitTimer,
+    dispatch,
+    hideNotice,
+    machineRef,
+    onRecordingStart,
+    onRecordingStartFailed,
+    resizeForSettings,
+    scheduleRecordingLimitTimer,
+    setStream,
+    settings,
+    showError,
+    startLowMicMonitor,
+    stopLowMicMonitor,
+    t,
+  ]);
 
   // ── Stop and process ────────────────────────────────────────────────────
   const stopAndProcess = useCallback(async () => {
@@ -581,7 +616,11 @@ export function useWidgetRecording({
 
     const machine = machineRef.current;
     const activeSettings = recordingSettingsRef.current ?? settings;
-    if (!runtimeRef.current.hasRecorder() || !activeSettings || !machine.recordingActive) {
+    if (
+      !runtimeRef.current.hasRecorder() ||
+      !activeSettings ||
+      !machine.recordingActive
+    ) {
       logError("RECORDING", "No active recording");
       return;
     }
@@ -619,10 +658,16 @@ export function useWidgetRecording({
       }
 
       const blob = await runtimeRef.current.getAudioBlob();
-      logInfo("RECORDING", `Recorded audio blob: type=${blob.type || "[unknown]"}, size=${blob.size}`);
+      logInfo(
+        "RECORDING",
+        `Recorded audio blob: type=${blob.type || "[unknown]"}, size=${blob.size}`,
+      );
       const durationMs = Date.now() - machine.recordingStartTimestamp;
 
-      if (durationMs < MIN_RECORDING_DURATION_MS || blob.size < MIN_AUDIO_BLOB_BYTES) {
+      if (
+        durationMs < MIN_RECORDING_DURATION_MS ||
+        blob.size < MIN_AUDIO_BLOB_BYTES
+      ) {
         logInfo(
           "RECORDING",
           `Recording too short, skipping API request. duration_ms=${durationMs}, blob_size=${blob.size}`,
@@ -663,14 +708,30 @@ export function useWidgetRecording({
       const errorMessage = formatErrorMessage(error);
       logError("API", `Processing error: ${errorMessage}`);
 
-      const message = errorMessage && errorMessage !== "{}" ? errorMessage : t("widget.recording.processingError");
+      const message =
+        errorMessage && errorMessage !== "{}"
+          ? errorMessage
+          : t("widget.recording.processingError");
 
       recordingSettingsRef.current = null;
       runtimeRef.current.reset();
       await clearDictationStreamSession(true);
       showError(message);
     }
-  }, [clearDictationStreamSession, clearRecordingLimitTimer, dispatch, machineRef, onRecordingProcessing, resizeForSettings, setStream, settings, showError, showNotice, stopLowMicMonitor, t]);
+  }, [
+    clearDictationStreamSession,
+    clearRecordingLimitTimer,
+    dispatch,
+    machineRef,
+    onRecordingProcessing,
+    resizeForSettings,
+    setStream,
+    settings,
+    showError,
+    showNotice,
+    stopLowMicMonitor,
+    t,
+  ]);
 
   // ── Keep stopAndProcessRef current ──────────────────────────────────────
   useEffect(() => {
@@ -685,7 +746,11 @@ export function useWidgetRecording({
       runtimeRef.current.dispose();
       void clearDictationStreamSession(true);
     };
-  }, [clearDictationStreamSession, clearRecordingLimitTimer, stopLowMicMonitor]);
+  }, [
+    clearDictationStreamSession,
+    clearRecordingLimitTimer,
+    stopLowMicMonitor,
+  ]);
 
   return { startRecording, stopAndProcess };
 }

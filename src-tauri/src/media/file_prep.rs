@@ -5,7 +5,7 @@ use std::path::Path;
 
 use super::ffmpeg::run_ffmpeg;
 use super::paths::{file_extension, unique_temp_path};
-use super::probe::is_local_stt_ready_wav;
+use super::probe::local_stt_ready_wav_duration_seconds;
 use super::types::{
     PrepareMediaRequest, PrepareMediaResponse, PreparedDiarizationAudio, PreparedMediaChunk,
     PreparedMediaChunks, PreparedProxyMedia,
@@ -24,13 +24,15 @@ struct TranscriptionChunkSpec {
 }
 
 impl TranscriptionChunkSpec {
-    fn for_target(local_stt_target: bool) -> Self {
+    fn for_target(local_stt_target: bool, local_segment_seconds: Option<u32>) -> Self {
         if local_stt_target {
             Self {
                 extension: "wav",
                 mime_type: "audio/wav",
                 fallback_file_name: "talkis-transcription-chunk.wav",
-                segment_seconds: LOCAL_STT_FILE_TRANSCRIPTION_SEGMENT_SECONDS,
+                segment_seconds: local_segment_seconds
+                    .filter(|seconds| *seconds > 0)
+                    .unwrap_or(LOCAL_STT_FILE_TRANSCRIPTION_SEGMENT_SECONDS),
             }
         } else {
             Self {
@@ -93,6 +95,7 @@ pub async fn prepare_media_file_chunks_for_transcription(
     app: &tauri::AppHandle,
     input_path: &Path,
     local_stt_target: bool,
+    local_segment_seconds: Option<u32>,
 ) -> Result<PreparedMediaChunks, String> {
     let metadata =
         fs::metadata(input_path).map_err(|err| format!("Не удалось прочитать файл: {}", err))?;
@@ -113,7 +116,16 @@ pub async fn prepare_media_file_chunks_for_transcription(
 
     if metadata.len() <= MAX_TRANSCRIPTION_BYTES {
         if let Ok(input_bytes) = fs::read(input_path) {
-            if is_local_stt_ready_wav(&input_bytes) {
+            let ready_wav_duration = local_stt_ready_wav_duration_seconds(&input_bytes);
+            let fits_target_window = local_segment_seconds
+                .map(|limit| {
+                    ready_wav_duration
+                        .map(|duration| duration <= limit as f64)
+                        .unwrap_or(false)
+                })
+                .unwrap_or(true);
+
+            if ready_wav_duration.is_some() && fits_target_window {
                 logger::log_info(
                     "MEDIA",
                     &format!(
@@ -143,7 +155,7 @@ pub async fn prepare_media_file_chunks_for_transcription(
     fs::create_dir_all(&chunks_dir)
         .map_err(|err| format!("Не удалось подготовить временную папку: {}", err))?;
 
-    let chunk_spec = TranscriptionChunkSpec::for_target(local_stt_target);
+    let chunk_spec = TranscriptionChunkSpec::for_target(local_stt_target, local_segment_seconds);
     logger::log_info(
         "MEDIA",
         &format!(
@@ -440,7 +452,7 @@ mod tests {
 
     #[test]
     fn local_transcription_chunk_spec_targets_wav_for_local_stt() {
-        let spec = TranscriptionChunkSpec::for_target(true);
+        let spec = TranscriptionChunkSpec::for_target(true, None);
         let output_pattern = spec.output_pattern(Path::new("/tmp/talkis-chunks"));
         let args = spec.ffmpeg_args(Path::new("/tmp/input.mp4"), &output_pattern);
 
@@ -457,7 +469,7 @@ mod tests {
 
     #[test]
     fn remote_transcription_chunk_spec_keeps_mp3_upload_chunks() {
-        let spec = TranscriptionChunkSpec::for_target(false);
+        let spec = TranscriptionChunkSpec::for_target(false, Some(25));
         let output_pattern = spec.output_pattern(Path::new("/tmp/talkis-chunks"));
         let args = spec.ffmpeg_args(Path::new("/tmp/input.mp4"), &output_pattern);
 
@@ -470,5 +482,15 @@ mod tests {
         assert!(has_arg_pair(&args, "-b:a", "32k"));
         assert!(!has_arg_pair(&args, "-acodec", "pcm_s16le"));
         assert!(has_arg_pair(&args, "-segment_time", "600"));
+    }
+
+    #[test]
+    fn local_transcription_chunk_spec_accepts_model_window_override() {
+        let spec = TranscriptionChunkSpec::for_target(true, Some(25));
+        let output_pattern = spec.output_pattern(Path::new("/tmp/talkis-chunks"));
+        let args = spec.ffmpeg_args(Path::new("/tmp/input.wav"), &output_pattern);
+
+        assert_eq!(spec.segment_seconds, 25);
+        assert!(has_arg_pair(&args, "-segment_time", "25"));
     }
 }

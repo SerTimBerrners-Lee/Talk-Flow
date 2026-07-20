@@ -37,10 +37,19 @@ It is designed for practical daily work: IDEs, chats, notes, CRM fields, email, 
 - Transcribe audio and video files from the Files tab or by dropping files onto the widget.
 - Record calls with separate microphone and system-audio tracks on macOS, Windows, and Linux.
 - Keep local history for voice recordings, file transcriptions, calls, and live translations.
-- Run managed local STT through one native `transcribe.cpp` runtime for Whisper, Qwen ASR, NVIDIA Parakeet, plus local text summaries through a managed GGUF LLM runtime.
+- Run managed local STT through one native `transcribe.cpp` runtime for Whisper, GigaAM, Qwen ASR, NVIDIA Parakeet, plus local text summaries through a managed GGUF LLM runtime.
 - Build native bundles for macOS, Windows, and Linux.
 
 ## Latest Changes
+
+### v0.4.1
+
+- Added GigaAM v3 E2E RNNT as a managed local Russian speech-recognition model, with short file-transcription chunks matched to the model's 25-second window.
+- Fixed local selected-text translation dropping everything after the first sentence by translating multi-sentence input as a checked CTranslate2 batch.
+- Improved local model installation with automatic retries for transient Hugging Face transport failures and stable installed-state UI while the local runtime refreshes.
+- Added live call transcription directly in the Transcription result view while separate microphone and system-audio tracks continue to be saved for recovery and final refinement.
+- Added a persistent desktop system tray with explicit Open Talkis and Quit actions; Quit also terminates managed local sidecar processes.
+- Added a native Windows release gate that verifies the main application and every bundled sidecar as x86-64 PE executables, plus a published SHA-256 checksum for the stable Windows installer.
 
 ### v0.4.0
 
@@ -193,7 +202,7 @@ Install and run Talkis-managed local models from Settings. Local mode can keep b
 
 Managed local runtimes:
 
-- Whisper, NVIDIA Parakeet GGUF, and Qwen ASR GGUF through the unified `transcribe.cpp` runtime, default endpoint `http://127.0.0.1:8000`
+- Whisper, GigaAM GGUF, NVIDIA Parakeet GGUF, and Qwen ASR GGUF through the unified `transcribe.cpp` runtime, default endpoint `http://127.0.0.1:8000`
 - Text LLM summaries through the bundled OpenAI-compatible `talkis-llm` runtime backed by GGUF models such as Qwen2.5 Instruct
 - Speaker diarization, default endpoint `http://127.0.0.1:8003`
 
@@ -256,6 +265,13 @@ Call recording captures two tracks:
 System-audio capture is implemented with Core Audio on macOS, WASAPI loopback on
 Windows, and PipeWire monitor streams on Linux. Linux requires a running PipeWire
 daemon with an active output device.
+
+The call appears in history as soon as recording starts. Talkis checkpoints
+both audio tracks and the transcript draft while the call is active. Streaming
+STT models show live text in the Transcription tab, then the saved tracks refine
+the result after stop. After an unexpected shutdown, Talkis restores available
+audio and the latest durable draft on the next launch. GigaAM and other
+batch-only models transcribe the call after recording stops.
 
 ## Synchronous Translation
 

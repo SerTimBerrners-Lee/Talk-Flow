@@ -104,6 +104,10 @@ impl LiveDictationSession {
             closed: Arc::clone(&self.closed),
         }
     }
+
+    pub fn command_sender(&self) -> tokio::sync::mpsc::Sender<RealtimeAudioCommand> {
+        self.tx.clone()
+    }
 }
 
 impl LivePcmEncoder {

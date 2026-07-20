@@ -130,6 +130,14 @@ export const libMessages = {
     ru: "Обработка остановлена. Можно запустить повторно.",
     en: "Processing stopped. You can run it again.",
   },
+  "callCapture.recovered": {
+    ru: "Talkis восстановил незавершённый разговор. Аудио и сохранённый черновик доступны, обработку можно повторить.",
+    en: "Talkis recovered an unfinished call. Its audio and saved draft are available, and processing can be retried.",
+  },
+  "callCapture.liveUnavailable": {
+    ru: "Онлайн-транскрибация недоступна, но аудио продолжает сохраняться.",
+    en: "Live transcription is unavailable, but audio is still being saved.",
+  },
   "callCapture.fileName": {
     ru: "Созвон",
     en: "Call",

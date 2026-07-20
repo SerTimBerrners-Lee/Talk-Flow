@@ -32,6 +32,18 @@ export const settingsTabsMisc = {
   "fileTab.status.done": { ru: "Готово", en: "Done" },
   "fileTab.status.error": { ru: "Ошибка", en: "Error" },
   "fileTab.status.idle": { ru: "Ожидаем файл", en: "Waiting for a file" },
+  "fileTab.live.stop": {
+    ru: "Остановить",
+    en: "Stop",
+  },
+  "fileTab.live.stopping": {
+    ru: "Останавливаем...",
+    en: "Stopping...",
+  },
+  "fileTab.live.stopFailed": {
+    ru: "Не удалось остановить запись. Попробуйте ещё раз.",
+    en: "Could not stop the recording. Try again.",
+  },
 
   // Result source label (resultSourceLabel) — also reused as the file-name fallback
   "fileTab.source.call": { ru: "Созвон", en: "Call" },
@@ -182,7 +194,10 @@ export const settingsTabsMisc = {
   },
 
   // ---- TranslationTab ----
-  "translation.loading": { ru: "Загружаем переводчик…", en: "Loading translator…" },
+  "translation.loading": {
+    ru: "Загружаем переводчик…",
+    en: "Loading translator…",
+  },
   "translation.title": { ru: "Переводчик", en: "Translator" },
   "translation.view.live": {
     ru: "Синхронный перевод (Облако/API)",
@@ -203,7 +218,10 @@ export const settingsTabsMisc = {
     ru: "Перевод через транскрибацию",
     en: "Translation through transcription",
   },
-  "translation.widget.title": { ru: "Включить перевод", en: "Enable translation" },
+  "translation.widget.title": {
+    ru: "Включить перевод",
+    en: "Enable translation",
+  },
   "translation.widget.desc": {
     ru: "Переводит обычную диктовку после распознавания и перед вставкой.",
     en: "Translates ordinary dictation after recognition and before paste.",

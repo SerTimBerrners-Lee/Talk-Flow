@@ -3,6 +3,7 @@ use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use crate::{logger, media_permissions};
 
 const SETTINGS_NAVIGATE_EVENT: &str = "settings-navigate";
+const APP_UPDATE_CHECK_REQUEST_EVENT: &str = "app-update-check-request";
 
 fn show_and_focus_window(win: &tauri::WebviewWindow) {
     if let Err(err) = win.show() {
@@ -86,5 +87,20 @@ pub async fn open_settings_tab(
         _ => format!("index.html?window=settings&tab={}", tab),
     };
     create_settings_window(&app, &url)?;
+    Ok(())
+}
+
+pub async fn open_update_check(app: AppHandle) -> Result<(), String> {
+    if let Some(win) = app.get_webview_window("settings") {
+        show_and_focus_window(&win);
+        app.emit_to("settings", APP_UPDATE_CHECK_REQUEST_EVENT, ())
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    create_settings_window(
+        &app,
+        "index.html?window=settings&tab=settings&checkUpdate=1",
+    )?;
     Ok(())
 }

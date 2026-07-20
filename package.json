@@ -1,7 +1,7 @@
 {
   "name": "talkis",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.4.1",
   "license": "AGPL-3.0-or-later",
   "type": "module",
   "packageManager": "bun@1.2.13",
@@ -14,6 +14,7 @@
     "check": "bun run prepare:sidecars && bunx tsc --noEmit && cargo check --manifest-path src-tauri/Cargo.toml",
     "test": "bun test",
     "smoke:hotkey": "bun test ./src/windows/widget/services/hotkeyFsm.test.js",
+    "verify:windows-release": "bun scripts/verify-windows-release.mjs",
     "check:versions": "bash scripts/check-version-sync.sh",
     "check:release": "bun run check:versions && bun run check && bun run smoke:hotkey && bun run build",
     "postprocess:macos-release": "VERSION=$(python3 -c \"import json; print(json.load(open('package.json'))['version'])\") && BUILD_ROOT=src-tauri/target/release/bundle bash scripts/postprocess-macos-release.sh \"$VERSION\"",

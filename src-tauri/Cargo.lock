@@ -5725,7 +5725,7 @@ dependencies = [
 
 [[package]]
 name = "talkis"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "base64 0.22.1",
  "block2 0.6.2",
@@ -5769,6 +5769,7 @@ dependencies = [
  "url",
  "webkit2gtk",
  "window-vibrancy 0.7.1",
+ "windows-sys 0.61.2",
  "x11rb",
 ]
 

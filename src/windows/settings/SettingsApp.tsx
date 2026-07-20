@@ -25,6 +25,7 @@ import { DevChatTab } from "./tabs/DevChatTab";
 import { TranslationTab } from "./tabs/TranslationTab";
 import { PermissionScreen } from "../../components/PermissionScreen";
 import {
+  APP_UPDATE_CHECK_REQUEST_EVENT,
   SETTINGS_NAVIGATE_EVENT,
   SETTINGS_UPDATED_EVENT,
   SELECTION_TEXT_REQUEST_EVENT,
@@ -384,6 +385,8 @@ function getCurrentDomSelectionText(): string {
 
 export function SettingsApp() {
   const { t } = useI18n();
+  const checkUpdateAtStartup =
+    new URLSearchParams(window.location.search).get("checkUpdate") === "1";
   const [activeTab, setActiveTab] = useState<Tab>(resolveInitialTab);
   const [focusedFileResultId, setFocusedFileResultId] = useState<string | null>(
     () => new URLSearchParams(window.location.search).get("resultId"),
@@ -435,7 +438,10 @@ export function SettingsApp() {
         }
 
         setShowPermissions(
-          !((passed || shouldRecoverExistingInstall) && hasRequiredStartupPermissions),
+          !(
+            (passed || shouldRecoverExistingInstall) &&
+            hasRequiredStartupPermissions
+          ),
         );
         setLoadError(null);
       })
@@ -447,6 +453,20 @@ export function SettingsApp() {
         setShowPermissions(false);
         setLoadError(t("settingsApp.loadError"));
       });
+  }, []);
+
+  useEffect(() => {
+    if (checkUpdateAtStartup) {
+      void checkForAppUpdateNow();
+    }
+
+    const unlistenPromise = listen(APP_UPDATE_CHECK_REQUEST_EVENT, () => {
+      void checkForAppUpdateNow();
+    });
+
+    return () => {
+      unlistenPromise.then((dispose) => dispose());
+    };
   }, []);
 
   useEffect(() => {

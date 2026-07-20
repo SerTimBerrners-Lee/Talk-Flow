@@ -12,7 +12,8 @@ function detectPlatform() {
   throw new Error(`Unsupported release platform: ${process.platform}`);
 }
 
-const platform = process.argv[2] || process.env.TALKIS_RELEASE_PLATFORM || detectPlatform();
+const platform =
+  process.argv[2] || process.env.TALKIS_RELEASE_PLATFORM || detectPlatform();
 const bundleTargets = {
   macos: ["app"],
   windows: ["nsis"],
@@ -39,10 +40,19 @@ if (platform === "macos") {
 
   if (!env.TAURI_SIGNING_PRIVATE_KEY && env.TAURI_SIGNING_PRIVATE_KEY_PATH) {
     if (!existsSync(env.TAURI_SIGNING_PRIVATE_KEY_PATH)) {
-      throw new Error(`TAURI_SIGNING_PRIVATE_KEY_PATH does not point to a file: ${env.TAURI_SIGNING_PRIVATE_KEY_PATH}`);
+      throw new Error(
+        `TAURI_SIGNING_PRIVATE_KEY_PATH does not point to a file: ${env.TAURI_SIGNING_PRIVATE_KEY_PATH}`,
+      );
     }
 
-    env.TAURI_SIGNING_PRIVATE_KEY = readFileSync(env.TAURI_SIGNING_PRIVATE_KEY_PATH, "utf8");
+    env.TAURI_SIGNING_PRIVATE_KEY = readFileSync(
+      env.TAURI_SIGNING_PRIVATE_KEY_PATH,
+      "utf8",
+    );
+  }
+
+  if (env.TAURI_SIGNING_PRIVATE_KEY) {
+    delete env.TAURI_SIGNING_PRIVATE_KEY_PATH;
   }
 }
 
@@ -56,10 +66,25 @@ function run(command, args) {
 
 run("bun", ["run", "prepare:sidecars"]);
 run("bun", ["run", "build"]);
-run("bun", ["run", "tauri", "build", "--bundles", bundleTargets[platform].join(",")]);
+run("bun", [
+  "run",
+  "tauri",
+  "build",
+  "--bundles",
+  bundleTargets[platform].join(","),
+]);
 
-if (platform === "macos" && process.env.TALKIS_POSTPROCESS_MACOS_RELEASE !== "0") {
+if (platform === "windows") {
+  run("bun", ["run", "verify:windows-release"]);
+}
+
+if (
+  platform === "macos" &&
+  process.env.TALKIS_POSTPROCESS_MACOS_RELEASE !== "0"
+) {
   run("bun", ["run", "postprocess:macos-release"]);
 }
 
-console.log(`Built ${platform} release bundles: ${releaseOutputs[platform].join(", ")}`);
+console.log(
+  `Built ${platform} release bundles: ${releaseOutputs[platform].join(", ")}`,
+);

@@ -7,6 +7,9 @@ APP_NAME="Talkis"
 APP_IDENTIFIER="com.trixter.talkis"
 BUILD_ROOT="${BUILD_ROOT:-/tmp/talkis-target/release/bundle}"
 APP_PATH="${BUILD_ROOT}/macos/${APP_NAME}.app"
+UPDATER_ARCHIVE="${BUILD_ROOT}/macos/${APP_NAME}.app.tar.gz"
+UPDATER_ARCHIVE_TMP="${UPDATER_ARCHIVE}.tmp"
+UPDATER_SIGNATURE="${UPDATER_ARCHIVE}.sig"
 DMG_PATH="${BUILD_ROOT}/dmg/${APP_NAME}_${VERSION}_aarch64.dmg"
 STAGING_DIR="${BUILD_ROOT}/macos/dmg-staging"
 DMG_DIR="$(dirname "${DMG_PATH}")"
@@ -18,6 +21,29 @@ fi
 
 echo "Ad-hoc signing ${APP_PATH} with stable identifier ${APP_IDENTIFIER}"
 codesign --force --deep --sign - --identifier "${APP_IDENTIFIER}" "${APP_PATH}"
+
+if [[ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" && -n "${TAURI_SIGNING_PRIVATE_KEY_PATH:-}" ]]; then
+  if [[ ! -f "${TAURI_SIGNING_PRIVATE_KEY_PATH}" ]]; then
+    echo "TAURI_SIGNING_PRIVATE_KEY_PATH does not point to a file: ${TAURI_SIGNING_PRIVATE_KEY_PATH}" >&2
+    exit 1
+  fi
+  export TAURI_SIGNING_PRIVATE_KEY="$(<"${TAURI_SIGNING_PRIVATE_KEY_PATH}")"
+  unset TAURI_SIGNING_PRIVATE_KEY_PATH
+fi
+
+if [[ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
+  echo "TAURI_SIGNING_PRIVATE_KEY or TAURI_SIGNING_PRIVATE_KEY_PATH is required to rebuild the signed updater archive" >&2
+  exit 1
+fi
+
+echo "Rebuilding updater archive from the signed app bundle"
+rm -f "${UPDATER_ARCHIVE_TMP}" "${UPDATER_SIGNATURE}"
+COPYFILE_DISABLE=1 tar \
+  -czf "${UPDATER_ARCHIVE_TMP}" \
+  -C "$(dirname "${APP_PATH}")" \
+  "${APP_NAME}.app"
+mv "${UPDATER_ARCHIVE_TMP}" "${UPDATER_ARCHIVE}"
+bun run tauri signer sign "${UPDATER_ARCHIVE}"
 
 echo "Rebuilding DMG from signed app bundle"
 rm -rf "${STAGING_DIR}"

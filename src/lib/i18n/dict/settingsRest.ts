@@ -28,7 +28,10 @@ export const settingsRest = {
     ru: "Обработка остановлена. Можно запустить повторно.",
     en: "Processing stopped. You can run it again.",
   },
-  "mainTab.howToStart": { ru: "Как начать запись", en: "How to start recording" },
+  "mainTab.howToStart": {
+    ru: "Как начать запись",
+    en: "How to start recording",
+  },
   "mainTab.howItWorks": { ru: "Как это работает", en: "How it works" },
   "mainTab.howToStartHint": {
     ru: "Удерживайте горячую клавишу, говорите и отпустите ее, когда закончите. После обработки текст вставится автоматически.",
@@ -53,7 +56,10 @@ export const settingsRest = {
     ru: "Нажмите еще раз, чтобы очистить всю историю",
     en: "Click again to clear all history",
   },
-  "mainTab.clearAllTitle": { ru: "Очистить всю историю", en: "Clear all history" },
+  "mainTab.clearAllTitle": {
+    ru: "Очистить всю историю",
+    en: "Clear all history",
+  },
   "mainTab.confirm": { ru: "Подтвердить", en: "Confirm" },
   "mainTab.clear": { ru: "Очистить", en: "Clear" },
   "mainTab.emptyTitle": { ru: "История пуста", en: "History is empty" },
@@ -75,13 +81,22 @@ export const settingsRest = {
   "mainTab.durationMs": { ru: "{value}мс", en: "{value}ms" },
   "mainTab.durationS": { ru: "{value}с", en: "{value}s" },
   "mainTab.processing": { ru: "Идёт обработка…", en: "Processing…" },
-  "mainTab.statusInterrupted": { ru: "Обработка прервана", en: "Processing interrupted" },
-  "mainTab.statusFailed": { ru: "Обработка не завершилась", en: "Processing did not finish" },
+  "mainTab.statusInterrupted": {
+    ru: "Обработка прервана",
+    en: "Processing interrupted",
+  },
+  "mainTab.statusFailed": {
+    ru: "Обработка не завершилась",
+    en: "Processing did not finish",
+  },
   "mainTab.audioSavedLocally": {
     ru: "Аудио сохранено локально. Можно отправить повторно.",
     en: "Audio saved locally. You can resubmit it.",
   },
-  "mainTab.stopProcessing": { ru: "Остановить обработку", en: "Stop processing" },
+  "mainTab.stopProcessing": {
+    ru: "Остановить обработку",
+    en: "Stop processing",
+  },
   "mainTab.retryProcess": { ru: "Обработать заново", en: "Process again" },
   "mainTab.audioPlay": { ru: "Воспроизвести аудио", en: "Play audio" },
   "mainTab.audioPause": { ru: "Пауза", en: "Pause" },
@@ -113,12 +128,18 @@ export const settingsRest = {
     ru: "Версия приложения {version}. Открыть проект на GitHub",
     en: "App version {version}. Open the project on GitHub",
   },
-  "settingsApp.githubTitle": { ru: "Проект на GitHub", en: "Project on GitHub" },
+  "settingsApp.githubTitle": {
+    ru: "Проект на GitHub",
+    en: "Project on GitHub",
+  },
   "settingsApp.loadError": {
     ru: "Не удалось загрузить состояние приложения. Некоторые данные могут быть недоступны.",
     en: "Failed to load the app state. Some data may be unavailable.",
   },
-  "settingsApp.loading": { ru: "Загружаем настройки…", en: "Loading settings…" },
+  "settingsApp.loading": {
+    ru: "Загружаем настройки…",
+    en: "Loading settings…",
+  },
 
   // ===== LocalLlmModels (components/LocalLlmModels.tsx) =====
   "localLlm.title": { ru: "Текстовые модели", en: "Text models" },
@@ -131,10 +152,19 @@ export const settingsRest = {
   "localLlm.status.selected": { ru: "Выбрана", en: "Selected" },
   "localLlm.status.ready": { ru: "Готова", en: "Ready" },
   "localLlm.status.notDownloaded": { ru: "Не скачана", en: "Not downloaded" },
-  "localLlm.diskSize": { ru: "Размер на диске: {size}", en: "Size on disk: {size}" },
-  "localLlm.ramRequired": { ru: "Требуется ОЗУ: от {ram} ГБ", en: "Required RAM: {ram} GB or more" },
+  "localLlm.diskSize": {
+    ru: "Размер на диске: {size}",
+    en: "Size on disk: {size}",
+  },
+  "localLlm.ramRequired": {
+    ru: "Требуется ОЗУ: от {ram} ГБ",
+    en: "Required RAM: {ram} GB or more",
+  },
   "localLlm.ramShort": { ru: "≥ {ram} ГБ", en: "≥ {ram} GB" },
-  "localLlm.downloadingModel": { ru: "Загрузка модели", en: "Downloading model" },
+  "localLlm.downloadingModel": {
+    ru: "Загрузка модели",
+    en: "Downloading model",
+  },
   "localLlm.preparing": { ru: "Подготовка", en: "Preparing" },
   "localLlm.cancel": { ru: "Отмена", en: "Cancel" },
   "localLlm.download": { ru: "Скачать", en: "Download" },

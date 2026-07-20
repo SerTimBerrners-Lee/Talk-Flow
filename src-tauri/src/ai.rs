@@ -1246,6 +1246,15 @@ fn local_model_prefers_streaming_transcription(model: Option<&str>) -> bool {
         .unwrap_or(false)
 }
 
+fn local_file_transcription_segment_seconds(model: Option<&str>) -> Option<u32> {
+    model
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_lowercase)
+        .filter(|value| value.contains("gigaam"))
+        .map(|_| 25)
+}
+
 fn ensure_diarized_file_preconditions(req: &FilePathTranscriptionRequest) -> Result<(), String> {
     let kind = local_runtime_kind_from_endpoint(req.whisper_endpoint.as_deref());
     if !req.use_own_key && kind.is_none() {
@@ -1604,6 +1613,9 @@ pub async fn transcribe_file_path(
         &app,
         chunk_input_path,
         is_local_stt_endpoint,
+        is_local_stt_endpoint
+            .then(|| local_file_transcription_segment_seconds(req.whisper_model.as_deref()))
+            .flatten(),
     )
     .await
     {
@@ -2252,6 +2264,7 @@ pub struct ListSttModelsResult {
     pub success: bool,
     pub models: Vec<String>,
     pub message: String,
+    pub whisper_endpoint: Option<String>,
 }
 
 #[tauri::command]
@@ -2262,6 +2275,7 @@ pub async fn list_stt_models(
     let whisper_url = resolve_whisper_url(req.whisper_endpoint.as_deref());
     let mut models_url = resolve_whisper_models_url(&whisper_url);
     let managed_runtime_kind = local_stt::managed_runtime_kind(&models_url);
+    let mut effective_whisper_endpoint = None;
     let whisper_key = if is_likely_local_url(&models_url) {
         None
     } else {
@@ -2277,6 +2291,7 @@ pub async fn list_stt_models(
             local_stt::ensure_runtime(&app, client, &models_url, req.local_models_dir.as_deref())
                 .await
         {
+            effective_whisper_endpoint = Some(runtime_base_url.clone());
             models_url = resolve_managed_models_url(&runtime_base_url);
         }
     }
@@ -2303,6 +2318,7 @@ pub async fn list_stt_models(
                         err
                     )
                 },
+                whisper_endpoint: effective_whisper_endpoint,
             });
         }
         Err(err) => Err(if err.is_connect() {
@@ -2333,6 +2349,7 @@ pub async fn list_stt_models(
                         "Локальный STT endpoint вернул {}, список восстановлен по файлам на диске.",
                         status.as_u16()
                     ),
+                    whisper_endpoint: effective_whisper_endpoint,
                 });
             }
         }
@@ -2345,6 +2362,7 @@ pub async fn list_stt_models(
                 status.as_u16(),
                 error_text.chars().take(200).collect::<String>()
             ),
+            whisper_endpoint: effective_whisper_endpoint,
         });
     }
 
@@ -2380,6 +2398,7 @@ pub async fn list_stt_models(
         success: true,
         models,
         message: "Список локальных моделей обновлен.".to_string(),
+        whisper_endpoint: effective_whisper_endpoint,
     })
 }
 
@@ -2871,6 +2890,22 @@ mod tests {
             "whisper-large-v3-turbo"
         )));
         assert!(!local_model_prefers_streaming_transcription(None));
+    }
+
+    #[test]
+    fn gigaam_file_transcription_uses_short_model_window() {
+        assert_eq!(
+            local_file_transcription_segment_seconds(Some("ai-sage/GigaAM-v3")),
+            Some(25)
+        );
+        assert_eq!(
+            local_file_transcription_segment_seconds(Some("gigaam-v3-e2e-rnnt")),
+            Some(25)
+        );
+        assert_eq!(
+            local_file_transcription_segment_seconds(Some("whisper-large-v3-turbo")),
+            None
+        );
     }
 
     #[test]

@@ -34,7 +34,8 @@ export interface HistoryEntry {
     label: string;
     path: string;
   }[];
-  status?: "processing" | "completed" | "failed" | "interrupted";
+  callCapturePhase?: "recording" | "finalizing" | "recovered";
+  status?: "recording" | "processing" | "completed" | "failed" | "interrupted";
   errorMessage?: string;
   audioPath?: string;
   audioBase64?: string;
@@ -74,6 +75,7 @@ export interface HistoryListEntry {
   hasAudio: boolean;
   hasCallTracks: boolean;
   hasFilePath: boolean;
+  callCapturePhase?: HistoryEntry["callCapturePhase"];
   summaryCount: number;
 }
 
@@ -1451,6 +1453,7 @@ export function toHistoryListEntry(entry: HistoryEntry): HistoryListEntry {
     hasAudio: Boolean(entry.audioPath || entry.audioBase64),
     hasCallTracks: Boolean(entry.callTracks?.length),
     hasFilePath: Boolean(entry.filePath),
+    callCapturePhase: entry.callCapturePhase,
     summaryCount: Math.min(
       entry.summaries?.length ?? 0,
       HISTORY_MAX_SUMMARIES_PER_ENTRY,

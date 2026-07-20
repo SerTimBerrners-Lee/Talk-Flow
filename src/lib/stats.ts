@@ -57,9 +57,14 @@ export { getEmptyView };
  * entry id, ignores failed/empty entries, and never throws — statistics must
  * not be able to break the transcription or history pipeline.
  */
-export async function recordTranscriptionStats(entry: HistoryEntry): Promise<void> {
+export async function recordTranscriptionStats(
+  entry: HistoryEntry,
+): Promise<void> {
   try {
-    if (!entry || entry.status === "failed") {
+    if (
+      !entry ||
+      (entry.status !== undefined && entry.status !== "completed")
+    ) {
       return;
     }
     if (!entry.cleaned || !entry.cleaned.trim()) {
@@ -72,7 +77,10 @@ export async function recordTranscriptionStats(entry: HistoryEntry): Promise<voi
       id: entry.id,
       text: entry.cleaned,
       source: entry.source,
-      durationSec: typeof entry.duration === "number" && entry.duration > 0 ? entry.duration : 0,
+      durationSec:
+        typeof entry.duration === "number" && entry.duration > 0
+          ? entry.duration
+          : 0,
       timestamp: entry.timestamp,
       status: entry.status,
     });

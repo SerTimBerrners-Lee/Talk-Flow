@@ -197,6 +197,7 @@ Rules:
 - Native voice recording should already produce this format.
 - `media::convert_audio_to_local_stt_wav()` must skip ffmpeg when input is already ready.
 - File transcription should also skip ffmpeg for ready WAV files that fit into one STT request.
+- GigaAM v3 E2E RNNT is a non-streaming, short-form model. Keep ordinary dictation on the batch path and split file transcription into chunks no longer than 25 seconds.
 - ffmpeg remains the correct path for arbitrary audio/video, WebM/Opus, MP3/M4A/MP4, diarization prep, and chunking.
 
 When editing conversion code, preserve the logs:
@@ -206,6 +207,16 @@ When editing conversion code, preserve the logs:
 - `System ffmpeg fallback finished in ...ms`
 - `Skipping ffmpeg for local STT...`
 - `Skipping ffmpeg for file transcription...`
+
+The managed local STT runtime may move from its configured port to a dynamic
+port when the preferred port is occupied. Live transcription must use the
+effective endpoint returned by runtime warm-up, not the stale configured URL.
+Reuse that effective runtime for subsequent chunks instead of starting a new
+sidecar for every request. Runtime readiness must probe both the buffered
+`/stream` route and the continuous `/live` route so an older sidecar cannot be
+mistaken for a live-capable runtime. The Whisper runtime `/health` response also
+has a versioned live API contract; bump and validate it whenever that protocol
+changes.
 
 ## Local Whisper Hallucination Guardrails
 
@@ -255,8 +266,26 @@ Chunking currently protects API limits and long recordings. Do not remove chunki
 
 Call capture has two different tracks:
 
-- mic track: user microphone, handled through the existing recording runtime / file pipeline;
+- mic track: user microphone, captured natively through `cpal` when possible,
+  with WebView `MediaRecorder` only as a compatibility fallback;
 - system track: platform-specific system audio capture.
+
+Both native tracks are written while the call is active. Their PCM WAV headers
+must be flushed at least every five seconds so a process crash cannot invalidate
+the whole conversation. The session manifest is written atomically and the
+frontend creates the history entry immediately after capture starts.
+
+When the selected STT configuration supports streaming, microphone and system
+audio use separate realtime sessions and update one live history draft. Durable
+transcript checkpoints are appended to `transcript.jsonl`; partial UI updates
+must never block an audio callback. A realtime failure is non-fatal: audio
+capture continues and the user sees that the saved recording is still safe.
+
+After stop, the normal file pipeline transcribes both saved tracks and replaces
+the draft with the reconciled result. Batch-only models such as GigaAM skip the
+live step and use this same stop-time path. On startup, manifests left in
+`starting` or `recording` state are recovered, WAV sizes are repaired from the
+durable file tail, and the latest saved transcript draft is restored to history.
 
 Current system-audio support:
 

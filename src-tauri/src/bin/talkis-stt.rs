@@ -15,6 +15,7 @@ use transcribe_cpp::{
 };
 
 const SERVER_NAME: &str = "talkis-stt";
+const RUNTIME_API_VERSION: u32 = 2;
 const MAX_REQUEST_BYTES: usize = 128 * 1024 * 1024;
 const WHISPER_RUN_EXT_KIND: u32 = 0x4E524857;
 const PARAKEET_STREAM_EXT_KIND: u32 = 0x54534B50;
@@ -23,6 +24,7 @@ const MOONSHINE_STREAMING_EXT_KIND: u32 = 0x5453534D;
 const VOXTRAL_REALTIME_EXT_KIND: u32 = 0x54535256;
 static INIT_TRANSCRIBE_CPP: Once = Once::new();
 
+#[derive(Clone)]
 struct RuntimeConfig {
     host: String,
     port: u16,
@@ -218,6 +220,18 @@ const WHISPER_MODELS: &[WhisperModel] = &[
         url: "https://huggingface.co/handy-computer/Qwen3-ASR-0.6B-gguf/resolve/main/Qwen3-ASR-0.6B-Q8_0.gguf",
         supports_streaming: false,
     },
+    WhisperModel {
+        id: "ai-sage/GigaAM-v3",
+        aliases: &[
+            "gigaam-v3",
+            "gigaam-v3-e2e-rnnt",
+            "gigaam-v3-e2e-rnnt-Q4_K_M.gguf",
+        ],
+        file_name: "gigaam-v3-e2e-rnnt-Q4_K_M.gguf",
+        gguf_file_name: "gigaam-v3-e2e-rnnt-Q4_K_M.gguf",
+        url: "https://huggingface.co/handy-computer/gigaam-v3-e2e-rnnt-gguf/resolve/main/gigaam-v3-e2e-rnnt-Q4_K_M.gguf",
+        supports_streaming: false,
+    },
 ];
 
 fn main() {
@@ -243,7 +257,15 @@ fn main() {
     eprintln!("{} listening on {}", SERVER_NAME, bind_addr);
     for stream in listener.incoming() {
         match stream {
-            Ok(stream) => handle_connection(stream, &config),
+            Ok(stream) => {
+                let connection_config = config.clone();
+                if let Err(error) = std::thread::Builder::new()
+                    .name("talkis-stt-connection".to_string())
+                    .spawn(move || handle_connection(stream, &connection_config))
+                {
+                    eprintln!("failed to spawn connection worker: {}", error);
+                }
+            }
             Err(err) => eprintln!("connection error: {}", err),
         }
     }
@@ -426,7 +448,8 @@ fn route_request(request: &HttpRequest, config: &RuntimeConfig) -> (u16, String)
             json!({
                 "status": "ok",
                 "runtime": SERVER_NAME,
-                "engine": "transcribe.cpp"
+                "engine": "transcribe.cpp",
+                "api_version": RUNTIME_API_VERSION
             })
             .to_string(),
         ),
@@ -1744,6 +1767,21 @@ mod tests {
         let model = find_model("moonshine-streaming-tiny").expect("model");
 
         assert_eq!(normalize_streaming_language(model, Some("ru")), None);
+    }
+
+    #[test]
+    fn gigaam_resolves_base_model_and_gguf_aliases() {
+        let model = find_model("ai-sage/GigaAM-v3").expect("model");
+
+        assert_eq!(model.id, "ai-sage/GigaAM-v3");
+        assert_eq!(model.file_name, "gigaam-v3-e2e-rnnt-Q4_K_M.gguf");
+        assert!(!model.supports_streaming);
+        assert_eq!(
+            find_model("gigaam-v3-e2e-rnnt-Q4_K_M.gguf")
+                .expect("gguf alias")
+                .id,
+            model.id
+        );
     }
 
     #[test]

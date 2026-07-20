@@ -1,3 +1,6 @@
+mod text_units;
+
+use self::text_units::{join_translation_results, split_translation_units};
 use crate::logger;
 use ct2rs::{ComputeType, Config, Device, TranslationOptions, Translator};
 use serde::{Deserialize, Serialize};
@@ -464,6 +467,16 @@ fn translate_text(
     definition: &'static LocalTranslatorDefinition,
     languages: ResolvedTranslationLanguages,
 ) -> Result<String, String> {
+    let units = split_translation_units(&text);
+    if units.is_empty() {
+        return Err("Нет текста для перевода.".to_string());
+    }
+
+    logger::log_info(
+        "LOCAL_TRANSLATOR",
+        &format!("Prepared translation batch: units={}", units.len()),
+    );
+
     let options = TranslationOptions {
         beam_size: FAST_TRANSLATION_BEAM_SIZE,
         max_decoding_length: 512,
@@ -472,22 +485,27 @@ fn translate_text(
 
     let results = match definition.kind {
         LocalTranslatorKind::Nllb => {
-            let source = format!("{} {}", languages.source_language, text);
-            let target_prefixes = vec![vec![languages.target_language]];
+            let sources = units
+                .iter()
+                .map(|unit| format!("{} {}", languages.source_language, unit.text))
+                .collect::<Vec<_>>();
+            let target_prefixes = vec![vec![languages.target_language.clone()]; sources.len()];
             translator
-                .translate_batch_with_target_prefix(&[source], &target_prefixes, &options, None)
+                .translate_batch_with_target_prefix(&sources, &target_prefixes, &options, None)
                 .map_err(|err| format!("Ошибка CTranslate2: {}", err))?
         }
-        LocalTranslatorKind::MarianPair { .. } => translator
-            .translate_batch(&[text], &options, None)
-            .map_err(|err| format!("Ошибка CTranslate2: {}", err))?,
+        LocalTranslatorKind::MarianPair { .. } => {
+            let sources = units
+                .iter()
+                .map(|unit| unit.text.as_str())
+                .collect::<Vec<_>>();
+            translator
+                .translate_batch(&sources, &options, None)
+                .map_err(|err| format!("Ошибка CTranslate2: {}", err))?
+        }
     };
 
-    results
-        .into_iter()
-        .next()
-        .map(|(value, _score)| value)
-        .ok_or_else(|| "CTranslate2 не вернул результат.".to_string())
+    join_translation_results(&units, results)
 }
 
 fn language_to_nllb(language: &str) -> Option<&'static str> {
@@ -684,5 +702,42 @@ mod tests {
         assert_eq!(language_to_nllb("ja"), Some("jpn_Jpan"));
         assert_eq!(language_to_nllb("auto"), Some("auto"));
         assert_eq!(language_to_nllb("unknown"), None);
+    }
+
+    #[test]
+    #[ignore = "requires TALKIS_NLLB_TEST_MODEL with an installed NLLB model"]
+    fn translates_complete_multi_sentence_selection_with_installed_nllb() {
+        let model_dir = std::env::var_os("TALKIS_NLLB_TEST_MODEL")
+            .map(PathBuf::from)
+            .expect("TALKIS_NLLB_TEST_MODEL must point to the installed NLLB model");
+        let translator = Arc::new(
+            Translator::new(
+                model_dir,
+                &Config {
+                    device: Device::CPU,
+                    compute_type: ComputeType::AUTO,
+                    ..Default::default()
+                },
+            )
+            .expect("installed NLLB model must load"),
+        );
+        let translated = translate_text(
+            translator,
+            "I closed my sick leave just now. Tomorrow i'll be back in the morning".to_string(),
+            &NLLB_TRANSLATOR,
+            ResolvedTranslationLanguages {
+                source_language: "eng_Latn".to_string(),
+                target_language: "rus_Cyrl".to_string(),
+            },
+        )
+        .expect("multi-sentence translation must succeed")
+        .to_lowercase();
+
+        assert!(
+            translated.contains("больнич") || translated.contains("болезн"),
+            "{translated}"
+        );
+        assert!(translated.contains("завтра"), "{translated}");
+        assert!(translated.contains("утр"), "{translated}");
     }
 }

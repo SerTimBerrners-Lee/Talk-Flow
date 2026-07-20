@@ -5,15 +5,26 @@ import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { IconCheck, IconCopy, IconFileMusic, IconLanguage, IconLoader2, IconPhoneCall } from "../../lib/icons";
+import {
+  IconCheck,
+  IconCopy,
+  IconFileMusic,
+  IconLanguage,
+  IconLoader2,
+  IconPhoneCall,
+} from "../../lib/icons";
 
 import {
+  CALL_CAPTURE_STOP_REQUEST_EVENT,
   HISTORY_CLEARED_EVENT,
   HISTORY_DELETED_EVENT,
   HISTORY_UPDATED_EVENT,
+  DICTATION_STREAM_UPDATE_EVENT,
   PROCESSING_CANCEL_REQUEST_EVENT,
   SETTINGS_UPDATED_EVENT,
   WIDGET_RETRY_PROCESSING_EVENT,
+  type DictationStreamUpdatePayload,
+  type CallCaptureStopRequestPayload,
   type ProcessingCancelRequestPayload,
   type WidgetRetryProcessingPayload,
 } from "../../lib/hotkeyEvents";
@@ -26,6 +37,7 @@ import {
   reconcileInterruptedProcessing,
   type HistoryEntry,
   type TranslationSettings,
+  updateHistoryEntry,
 } from "../../lib/store";
 import {
   beginProcessing,
@@ -50,6 +62,12 @@ import {
 import { startAppUpdateScheduler } from "../../lib/updater";
 import { scaleWidgetDimension } from "../../lib/widgetScale";
 import {
+  buildCallLiveSpeakerTranscript,
+  checkpointCallTranscription,
+  formatCallLiveTranscript,
+  pauseCallCaptureMic,
+  restoreInterruptedCallCaptureHistory,
+  resumeCallCaptureMic,
   saveFailedCallCaptureEntry,
   saveCallCaptureMicTrack,
   startCallCapture,
@@ -68,6 +86,10 @@ import {
   type LiveTranslationEventPayload,
   type LiveTranslationOverlayState,
 } from "./services/liveTranslation";
+import {
+  createCallLiveDictationOptions,
+  warmUpLiveDictationRuntime,
+} from "./services/dictationStreamOverlay";
 import {
   createLiveTranslationOverlayRenderer,
   type LiveTranslationOverlayRenderer,
@@ -94,26 +116,26 @@ const WIDGET_RECORD_BUTTON_LEFT = 10;
 const FILE_DROP_LEAVE_GRACE_MS = 260;
 const FILE_DROP_CLOSE_ANIMATION_MS = 160;
 type WidgetFileDropState =
-  | "idle"
-  | "drag-over"
-  | "processing"
-  | "success"
-  | "error"
-  | "closing";
+  "idle" | "drag-over" | "processing" | "success" | "error" | "closing";
 type WidgetCallState =
-  | "idle"
-  | "starting"
-  | "recording"
-  | "processing"
-  | "success"
-  | "error";
+  "idle" | "starting" | "recording" | "processing" | "success" | "error";
 type WidgetLiveTranslationState =
-  | "idle"
-  | "starting"
-  | "recording"
-  | "stopping"
-  | "error";
+  "idle" | "starting" | "recording" | "stopping" | "error";
 type WidgetRetryProcessingSource = WidgetRetryProcessingPayload["source"];
+
+interface CallTranscriptRuntime {
+  entry: HistoryEntry;
+  sessionId: string | null;
+  micRequestId: string | null;
+  systemRequestId: string | null;
+  micText: string;
+  systemText: string;
+  channelStartedAt: Record<"mic" | "system", number | null>;
+  lastCheckpointAt: Record<"mic" | "system", number>;
+  lastUiEmitAt: number;
+}
+
+const CALL_DRAFT_CHECKPOINT_MS = 5_000;
 
 const DEFAULT_TRANSLATION_SETTINGS: TranslationSettings = {
   widgetEnabled: false,
@@ -250,7 +272,9 @@ function formatCallCaptureRawError(error: unknown): string {
   return String(source);
 }
 
-async function requestCallMicrophoneStream(micId: string): Promise<MediaStream> {
+async function requestCallMicrophoneStream(
+  micId: string,
+): Promise<MediaStream> {
   if (!micId) {
     return navigator.mediaDevices.getUserMedia({ audio: true });
   }
@@ -276,7 +300,10 @@ async function requestCallMicrophoneStream(micId: string): Promise<MediaStream> 
       const defaultStream = await navigator.mediaDevices.getUserMedia({
         audio: true,
       });
-      logInfo("CALL_CAPTURE", "Using default call mic after selected mic failed");
+      logInfo(
+        "CALL_CAPTURE",
+        "Using default call mic after selected mic failed",
+      );
       return defaultStream;
     } catch (defaultError) {
       throw new CallCaptureStartError(
@@ -353,6 +380,11 @@ export function Widget() {
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const dragTriggeredRef = useRef(false);
   const callMicRuntimeRef = useRef(createRecordingRuntimeController());
+  const callSessionRef = useRef<CallCaptureSession | null>(null);
+  const callTranscriptRuntimeRef = useRef<CallTranscriptRuntime | null>(null);
+  const callTranscriptPersistQueueRef = useRef<Promise<void>>(
+    Promise.resolve(),
+  );
   // Ids of the entries currently being processed in this window, so a stop
   // request from the table can reset the matching widget UI immediately (a local
   // `invoke` keeps running and would otherwise leave the spinner going).
@@ -365,18 +397,41 @@ export function Widget() {
   const liveTranslationStateRef = useRef<WidgetLiveTranslationState>("idle");
   const liveOverlayRef = useRef<LiveTranslationOverlayState | null>(null);
   const pendingLiveEventsRef = useRef<LiveTranslationEventPayload[]>([]);
-  const liveOverlayRendererRef =
-    useRef<LiveTranslationOverlayRenderer | null>(null);
+  const liveOverlayRendererRef = useRef<LiveTranslationOverlayRenderer | null>(
+    null,
+  );
   const liveStartedAtRef = useRef(0);
   const liveAdapterIdRef = useRef("unknown");
   const liveAudioWatchdogTimerRef = useRef<number | null>(null);
   const stopLiveTranslationRef = useRef<() => Promise<void>>(async () => {});
+  const stopCallListeningRef = useRef<() => Promise<void>>(async () => {});
   const pauseCallMicForVoice = useCallback(() => {
     if (callStateRef.current !== "recording") {
       return;
     }
 
     callMicPausedForVoiceRef.current = true;
+    const callSession = callSessionRef.current;
+    if (callSession?.nativeMicActive) {
+      void pauseCallCaptureMic(callSession.id)
+        .then((paused) => {
+          if (paused) {
+            logInfo(
+              "CALL_CAPTURE",
+              "Paused native call mic while voice recording",
+            );
+          }
+        })
+        .catch((error) => {
+          logError(
+            "CALL_CAPTURE",
+            `Failed to pause native call mic: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        });
+      return;
+    }
     if (callMicRuntimeRef.current.pause()) {
       logInfo("CALL_CAPTURE", "Paused call mic while voice recording");
     }
@@ -387,16 +442,43 @@ export function Widget() {
     }
 
     callMicPausedForVoiceRef.current = false;
+    const callSession = callSessionRef.current;
+    if (callSession?.nativeMicActive) {
+      void resumeCallCaptureMic(callSession.id)
+        .then((resumed) => {
+          if (resumed) {
+            logInfo(
+              "CALL_CAPTURE",
+              "Resumed native call mic after voice recording",
+            );
+          }
+        })
+        .catch((error) => {
+          logError(
+            "CALL_CAPTURE",
+            `Failed to resume native call mic: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        });
+      return;
+    }
     if (callMicRuntimeRef.current.resume()) {
       logInfo("CALL_CAPTURE", "Resumed call mic after voice recording");
     }
   }, []);
-  const { state, stream, lockedRecording, widgetScale, resizeWidget, toggleManualRecording } =
-    useWidgetController({
-      onVoiceRecordingProcessing: resumeCallMicForVoice,
-      onVoiceRecordingStart: pauseCallMicForVoice,
-      onVoiceRecordingStartFailed: resumeCallMicForVoice,
-    });
+  const {
+    state,
+    stream,
+    lockedRecording,
+    widgetScale,
+    resizeWidget,
+    toggleManualRecording,
+  } = useWidgetController({
+    onVoiceRecordingProcessing: resumeCallMicForVoice,
+    onVoiceRecordingStart: pauseCallMicForVoice,
+    onVoiceRecordingStartFailed: resumeCallMicForVoice,
+  });
   const stateRef = useRef(state);
   const fileDropStateRef = useRef<WidgetFileDropState>("idle");
   const retryProcessingSourceRef = useRef<WidgetRetryProcessingSource | null>(
@@ -412,16 +494,14 @@ export function Widget() {
   );
   if (!liveOverlayRendererRef.current) {
     liveOverlayRendererRef.current = createLiveTranslationOverlayRenderer({
-      isActive: (sessionId) =>
-        liveOverlayRef.current?.sessionId === sessionId,
+      isActive: (sessionId) => liveOverlayRef.current?.sessionId === sessionId,
       render: async (next) => {
         await invoke("show_widget_text_overlay", {
           payload: {
             status: "liveTranslation",
             sourceText: "",
             translatedText: "",
-            targetLanguage:
-              translationSettingsRef.current.liveTargetLanguage,
+            targetLanguage: translationSettingsRef.current.liveTargetLanguage,
             requestId: next.sessionId,
             message: next.error,
             liveSegments: liveTranslationVisibleSegments(next),
@@ -491,6 +571,115 @@ export function Widget() {
   useEffect(() => {
     liveTranslationStateRef.current = liveTranslationState;
   }, [liveTranslationState]);
+
+  useEffect(() => {
+    const unlistenPromise = listen<DictationStreamUpdatePayload>(
+      DICTATION_STREAM_UPDATE_EVENT,
+      ({ payload }) => {
+        const runtime = callTranscriptRuntimeRef.current;
+        if (!runtime) return;
+        const channel =
+          payload.requestId === runtime.micRequestId
+            ? "mic"
+            : payload.requestId === runtime.systemRequestId
+              ? "system"
+              : null;
+        if (!channel || payload.status === "started") {
+          return;
+        }
+
+        const now = Date.now();
+        const startedAt = Date.parse(runtime.entry.timestamp);
+        const duration = Number.isFinite(startedAt)
+          ? Math.max(0, Math.round((now - startedAt) / 1000))
+          : runtime.entry.duration;
+        const nextText = payload.text.trim();
+        if (nextText) {
+          if (
+            !runtime[channel === "mic" ? "micText" : "systemText"] &&
+            runtime.channelStartedAt[channel] === null
+          ) {
+            runtime.channelStartedAt[channel] = duration;
+          }
+          if (channel === "mic") {
+            runtime.micText = nextText;
+          } else {
+            runtime.systemText = nextText;
+          }
+        }
+        const transcript = formatCallLiveTranscript(
+          runtime.micText,
+          runtime.systemText,
+        );
+        runtime.entry = {
+          ...runtime.entry,
+          duration,
+          raw: transcript || runtime.entry.raw,
+          cleaned: transcript || runtime.entry.cleaned,
+          ...buildCallLiveSpeakerTranscript({
+            micText: runtime.micText,
+            systemText: runtime.systemText,
+            micStartedAt: runtime.channelStartedAt.mic,
+            systemStartedAt: runtime.channelStartedAt.system,
+            duration,
+          }),
+          errorMessage:
+            payload.status === "error"
+              ? tn("callCapture.liveUnavailable")
+              : runtime.entry.errorMessage,
+        };
+
+        if (payload.status !== "partial" || now - runtime.lastUiEmitAt >= 150) {
+          runtime.lastUiEmitAt = now;
+          void emit(HISTORY_UPDATED_EVENT, runtime.entry);
+        }
+
+        const shouldCheckpointDraft =
+          payload.status === "partial" &&
+          now - runtime.lastCheckpointAt[channel] >= CALL_DRAFT_CHECKPOINT_MS;
+        const durableStatus =
+          payload.status === "final"
+            ? "final"
+            : payload.status === "error"
+              ? "error"
+              : shouldCheckpointDraft
+                ? "draft"
+                : null;
+        if (!durableStatus || !runtime.sessionId) {
+          return;
+        }
+        runtime.lastCheckpointAt[channel] = now;
+        const entrySnapshot = { ...runtime.entry };
+        const sessionId = runtime.sessionId;
+        callTranscriptPersistQueueRef.current =
+          callTranscriptPersistQueueRef.current
+            .catch(() => {})
+            .then(async () => {
+              await checkpointCallTranscription({
+                sessionId,
+                channel,
+                status: durableStatus,
+                text: channel === "mic" ? runtime.micText : runtime.systemText,
+                startedAtMs: now,
+                message: payload.message,
+              });
+              await updateHistoryEntry(entrySnapshot);
+              await emit(HISTORY_UPDATED_EVENT, entrySnapshot);
+            })
+            .catch((error) => {
+              logError(
+                "CALL_CAPTURE",
+                `Failed to checkpoint live transcript: ${
+                  error instanceof Error ? error.message : String(error)
+                }`,
+              );
+            });
+      },
+    );
+    return () => {
+      void unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, []);
 
   useEffect(() => {
     const unlistenPromise = listen<LiveTranslationEventPayload>(
@@ -584,9 +773,28 @@ export function Widget() {
   }, []);
 
   useEffect(() => {
-    // Recover from a crash/quit mid-processing: orphaned "processing" entries
-    // become "interrupted" so they can be re-run.
-    void reconcileInterruptedProcessing();
+    // Recover durable call manifests and transcript checkpoints before the
+    // generic processing reconciliation updates any remaining orphan rows.
+    void restoreInterruptedCallCaptureHistory()
+      .then((restored) => {
+        if (restored.length > 0) {
+          logInfo(
+            "CALL_CAPTURE",
+            `Recovered interrupted call sessions: ${restored.length}`,
+          );
+        }
+      })
+      .catch((error) => {
+        logError(
+          "CALL_CAPTURE",
+          `Failed to recover interrupted calls: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      })
+      .finally(() => {
+        void reconcileInterruptedProcessing();
+      });
 
     // Allow the history table (Settings window) to stop an in-flight job here.
     const unlistenPromise = listen<ProcessingCancelRequestPayload>(
@@ -602,6 +810,23 @@ export function Widget() {
         } else if (payload.entryId === fileProcessingIdRef.current) {
           resetFileProcessingUi();
         }
+      },
+    );
+
+    return () => {
+      void unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, []);
+
+  useEffect(() => {
+    const unlistenPromise = listen<CallCaptureStopRequestPayload>(
+      CALL_CAPTURE_STOP_REQUEST_EVENT,
+      ({ payload }) => {
+        const runtime = callTranscriptRuntimeRef.current;
+        if (!payload?.entryId || payload.entryId !== runtime?.entry.id) {
+          return;
+        }
+        void stopCallListeningRef.current();
       },
     );
 
@@ -730,6 +955,8 @@ export function Widget() {
   const resetCallProcessingUi = (): void => {
     callProcessingIdRef.current = null;
     callMicRuntimeRef.current.dispose();
+    callSessionRef.current = null;
+    callTranscriptRuntimeRef.current = null;
     callMicPausedForVoiceRef.current = false;
     setCallSession(null);
     setCallSettings(null);
@@ -759,6 +986,7 @@ export function Widget() {
     }
 
     let micStream: MediaStream | null = null;
+    let startedSession: CallCaptureSession | null = null;
 
     try {
       setCallError("");
@@ -789,29 +1017,169 @@ export function Widget() {
         callSystemAudioPermissionReadyRef.current = true;
       }
 
-      callMicRuntimeRef.current.start(micStream);
-      micStream = null;
-      if (callMicPausedForVoiceRef.current) {
-        callMicRuntimeRef.current.pause();
+      const startedAt = Date.now();
+      const entryId = crypto.randomUUID();
+      const micRequestId = `${entryId}:mic`;
+      const systemRequestId = `${entryId}:system`;
+      let micLiveOptions = createCallLiveDictationOptions(
+        settings,
+        micRequestId,
+      );
+      let systemLiveOptions = createCallLiveDictationOptions(
+        settings,
+        systemRequestId,
+      );
+      let liveStreamingReady = true;
+      if (micLiveOptions?.provider === "local") {
+        try {
+          const runtimeEndpoint = await warmUpLiveDictationRuntime(
+            settings,
+            micLiveOptions.model,
+          );
+          if (runtimeEndpoint) {
+            micLiveOptions = {
+              ...micLiveOptions,
+              endpoint: runtimeEndpoint,
+            };
+            if (systemLiveOptions?.provider === "local") {
+              systemLiveOptions = {
+                ...systemLiveOptions,
+                endpoint: runtimeEndpoint,
+              };
+            }
+          }
+          if (micLiveOptions.model !== settings.whisperModel) {
+            logInfo(
+              "CALL_CAPTURE",
+              `Using local live preview model=${micLiveOptions.model}; final_model=${settings.whisperModel}`,
+            );
+          }
+        } catch (error) {
+          liveStreamingReady = false;
+          logError(
+            "CALL_CAPTURE",
+            `Local live STT warm-up failed; audio recording and stop-time transcription remain active: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
       }
-
+      if (!liveStreamingReady) {
+        micLiveOptions = null;
+        systemLiveOptions = null;
+      }
+      const baseEntry: HistoryEntry = {
+        id: entryId,
+        timestamp: new Date(startedAt).toISOString(),
+        duration: 0,
+        raw: "",
+        cleaned: "",
+        source: "call",
+        fileName: tn("callCapture.fileName"),
+        status: "recording",
+        callCapturePhase: "recording",
+        ...buildCallLiveSpeakerTranscript({}),
+      };
+      callTranscriptRuntimeRef.current = {
+        entry: baseEntry,
+        sessionId: null,
+        micRequestId: micLiveOptions ? micRequestId : null,
+        systemRequestId: systemLiveOptions ? systemRequestId : null,
+        micText: "",
+        systemText: "",
+        channelStartedAt: { mic: null, system: null },
+        lastCheckpointAt: { mic: 0, system: 0 },
+        lastUiEmitAt: 0,
+      };
+      const micDeviceLabel =
+        micStream.getAudioTracks()[0]?.label?.trim() || null;
       const session = await startCallCapture({
         targetId: "system-output",
-        includeMic: false,
+        includeMic: true,
         includeSystem: true,
+        micDeviceId: settings.micId || null,
+        micDeviceLabel,
         storageDir: settings.transcriptionStorageDir || null,
+        liveTranscription:
+          micLiveOptions && systemLiveOptions
+            ? { mic: micLiveOptions, system: systemLiveOptions }
+            : null,
       });
-      setCallStartedAt(Date.now());
+      startedSession = session;
+
+      if (session.nativeMicActive) {
+        stopMediaStream(micStream);
+      } else {
+        callMicRuntimeRef.current.start(micStream);
+      }
+      micStream = null;
+      if (callMicPausedForVoiceRef.current) {
+        if (session.nativeMicActive) {
+          await pauseCallCaptureMic(session.id);
+        } else {
+          callMicRuntimeRef.current.pause();
+        }
+      }
+
+      const runtime = callTranscriptRuntimeRef.current;
+      const recordingEntry: HistoryEntry = {
+        ...(runtime?.entry || baseEntry),
+        callSessionId: session.id,
+        callTracks: session.tracks.map((track) => ({
+          kind: track.kind,
+          label: track.label,
+          path: track.path,
+        })),
+        errorMessage: session.liveTranscription?.errors.length
+          ? tn("callCapture.liveUnavailable")
+          : undefined,
+      };
+      if (runtime) {
+        runtime.entry = recordingEntry;
+        runtime.sessionId = session.id;
+      }
+      callTranscriptPersistQueueRef.current =
+        callTranscriptPersistQueueRef.current
+          .catch(() => {})
+          .then(async () => {
+            await addHistoryEntry(recordingEntry);
+            await emit(HISTORY_UPDATED_EVENT, recordingEntry);
+          });
+      try {
+        await callTranscriptPersistQueueRef.current;
+      } catch (error) {
+        logError(
+          "CALL_CAPTURE",
+          `Failed to persist live call row: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+
+      callSessionRef.current = session;
+      setCallStartedAt(startedAt);
       setCallSession(session);
       setCallState("recording");
     } catch (error) {
       stopMediaStream(micStream);
+      if (startedSession) {
+        await stopCallCapture(startedSession.id).catch((stopError) => {
+          logError(
+            "CALL_CAPTURE",
+            `Failed to stop partially started call: ${
+              stopError instanceof Error ? stopError.message : String(stopError)
+            }`,
+          );
+        });
+      }
       const message = callCaptureStartErrorMessage(error);
       logError(
         "CALL_CAPTURE",
         `Call capture start failed: ${formatCallCaptureRawError(error)}`,
       );
       callMicRuntimeRef.current.dispose();
+      callSessionRef.current = null;
+      callTranscriptRuntimeRef.current = null;
       callMicPausedForVoiceRef.current = false;
       if (isCallCapturePermissionError(error)) {
         callSystemAudioPermissionReadyRef.current = false;
@@ -839,11 +1207,48 @@ export function Widget() {
       setCallState("processing");
       setFileStatus("preparing");
       setFileProgress(null);
-      await callMicRuntimeRef.current.stop();
-      const micBlob = callMicRuntimeRef.current.hasAudioChunks()
-        ? await callMicRuntimeRef.current.getAudioBlob()
-        : null;
-      const micFileName = micBlob?.type.includes("wav") ? "call-mic.wav" : "call-mic.webm";
+      const runtime = callTranscriptRuntimeRef.current;
+      if (runtime) {
+        runtime.entry = {
+          ...runtime.entry,
+          status: "processing",
+          callCapturePhase: "finalizing",
+          duration: Math.max(
+            runtime.entry.duration,
+            Math.round((Date.now() - callStartedAt) / 1000),
+          ),
+        };
+        callProcessingIdRef.current = runtime.entry.id;
+        const finalizingEntry = { ...runtime.entry };
+        callTranscriptPersistQueueRef.current =
+          callTranscriptPersistQueueRef.current
+            .catch(() => {})
+            .then(async () => {
+              await updateHistoryEntry(finalizingEntry);
+              await emit(HISTORY_UPDATED_EVENT, finalizingEntry);
+            });
+        try {
+          await callTranscriptPersistQueueRef.current;
+        } catch (error) {
+          logError(
+            "CALL_CAPTURE",
+            `Failed to persist finalizing call state: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      }
+      if (!callSession.nativeMicActive) {
+        await callMicRuntimeRef.current.stop();
+      }
+      const micBlob =
+        !callSession.nativeMicActive &&
+        callMicRuntimeRef.current.hasAudioChunks()
+          ? await callMicRuntimeRef.current.getAudioBlob()
+          : null;
+      const micFileName = micBlob?.type.includes("wav")
+        ? "call-mic.wav"
+        : "call-mic.webm";
       const micFile = micBlob
         ? new File([micBlob], micFileName, {
             type: micBlob.type || "audio/webm",
@@ -852,7 +1257,10 @@ export function Widget() {
       let micFileForTranscription = micFile;
       if (micBlob) {
         try {
-          const micTrack = await saveCallCaptureMicTrack(callSession.id, micBlob);
+          const micTrack = await saveCallCaptureMicTrack(
+            callSession.id,
+            micBlob,
+          );
           micFileForTranscription = null;
           sessionForFailure = {
             ...sessionForFailure,
@@ -873,12 +1281,62 @@ export function Widget() {
         }
       }
       stoppedSession = await stopCallCapture(callSession.id);
+      callSessionRef.current = null;
+      if (runtime) {
+        runtime.micRequestId = null;
+        runtime.systemRequestId = null;
+      }
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+      await callTranscriptPersistQueueRef.current.catch(() => {});
+      if (runtime && stoppedSession.liveTranscription) {
+        runtime.micText =
+          stoppedSession.liveTranscription.micText || runtime.micText;
+        runtime.systemText =
+          stoppedSession.liveTranscription.systemText || runtime.systemText;
+        const liveText = formatCallLiveTranscript(
+          runtime.micText,
+          runtime.systemText,
+        );
+        runtime.entry = {
+          ...runtime.entry,
+          raw: liveText || runtime.entry.raw,
+          cleaned: liveText || runtime.entry.cleaned,
+          ...buildCallLiveSpeakerTranscript({
+            micText: runtime.micText,
+            systemText: runtime.systemText,
+            micStartedAt: runtime.channelStartedAt.mic,
+            systemStartedAt: runtime.channelStartedAt.system,
+            duration: runtime.entry.duration,
+          }),
+          callTracks: stoppedSession.tracks.map((track) => ({
+            kind: track.kind,
+            label: track.label,
+            path: track.path,
+          })),
+          errorMessage: stoppedSession.liveTranscription.errors.length
+            ? tn("callCapture.liveUnavailable")
+            : runtime.entry.errorMessage,
+        };
+        try {
+          await updateHistoryEntry(runtime.entry);
+          await emit(HISTORY_UPDATED_EVENT, runtime.entry);
+        } catch (error) {
+          logError(
+            "CALL_CAPTURE",
+            `Failed to persist final live call draft: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      }
       const settings = callSettings ?? (await getSettings({ reload: true }));
       const entry = await transcribeCallCaptureSession({
         session: stoppedSession,
         settings,
         micFile: micFileForTranscription,
         startedAt: callStartedAt,
+        entryId: runtime?.entry.id,
+        baseEntry: runtime?.entry,
         onStatus: setFileStatus,
         onProgress: setFileProgress,
         onStarted: (entryId) => {
@@ -894,6 +1352,7 @@ export function Widget() {
       callProcessingIdRef.current = null;
 
       callMicPausedForVoiceRef.current = false;
+      callTranscriptRuntimeRef.current = null;
       setCallSession(null);
       setCallSettings(null);
       setFileProgress(null);
@@ -919,12 +1378,73 @@ export function Widget() {
       logError("CALL_CAPTURE", `Call capture stop/process failed: ${message}`);
       const userFacingMessage = t("widget.call.processFailed");
 
+      const failedRuntime = callTranscriptRuntimeRef.current;
+      if (failedRuntime) {
+        failedRuntime.micRequestId = null;
+        failedRuntime.systemRequestId = null;
+      }
+      if (!stoppedSession && callSessionRef.current?.id === callSession.id) {
+        try {
+          stoppedSession = await stopCallCapture(callSession.id);
+          sessionForFailure = stoppedSession;
+        } catch (stopError) {
+          logError(
+            "CALL_CAPTURE",
+            `Failed to stop call capture during error cleanup: ${
+              stopError instanceof Error ? stopError.message : String(stopError)
+            }`,
+          );
+        } finally {
+          callSessionRef.current = null;
+        }
+      }
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+      await callTranscriptPersistQueueRef.current.catch(() => {});
+
       try {
-        await saveFailedCallCaptureEntry({
-          session: stoppedSession ?? sessionForFailure,
-          errorMessage: userFacingMessage,
-          startedAt: callStartedAt,
-        });
+        const runtime = callTranscriptRuntimeRef.current;
+        if (runtime) {
+          if (stoppedSession?.liveTranscription) {
+            runtime.micText =
+              stoppedSession.liveTranscription.micText || runtime.micText;
+            runtime.systemText =
+              stoppedSession.liveTranscription.systemText || runtime.systemText;
+          }
+          const preservedLiveText = formatCallLiveTranscript(
+            runtime.micText,
+            runtime.systemText,
+          );
+          const failed: HistoryEntry = {
+            ...runtime.entry,
+            raw: preservedLiveText || runtime.entry.raw,
+            cleaned: preservedLiveText || runtime.entry.cleaned,
+            ...buildCallLiveSpeakerTranscript({
+              micText: runtime.micText,
+              systemText: runtime.systemText,
+              micStartedAt: runtime.channelStartedAt.mic,
+              systemStartedAt: runtime.channelStartedAt.system,
+              duration: runtime.entry.duration,
+            }),
+            status: "failed",
+            callCapturePhase: undefined,
+            errorMessage: userFacingMessage,
+            callTracks: (stoppedSession ?? sessionForFailure).tracks.map(
+              (track) => ({
+                kind: track.kind,
+                label: track.label,
+                path: track.path,
+              }),
+            ),
+          };
+          await updateHistoryEntry(failed);
+          await emit(HISTORY_UPDATED_EVENT, failed);
+        } else {
+          await saveFailedCallCaptureEntry({
+            session: stoppedSession ?? sessionForFailure,
+            errorMessage: userFacingMessage,
+            startedAt: callStartedAt,
+          });
+        }
       } catch (historyError) {
         logError(
           "CALL_CAPTURE",
@@ -937,6 +1457,8 @@ export function Widget() {
       }
 
       callMicRuntimeRef.current.dispose();
+      callSessionRef.current = null;
+      callTranscriptRuntimeRef.current = null;
       callMicPausedForVoiceRef.current = false;
       setCallError("");
       setCallState("idle");
@@ -946,6 +1468,7 @@ export function Widget() {
       setCallSettings(null);
     }
   };
+  stopCallListeningRef.current = stopCallListening;
 
   fileProcessRef.current = async (filePath: string): Promise<void> => {
     if (!filePath || !canAcceptFileDrop()) {
@@ -1248,12 +1771,16 @@ export function Widget() {
       : state;
   const callBubbleDisabled =
     displayCallState === "idle" &&
-    (displayWidgetState !== "idle" || fileDropActive || liveTranslationState !== "idle");
+    (displayWidgetState !== "idle" ||
+      fileDropActive ||
+      liveTranslationState !== "idle");
   const liveTranslationBubbleDisabled =
     liveTranslationState === "starting" ||
     liveTranslationState === "stopping" ||
     (liveTranslationState === "idle" &&
-      (displayWidgetState !== "idle" || fileDropActive || displayCallState !== "idle"));
+      (displayWidgetState !== "idle" ||
+        fileDropActive ||
+        displayCallState !== "idle"));
 
   useEffect(() => {
     void resizeWidget(
@@ -1296,11 +1823,14 @@ export function Widget() {
         settings.translation.liveMicrophoneEnabled ||
         settings.saveRecordingAudio
       ) {
-        const devices = await navigator.mediaDevices.enumerateDevices().catch(() => []);
+        const devices = await navigator.mediaDevices
+          .enumerateDevices()
+          .catch(() => []);
         micLabel =
           devices.find(
             (device) =>
-              device.kind === "audioinput" && device.deviceId === settings.micId,
+              device.kind === "audioinput" &&
+              device.deviceId === settings.micId,
           )?.label || null;
       }
       const session = await invoke<{ sessionId: string; startedAt: string }>(
@@ -1668,11 +2198,7 @@ function FileDropPill({
           }}
         >
           {isProcessing ? (
-            <IconLoader2
-              className="loading-soft-icon"
-              size={20}
-              stroke={2}
-            />
+            <IconLoader2 className="loading-soft-icon" size={20} stroke={2} />
           ) : isSuccess ? (
             <IconCheck size={20} stroke={2.4} />
           ) : (
@@ -2031,7 +2557,9 @@ function IdlePill({
           <button
             type="button"
             aria-label={t("widget.idle.copyLatest")}
-            title={copySucceeded ? t("widget.idle.copied") : t("widget.idle.copy")}
+            title={
+              copySucceeded ? t("widget.idle.copied") : t("widget.idle.copy")
+            }
             onPointerDown={(event) => {
               event.stopPropagation();
             }}

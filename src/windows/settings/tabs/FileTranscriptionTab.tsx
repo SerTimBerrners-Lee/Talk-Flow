@@ -11,6 +11,7 @@ import {
   IconFileMusic,
   IconListCheck,
   IconLoader2,
+  IconSquare,
   IconX,
 } from "../../../lib/icons";
 
@@ -24,7 +25,11 @@ import {
   type AppSettings,
   type SpeakerTranscriptSegment,
 } from "../../../lib/store";
-import { HISTORY_UPDATED_EVENT, SETTINGS_UPDATED_EVENT } from "../../../lib/hotkeyEvents";
+import {
+  CALL_CAPTURE_STOP_REQUEST_EVENT,
+  HISTORY_UPDATED_EVENT,
+  SETTINGS_UPDATED_EVENT,
+} from "../../../lib/hotkeyEvents";
 import { formatErrorMessage } from "../../../lib/utils";
 import { isSummaryAvailable } from "../../../lib/summarize";
 import { SummaryModal } from "../../../components/SummaryModal";
@@ -130,8 +135,10 @@ function statusLabel(
   if (status === "reading") return t("fileTab.status.reading");
   if (status === "converting") return t("fileTab.status.converting");
   if (status === "uploading") return t("fileTab.status.uploading");
-  if (status === "preparing") return progress?.message || t("fileTab.status.preparing");
-  if (status === "diarizing") return progress?.message || t("fileTab.status.diarizing");
+  if (status === "preparing")
+    return progress?.message || t("fileTab.status.preparing");
+  if (status === "diarizing")
+    return progress?.message || t("fileTab.status.diarizing");
   if (status === "transcribing") {
     if (progress && progress.totalChunks > 0) {
       return t("fileTab.status.transcribingChunk", {
@@ -142,7 +149,8 @@ function statusLabel(
 
     return t("fileTab.status.transcribing");
   }
-  if (status === "assembling") return progress?.message || t("fileTab.status.assembling");
+  if (status === "assembling")
+    return progress?.message || t("fileTab.status.assembling");
   if (status === "done") return t("fileTab.status.done");
   if (status === "error") return t("fileTab.status.error");
   return t("fileTab.status.idle");
@@ -218,7 +226,11 @@ function toSpeakerSetupErrorMessage(
     normalized.includes("127.0.0.1") ||
     normalized.includes("localhost")
   ) {
-    if (isAuthFailureLike(normalized) || normalized.includes("403") || normalized.includes("forbidden")) {
+    if (
+      isAuthFailureLike(normalized) ||
+      normalized.includes("403") ||
+      normalized.includes("forbidden")
+    ) {
       return t("fileTab.setupError.localRuntimeRejected");
     }
 
@@ -337,6 +349,7 @@ export function FileTranscriptionTab({
   const { t } = useI18n();
   const inputRef = useRef<HTMLInputElement>(null);
   const resultSectionRef = useRef<HTMLElement | null>(null);
+  const liveResultContentRef = useRef<HTMLDivElement | null>(null);
   const isProcessingRef = useRef(false);
   const nativeDropAtRef = useRef(0);
   const speakerDiarizationToggleRunRef = useRef(0);
@@ -351,6 +364,8 @@ export function FileTranscriptionTab({
     null,
   );
   const [resultEntry, setResultEntry] = useState<HistoryEntry | null>(null);
+  const [liveCallEntry, setLiveCallEntry] = useState<HistoryEntry | null>(null);
+  const [callStopRequested, setCallStopRequested] = useState(false);
   const [error, setError] = useState("");
   const [convertedInfo, setConvertedInfo] = useState("");
   const [isDragOver, setIsDragOver] = useState(false);
@@ -447,6 +462,20 @@ export function FileTranscriptionTab({
     };
   }, []);
 
+  useEffect(() => {
+    const content = liveResultContentRef.current;
+    if (!liveCallEntry || !content) return;
+
+    const frameId = requestAnimationFrame(() => {
+      content.scrollTop = content.scrollHeight;
+    });
+    return () => cancelAnimationFrame(frameId);
+  }, [liveCallEntry?.cleaned, liveCallEntry?.raw]);
+
+  useEffect(() => {
+    setCallStopRequested(false);
+  }, [liveCallEntry?.id]);
+
   // Keep the summary availability in sync when the text model is changed from
   // the «Models» tab (same window) or another window.
   useEffect(() => {
@@ -469,6 +498,20 @@ export function FileTranscriptionTab({
     setProgress(null);
     setCopied(false);
     setResultExpanded(false);
+  };
+
+  const requestStopLiveCall = async (): Promise<void> => {
+    if (!liveCallEntry || callStopRequested) return;
+
+    setCallStopRequested(true);
+    try {
+      await emit(CALL_CAPTURE_STOP_REQUEST_EVENT, {
+        entryId: liveCallEntry.id,
+      });
+    } catch {
+      setCallStopRequested(false);
+      setError(t("fileTab.live.stopFailed"));
+    }
   };
 
   const showHistoryEntryResult = (
@@ -498,9 +541,34 @@ export function FileTranscriptionTab({
   };
 
   useEffect(() => {
+    let mounted = true;
+    void getHistory()
+      .then((history) => {
+        if (!mounted) return;
+        const activeCall = [...history]
+          .reverse()
+          .find(
+            (entry) =>
+              entry.source === "call" &&
+              (entry.status === "recording" ||
+                entry.callCapturePhase === "finalizing"),
+          );
+        setLiveCallEntry(activeCall || null);
+      })
+      .catch(() => {});
+
     const unlistenPromise = listen<HistoryEntry>(
       HISTORY_UPDATED_EVENT,
       ({ payload }) => {
+        if (payload.source === "call") {
+          const isActive =
+            payload.status === "recording" ||
+            payload.callCapturePhase === "finalizing";
+          setLiveCallEntry((current) =>
+            isActive ? payload : current?.id === payload.id ? null : current,
+          );
+        }
+
         if (
           isProcessingRef.current ||
           (payload.source !== "file" && payload.source !== "call") ||
@@ -514,6 +582,7 @@ export function FileTranscriptionTab({
     );
 
     return () => {
+      mounted = false;
       unlistenPromise.then((unlisten) => unlisten());
     };
   }, []);
@@ -811,7 +880,9 @@ export function FileTranscriptionTab({
 
       if (!getDiarizationWhisperOption(settings)) {
         setSpeakerSetupMessage(
-          t("fileTab.setup.downloading", { name: RECOMMENDED_LOCAL_WHISPER_LABEL }),
+          t("fileTab.setup.downloading", {
+            name: RECOMMENDED_LOCAL_WHISPER_LABEL,
+          }),
         );
         const whisperResult = await invoke<{
           success: boolean;
@@ -1046,8 +1117,11 @@ export function FileTranscriptionTab({
     })();
   };
 
-  const resultText = resultEntry?.cleaned ?? "";
-  const shouldCollapseResult = resultText.length > RESULT_PREVIEW_LIMIT;
+  const displayedResultEntry = liveCallEntry || resultEntry;
+  const resultText =
+    displayedResultEntry?.cleaned || displayedResultEntry?.raw || "";
+  const shouldCollapseResult =
+    !liveCallEntry && resultText.length > RESULT_PREVIEW_LIMIT;
   const visibleResult =
     shouldCollapseResult && !resultExpanded
       ? `${resultText.slice(0, RESULT_PREVIEW_LIMIT).trimEnd()}...`
@@ -1099,218 +1173,235 @@ export function FileTranscriptionTab({
         style={{ display: "none" }}
       />
 
-      <section
-        role="button"
-        tabIndex={isProcessing ? -1 : 0}
-        onClick={() => {
-          if (!isProcessing) {
-            void openFileDialog();
-          }
-        }}
-        onKeyDown={(event) => {
-          if (isProcessing || (event.key !== "Enter" && event.key !== " ")) {
-            return;
-          }
+      {!liveCallEntry ? (
+        <>
+          <section
+            role="button"
+            tabIndex={isProcessing ? -1 : 0}
+            onClick={() => {
+              if (!isProcessing) {
+                void openFileDialog();
+              }
+            }}
+            onKeyDown={(event) => {
+              if (
+                isProcessing ||
+                (event.key !== "Enter" && event.key !== " ")
+              ) {
+                return;
+              }
 
-          event.preventDefault();
-          void openFileDialog();
-        }}
-        onDragOver={(event) => {
-          event.preventDefault();
-          setIsDragOver(true);
-        }}
-        onDragLeave={() => setIsDragOver(false)}
-        onDrop={handleDrop}
-        className="card"
-        style={{
-          display: "grid",
-          placeItems: "center",
-          minHeight: 220,
-          padding: 24,
-          borderWidth: 2,
-          borderStyle: "dashed",
-          borderColor: isDragOver
-            ? "var(--border-strong)"
-            : "var(--border-dashed)",
-          background: isDragOver ? "var(--surface-hi)" : "var(--surface)",
-          cursor: isProcessing ? "default" : "pointer",
-          transition: "background 0.18s ease, border-color 0.18s ease",
-        }}
-      >
-        <div
-          style={{
-            display: "grid",
-            justifyItems: "center",
-            gap: 14,
-            maxWidth: 520,
-            textAlign: "center",
-          }}
-        >
-          <div
+              event.preventDefault();
+              void openFileDialog();
+            }}
+            onDragOver={(event) => {
+              event.preventDefault();
+              setIsDragOver(true);
+            }}
+            onDragLeave={() => setIsDragOver(false)}
+            onDrop={handleDrop}
+            className="card"
             style={{
-              width: 54,
-              height: 54,
-              borderRadius: 14,
               display: "grid",
               placeItems: "center",
-              color: "var(--text-hi)",
-              background: "var(--icon-soft-bg)",
-              border: "1px solid var(--border-subtle)",
+              minHeight: 220,
+              padding: 24,
+              borderWidth: 2,
+              borderStyle: "dashed",
+              borderColor: isDragOver
+                ? "var(--border-strong)"
+                : "var(--border-dashed)",
+              background: isDragOver ? "var(--surface-hi)" : "var(--surface)",
+              cursor: isProcessing ? "default" : "pointer",
+              transition: "background 0.18s ease, border-color 0.18s ease",
             }}
           >
-            {isProcessing ? (
-              <IconLoader2
-                className="loading-soft-icon"
-                size={24}
-                stroke={1.8}
-              />
-            ) : (
-              <IconFileMusic size={25} stroke={1.8} />
-            )}
-          </div>
-
-          <div style={{ display: "grid", gap: 4 }}>
-            <div
-              style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)" }}
-            >
-              {selectedFile ? selectedFile.name : t("fileTab.dropzone.title")}
-            </div>
             <div
               style={{
-                fontSize: 13,
-                color: "var(--text-mid)",
-                lineHeight: 1.6,
+                display: "grid",
+                justifyItems: "center",
+                gap: 14,
+                maxWidth: 520,
+                textAlign: "center",
               }}
             >
-              {selectedFile
-                ? `${selectedFile.size !== null ? `${formatFileSize(selectedFile.size)} · ` : ""}${statusLabel(status, progress, t)}${isProcessing ? ` · ${progressPercent}%` : ""}`
-                : t("fileTab.dropzone.hint")}
+              <div
+                style={{
+                  width: 54,
+                  height: 54,
+                  borderRadius: 14,
+                  display: "grid",
+                  placeItems: "center",
+                  color: "var(--text-hi)",
+                  background: "var(--icon-soft-bg)",
+                  border: "1px solid var(--border-subtle)",
+                }}
+              >
+                {isProcessing ? (
+                  <IconLoader2
+                    className="loading-soft-icon"
+                    size={24}
+                    stroke={1.8}
+                  />
+                ) : (
+                  <IconFileMusic size={25} stroke={1.8} />
+                )}
+              </div>
+
+              <div style={{ display: "grid", gap: 4 }}>
+                <div
+                  style={{
+                    fontSize: 15,
+                    fontWeight: 700,
+                    color: "var(--text-hi)",
+                  }}
+                >
+                  {selectedFile
+                    ? selectedFile.name
+                    : t("fileTab.dropzone.title")}
+                </div>
+                <div
+                  style={{
+                    fontSize: 13,
+                    color: "var(--text-mid)",
+                    lineHeight: 1.6,
+                  }}
+                >
+                  {selectedFile
+                    ? `${selectedFile.size !== null ? `${formatFileSize(selectedFile.size)} · ` : ""}${statusLabel(status, progress, t)}${isProcessing ? ` · ${progressPercent}%` : ""}`
+                    : t("fileTab.dropzone.hint")}
+                </div>
+                {convertedInfo && (
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: "var(--text-low)",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {convertedInfo}
+                  </div>
+                )}
+              </div>
+
+              {isProcessing && (
+                <div
+                  style={{
+                    width: "min(320px, 100%)",
+                    height: 4,
+                    borderRadius: 999,
+                    overflow: "hidden",
+                    background: "var(--progress-track)",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${progressPercent}%`,
+                      height: "100%",
+                      borderRadius: 999,
+                      background: "var(--accent)",
+                      transition: "width 0.24s ease",
+                    }}
+                  />
+                </div>
+              )}
+
+              {error && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 8,
+                    color: "var(--danger)",
+                    fontSize: 13,
+                    lineHeight: 1.5,
+                    textAlign: "left",
+                  }}
+                >
+                  <IconAlertCircle
+                    size={16}
+                    stroke={2}
+                    style={{ flexShrink: 0, marginTop: 2 }}
+                  />
+                  <span>{error}</span>
+                </div>
+              )}
             </div>
-            {convertedInfo && (
+          </section>
+
+          <section
+            className="card"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 14,
+              background: "var(--surface)",
+            }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <div
+                style={{
+                  fontSize: 14,
+                  fontWeight: 700,
+                  color: "var(--text-hi)",
+                  marginBottom: 3,
+                }}
+              >
+                {t("fileTab.speaker.toggleTitle")}
+              </div>
               <div
                 style={{
                   fontSize: 12,
-                  color: "var(--text-low)",
+                  color: "var(--text-mid)",
                   lineHeight: 1.5,
                 }}
               >
-                {convertedInfo}
+                {t("fileTab.speaker.toggleDesc")}
               </div>
-            )}
-          </div>
-
-          {isProcessing && (
-            <div
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={speakerDiarization}
+              onClick={() => {
+                void toggleSpeakerDiarization();
+              }}
+              disabled={isProcessing}
               style={{
-                width: "min(320px, 100%)",
-                height: 4,
+                width: 44,
+                height: 26,
                 borderRadius: 999,
-                overflow: "hidden",
-                background: "var(--progress-track)",
+                border: "none",
+                background: speakerDiarization
+                  ? "var(--accent)"
+                  : "var(--switch-track)",
+                padding: 3,
+                cursor: isProcessing ? "not-allowed" : "pointer",
+                flexShrink: 0,
+                position: "relative",
               }}
             >
-              <div
+              <span
+                aria-hidden="true"
                 style={{
-                  width: `${progressPercent}%`,
-                  height: "100%",
-                  borderRadius: 999,
-                  background: "var(--accent)",
-                  transition: "width 0.24s ease",
+                  position: "absolute",
+                  top: 3,
+                  left: 3,
+                  width: 20,
+                  height: 20,
+                  borderRadius: "50%",
+                  background: "var(--accent-contrast)",
+                  transform: speakerDiarization
+                    ? "translateX(18px)"
+                    : "translateX(0)",
+                  transition: "transform 0.16s ease",
                 }}
               />
-            </div>
-          )}
-
-          {error && (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "flex-start",
-                gap: 8,
-                color: "var(--danger)",
-                fontSize: 13,
-                lineHeight: 1.5,
-                textAlign: "left",
-              }}
-            >
-              <IconAlertCircle
-                size={16}
-                stroke={2}
-                style={{ flexShrink: 0, marginTop: 2 }}
-              />
-              <span>{error}</span>
-            </div>
-          )}
-        </div>
-      </section>
-
-      <section
-        className="card"
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 14,
-          background: "var(--surface)",
-        }}
-      >
-        <div style={{ minWidth: 0 }}>
-          <div
-            style={{
-              fontSize: 14,
-              fontWeight: 700,
-              color: "var(--text-hi)",
-              marginBottom: 3,
-            }}
-          >
-            {t("fileTab.speaker.toggleTitle")}
-          </div>
-          <div
-            style={{ fontSize: 12, color: "var(--text-mid)", lineHeight: 1.5 }}
-          >
-            {t("fileTab.speaker.toggleDesc")}
-          </div>
-        </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={speakerDiarization}
-          onClick={() => {
-            void toggleSpeakerDiarization();
-          }}
-          disabled={isProcessing}
-          style={{
-            width: 44,
-            height: 26,
-            borderRadius: 999,
-            border: "none",
-            background: speakerDiarization
-              ? "var(--accent)"
-              : "var(--switch-track)",
-            padding: 3,
-            cursor: isProcessing ? "not-allowed" : "pointer",
-            flexShrink: 0,
-            position: "relative",
-          }}
-        >
-          <span
-            aria-hidden="true"
-            style={{
-              position: "absolute",
-              top: 3,
-              left: 3,
-              width: 20,
-              height: 20,
-              borderRadius: "50%",
-              background: "var(--accent-contrast)",
-              transform: speakerDiarization
-                ? "translateX(18px)"
-                : "translateX(0)",
-              transition: "transform 0.16s ease",
-            }}
-          />
-        </button>
-      </section>
+            </button>
+          </section>
+        </>
+      ) : null}
 
       <section ref={resultSectionRef} style={{ display: "grid", gap: 10 }}>
         <div
@@ -1328,7 +1419,37 @@ export function FileTranscriptionTab({
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            {resultEntry && (
+            {liveCallEntry ? (
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={() => {
+                  void requestStopLiveCall();
+                }}
+                disabled={
+                  callStopRequested ||
+                  liveCallEntry.callCapturePhase === "finalizing"
+                }
+                style={{ minHeight: 32, padding: "0 12px" }}
+              >
+                {callStopRequested ||
+                liveCallEntry.callCapturePhase === "finalizing" ? (
+                  <IconLoader2
+                    className="loading-soft-icon"
+                    size={13}
+                    stroke={2}
+                  />
+                ) : (
+                  <IconSquare size={11} stroke={2} fill="currentColor" />
+                )}
+                {callStopRequested ||
+                liveCallEntry.callCapturePhase === "finalizing"
+                  ? t("fileTab.live.stopping")
+                  : t("fileTab.live.stop")}
+              </button>
+            ) : null}
+
+            {!liveCallEntry && resultEntry && (
               <button
                 type="button"
                 className="btn"
@@ -1346,39 +1467,51 @@ export function FileTranscriptionTab({
               </button>
             )}
 
-            {resultEntry && (
+            {!liveCallEntry && resultEntry && (
               <button
                 type="button"
                 className="btn"
                 onClick={() => setSummaryOpen(true)}
                 disabled={!summaryAvailable}
-                title={summaryAvailable ? undefined : t("summary.unavailable.tooltip")}
-                style={{ minHeight: 32, padding: "0 12px", gap: 6, opacity: summaryAvailable ? 1 : 0.5, cursor: summaryAvailable ? "pointer" : "not-allowed" }}
+                title={
+                  summaryAvailable
+                    ? undefined
+                    : t("summary.unavailable.tooltip")
+                }
+                style={{
+                  minHeight: 32,
+                  padding: "0 12px",
+                  gap: 6,
+                  opacity: summaryAvailable ? 1 : 0.5,
+                  cursor: summaryAvailable ? "pointer" : "not-allowed",
+                }}
               >
                 <IconListCheck size={13} stroke={2} />
                 {t("summary.button")}
               </button>
             )}
 
-            {(resultEntry || error || selectedFile) && !isProcessing && (
-              <button
-                type="button"
-                className="btn"
-                onClick={() => {
-                  setSelectedFile(null);
-                  setStatus("idle");
-                  resetResult();
-                }}
-                style={{ width: 32, minWidth: 32, minHeight: 32, padding: 0 }}
-                title={t("fileTab.result.clear")}
-              >
-                <IconX size={14} stroke={2} />
-              </button>
-            )}
+            {!liveCallEntry &&
+              (resultEntry || error || selectedFile) &&
+              !isProcessing && (
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    setSelectedFile(null);
+                    setStatus("idle");
+                    resetResult();
+                  }}
+                  style={{ width: 32, minWidth: 32, minHeight: 32, padding: 0 }}
+                  title={t("fileTab.result.clear")}
+                >
+                  <IconX size={14} stroke={2} />
+                </button>
+              )}
           </div>
         </div>
 
-        {resultEntry && !summaryAvailable && (
+        {!liveCallEntry && resultEntry && !summaryAvailable && (
           <div
             style={{
               display: "flex",
@@ -1389,12 +1522,16 @@ export function FileTranscriptionTab({
               color: "var(--text-mid)",
             }}
           >
-            <IconAlertCircle size={14} stroke={2} style={{ flexShrink: 0, marginTop: 1, color: "var(--accent)" }} />
+            <IconAlertCircle
+              size={14}
+              stroke={2}
+              style={{ flexShrink: 0, marginTop: 1, color: "var(--accent)" }}
+            />
             <span>{t("summary.unavailable.note")}</span>
           </div>
         )}
 
-        {summaryOpen && resultEntry && summaryAvailable && (
+        {!liveCallEntry && summaryOpen && resultEntry && summaryAvailable && (
           <SummaryModal
             entry={resultEntry}
             onClose={() => setSummaryOpen(false)}
@@ -1402,27 +1539,37 @@ export function FileTranscriptionTab({
           />
         )}
 
-        {resultEntry ? (
-          resultEntry.mode === "speakers" && resultEntry.segments?.length ? (
+        {displayedResultEntry ? (
+          displayedResultEntry.mode === "speakers" &&
+          (liveCallEntry || displayedResultEntry.segments?.length) ? (
             <div style={{ display: "grid", gap: 12 }}>
-              {resultEntry.speakers?.length ? (
+              {displayedResultEntry.speakers?.length ? (
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {resultEntry.speakers.map((speaker) => (
+                  {displayedResultEntry.speakers.map((speaker) => (
                     <SpeakerNameInput
                       key={speaker.id}
                       value={speaker.label}
                       ariaLabel={t("fileTab.speaker.nameAria", {
                         name: speaker.label,
                       })}
+                      readOnly={Boolean(liveCallEntry)}
                       onCommit={(label) => renameSpeaker(speaker.id, label)}
                     />
                   ))}
                 </div>
               ) : null}
-              <div style={{ display: "grid", gap: 8 }}>
-                {resultEntry.segments.map((segment, index) => (
+              <div
+                ref={liveCallEntry ? liveResultContentRef : undefined}
+                style={{
+                  display: "grid",
+                  gap: 8,
+                  maxHeight: liveCallEntry ? 320 : undefined,
+                  overflowY: liveCallEntry ? "auto" : undefined,
+                }}
+              >
+                {displayedResultEntry.segments?.map((segment, index) => (
                   <div
-                    key={`${segment.start}-${index}`}
+                    key={`${segment.speakerId}-${segment.start}-${index}`}
                     style={{
                       display: "grid",
                       gridTemplateColumns: "84px minmax(0, 1fr)",
@@ -1492,13 +1639,12 @@ export function FileTranscriptionTab({
                       }}
                     >
                       <span>
-                        {new Date(resultEntry.timestamp).toLocaleTimeString(
-                          "ru-RU",
-                          {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          },
-                        )}
+                        {new Date(
+                          displayedResultEntry.timestamp,
+                        ).toLocaleTimeString("ru-RU", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
                       </span>
                       <span
                         style={{
@@ -1507,12 +1653,13 @@ export function FileTranscriptionTab({
                           letterSpacing: "0.02em",
                         }}
                       >
-                        {resultSourceLabel(resultEntry, t)}
+                        {resultSourceLabel(displayedResultEntry, t)}
                       </span>
                     </div>
                   </td>
                   <td style={{ verticalAlign: "top", paddingLeft: 8 }}>
                     <div
+                      ref={liveCallEntry ? liveResultContentRef : undefined}
                       style={{
                         display: "grid",
                         gap: 2,
@@ -1520,9 +1667,12 @@ export function FileTranscriptionTab({
                         lineHeight: 1.7,
                         overflowWrap: "anywhere",
                         wordBreak: "break-word",
+                        maxHeight: liveCallEntry ? 320 : undefined,
+                        overflowY: liveCallEntry ? "auto" : undefined,
+                        whiteSpace: liveCallEntry ? "pre-wrap" : undefined,
                       }}
                     >
-                      <span>{visibleResult}</span>
+                      <span>{visibleResult || t("fileTab.result.empty")}</span>
                       {shouldCollapseResult && (
                         <button
                           type="button"
@@ -1542,7 +1692,9 @@ export function FileTranscriptionTab({
                             justifySelf: "start",
                           }}
                         >
-                          {resultExpanded ? t("fileTab.result.collapse") : t("fileTab.result.expand")}
+                          {resultExpanded
+                            ? t("fileTab.result.collapse")
+                            : t("fileTab.result.expand")}
                         </button>
                       )}
                     </div>
@@ -1614,7 +1766,9 @@ export function FileTranscriptionTab({
             >
               {localWhisperDownloaded
                 ? t("fileTab.modal.descDownloaded", { name: localWhisperLabel })
-                : t("fileTab.modal.descNeedDownload", { name: RECOMMENDED_LOCAL_WHISPER_LABEL })}
+                : t("fileTab.modal.descNeedDownload", {
+                    name: RECOMMENDED_LOCAL_WHISPER_LABEL,
+                  })}
             </div>
 
             <div style={{ display: "grid", gap: 8, marginBottom: 16 }}>
@@ -1635,8 +1789,12 @@ export function FileTranscriptionTab({
                 )}
                 <span>
                   {localWhisperDownloaded
-                    ? t("fileTab.modal.whisperReady", { name: localWhisperLabel })
-                    : t("fileTab.modal.whisperWillDownload", { name: RECOMMENDED_LOCAL_WHISPER_LABEL })}
+                    ? t("fileTab.modal.whisperReady", {
+                        name: localWhisperLabel,
+                      })
+                    : t("fileTab.modal.whisperWillDownload", {
+                        name: RECOMMENDED_LOCAL_WHISPER_LABEL,
+                      })}
                 </span>
               </div>
               <div

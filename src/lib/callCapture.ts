@@ -6,13 +6,6 @@ import { logError, logInfo } from "./logger";
 import { beginProcessing, finishProcessing } from "./processingControl";
 import { tn } from "./i18n";
 import {
-  addHistoryEntry,
-  type AppSettings,
-  type HistoryEntry,
-} from "./store";
-
-const callInterruptedMessage = (): string => tn("callCapture.interrupted");
-import {
   type FileTranscriptionResult,
   toFileTranscriptionErrorMessage,
   transcribeFilePathOnly,
@@ -20,6 +13,16 @@ import {
   type FileTranscriptionProgress,
   type FileTranscriptionStatus,
 } from "./fileTranscription";
+import {
+  addHistoryEntry,
+  getHistory,
+  type AppSettings,
+  type HistoryEntry,
+  type SpeakerTranscriptSegment,
+  updateHistoryEntry,
+} from "./store";
+
+const callInterruptedMessage = (): string => tn("callCapture.interrupted");
 
 export type CaptureTargetKind = "systemOutput" | "process" | "window";
 export type CallCaptureStatus = "starting" | "recording" | "stopped" | "failed";
@@ -37,8 +40,34 @@ export interface StartCallCaptureRequest {
   includeMic?: boolean;
   includeSystem?: boolean;
   micDeviceId?: string | null;
+  micDeviceLabel?: string | null;
   sampleRate?: number | null;
   storageDir?: string | null;
+  nativeMicCapture?: boolean;
+  liveTranscription?: CallLiveTranscriptionRequest | null;
+}
+
+export interface CallLiveTranscriptionOptions {
+  requestId: string;
+  model: string;
+  language: string;
+  endpoint: string;
+  streamingEnabled: boolean;
+  provider?: string;
+  apiKey?: string;
+}
+
+export interface CallLiveTranscriptionRequest {
+  mic?: CallLiveTranscriptionOptions | null;
+  system?: CallLiveTranscriptionOptions | null;
+}
+
+export interface CallLiveTranscriptionState {
+  micRequestId?: string | null;
+  systemRequestId?: string | null;
+  micText?: string | null;
+  systemText?: string | null;
+  errors: string[];
 }
 
 export interface CallCaptureTrack {
@@ -57,6 +86,8 @@ export interface CallCaptureSession {
   endedAt?: string | null;
   directory: string;
   tracks: CallCaptureTrack[];
+  nativeMicActive: boolean;
+  liveTranscription?: CallLiveTranscriptionState | null;
 }
 
 export async function listCallCaptureTargets(): Promise<CaptureTarget[]> {
@@ -73,6 +104,186 @@ export async function stopCallCapture(
   sessionId: string,
 ): Promise<CallCaptureSession> {
   return invoke<CallCaptureSession>("stop_call_capture", { sessionId });
+}
+
+export async function pauseCallCaptureMic(sessionId: string): Promise<boolean> {
+  return invoke<boolean>("pause_call_capture_mic", { sessionId });
+}
+
+export async function resumeCallCaptureMic(
+  sessionId: string,
+): Promise<boolean> {
+  return invoke<boolean>("resume_call_capture_mic", { sessionId });
+}
+
+export async function checkpointCallTranscription({
+  sessionId,
+  channel,
+  status,
+  text,
+  startedAtMs,
+  message,
+}: {
+  sessionId: string;
+  channel: "mic" | "system";
+  status: "draft" | "final" | "error";
+  text: string;
+  startedAtMs: number;
+  message?: string;
+}): Promise<void> {
+  return invoke<void>("checkpoint_call_transcription", {
+    sessionId,
+    channel,
+    status,
+    text,
+    startedAtMs,
+    message: message || null,
+  });
+}
+
+export async function recoverCallCaptureSessions(): Promise<
+  CallCaptureSession[]
+> {
+  return invoke<CallCaptureSession[]>("recover_call_capture_sessions");
+}
+
+export function formatCallLiveTranscript(
+  micText?: string | null,
+  systemText?: string | null,
+): string {
+  const guestLabel = tn("callCapture.speakerGuestN", { index: 1 });
+  return [
+    micText?.trim()
+      ? `${tn("callCapture.speakerYou")}:\n${micText.trim()}`
+      : "",
+    systemText?.trim() ? `${guestLabel}:\n${systemText.trim()}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+interface CallLiveSpeakerTranscriptOptions {
+  micText?: string | null;
+  systemText?: string | null;
+  micStartedAt?: number | null;
+  systemStartedAt?: number | null;
+  duration?: number;
+}
+
+export function buildCallLiveSpeakerTranscript({
+  micText,
+  systemText,
+  micStartedAt = 0,
+  systemStartedAt = 0,
+  duration = 0,
+}: CallLiveSpeakerTranscriptOptions): Pick<
+  HistoryEntry,
+  "mode" | "speakers" | "segments"
+> {
+  const you = {
+    id: "call_live_you",
+    label: tn("callCapture.speakerYou"),
+  };
+  const guest = {
+    id: "call_live_guest_1",
+    label: tn("callCapture.speakerGuestN", { index: 1 }),
+  };
+  const safeDuration = Math.max(0, duration);
+  const segments: SpeakerTranscriptSegment[] = [];
+  const micTranscript = micText?.trim();
+  const systemTranscript = systemText?.trim();
+
+  if (micTranscript) {
+    const start = Math.max(0, micStartedAt || 0);
+    segments.push({
+      start,
+      end: Math.max(start, safeDuration),
+      speakerId: you.id,
+      speakerLabel: you.label,
+      text: micTranscript,
+    });
+  }
+  if (systemTranscript) {
+    const start = Math.max(0, systemStartedAt || 0);
+    segments.push({
+      start,
+      end: Math.max(start, safeDuration),
+      speakerId: guest.id,
+      speakerLabel: guest.label,
+      text: systemTranscript,
+    });
+  }
+
+  return {
+    mode: "speakers",
+    speakers: [you, guest],
+    segments,
+  };
+}
+
+export async function restoreInterruptedCallCaptureHistory(): Promise<
+  HistoryEntry[]
+> {
+  const sessions = await recoverCallCaptureSessions();
+  if (sessions.length === 0) {
+    return [];
+  }
+  const history = await getHistory();
+  const restored: HistoryEntry[] = [];
+
+  for (const session of sessions) {
+    const existing = history.find(
+      (entry) => entry.callSessionId === session.id,
+    );
+    const sessionDuration = Math.round(
+      (Date.parse(session.endedAt || new Date().toISOString()) -
+        Date.parse(session.startedAt)) /
+        1000,
+    );
+    const liveText = formatCallLiveTranscript(
+      session.liveTranscription?.micText,
+      session.liveTranscription?.systemText,
+    );
+    const entry: HistoryEntry = {
+      id: existing?.id || crypto.randomUUID(),
+      timestamp: existing?.timestamp || session.startedAt,
+      duration: Math.max(
+        existing?.duration || 0,
+        Number.isFinite(sessionDuration) ? sessionDuration : 0,
+      ),
+      raw: liveText || existing?.raw || "",
+      cleaned: liveText || existing?.cleaned || "",
+      source: "call",
+      fileName: tn("callCapture.fileName"),
+      status: "interrupted",
+      callCapturePhase: "recovered",
+      errorMessage: tn("callCapture.recovered"),
+      callSessionId: session.id,
+      ...buildCallLiveSpeakerTranscript({
+        micText: session.liveTranscription?.micText,
+        systemText: session.liveTranscription?.systemText,
+        duration: Math.max(
+          existing?.duration || 0,
+          Number.isFinite(sessionDuration) ? sessionDuration : 0,
+        ),
+      }),
+      callTracks: session.tracks.map((track) => ({
+        kind: track.kind,
+        label: track.label,
+        path: track.path,
+      })),
+    };
+
+    if (existing) {
+      await updateHistoryEntry(entry);
+    } else {
+      await addHistoryEntry(entry);
+    }
+    await emit(HISTORY_UPDATED_EVENT, entry);
+    restored.push(entry);
+  }
+
+  return restored;
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
@@ -148,7 +359,9 @@ export async function saveFailedCallCaptureEntry({
 }
 
 function callTrackTitle(track: CallCaptureTrack): string {
-  return track.kind === "mic" ? tn("callCapture.speakerYou") : tn("callCapture.speakerCall");
+  return track.kind === "mic"
+    ? tn("callCapture.speakerYou")
+    : tn("callCapture.speakerCall");
 }
 
 function formatTrackTranscript(track: CallCaptureTrack, text: string): string {
@@ -156,7 +369,10 @@ function formatTrackTranscript(track: CallCaptureTrack, text: string): string {
 }
 
 function micPlainText(part: string): string {
-  const label = tn("callCapture.speakerYou").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const label = tn("callCapture.speakerYou").replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&",
+  );
   return part.replace(new RegExp(`^${label}:\\s*`, "i"), "").trim();
 }
 
@@ -221,18 +437,25 @@ function normalizeCallSpeakerResult(
       return;
     }
 
-    labelsById.set(speakerId, tn("callCapture.speakerGuestN", { index: guestIndex }));
+    labelsById.set(
+      speakerId,
+      tn("callCapture.speakerGuestN", { index: guestIndex }),
+    );
     guestIndex += 1;
   });
 
   const speakers = orderedSpeakerIds(result).map((speakerId) => ({
     id: speakerId,
-    label: labelsById.get(speakerId) || tn("callCapture.speakerGuestN", { index: 1 }),
+    label:
+      labelsById.get(speakerId) ||
+      tn("callCapture.speakerGuestN", { index: 1 }),
   }));
   const segments = result.segments.map((segment) => ({
     ...segment,
     speakerLabel:
-      labelsById.get(segment.speakerId) || segment.speakerLabel || tn("callCapture.speakerGuestN", { index: 1 }),
+      labelsById.get(segment.speakerId) ||
+      segment.speakerLabel ||
+      tn("callCapture.speakerGuestN", { index: 1 }),
   }));
 
   return {
@@ -267,24 +490,29 @@ interface TranscribeCallCaptureSessionParams {
   settings: AppSettings;
   startedAt?: number;
   micFile?: File | null;
+  entryId?: string;
+  baseEntry?: HistoryEntry;
   onStatus?: (status: FileTranscriptionStatus) => void;
   onProgress?: (progress: FileTranscriptionProgress) => void;
   /** Fires with the new entry id once the "processing" row exists. */
   onStarted?: (entryId: string) => void;
 }
 
-async function buildCallCaptureHistoryEntry({
-  session,
-  settings,
-  startedAt,
-  micFile,
-  onStatus,
-  onProgress,
-}: TranscribeCallCaptureSessionParams, overrides?: {
-  id?: string;
-  timestamp?: string;
-  duration?: number;
-}): Promise<HistoryEntry> {
+async function buildCallCaptureHistoryEntry(
+  {
+    session,
+    settings,
+    startedAt,
+    micFile,
+    onStatus,
+    onProgress,
+  }: TranscribeCallCaptureSessionParams,
+  overrides?: {
+    id?: string;
+    timestamp?: string;
+    duration?: number;
+  },
+): Promise<HistoryEntry> {
   const orderedTracks = [...session.tracks].sort((left, right) => {
     if (left.kind === right.kind) return 0;
     return left.kind === "mic" ? -1 : 1;
@@ -421,7 +649,10 @@ async function buildCallCaptureHistoryEntry({
 
     if (speakerSegments.length > 0) {
       const selfSpeakerId = "call_self";
-      speakersById.set(selfSpeakerId, { id: selfSpeakerId, label: tn("callCapture.speakerYou") });
+      speakersById.set(selfSpeakerId, {
+        id: selfSpeakerId,
+        label: tn("callCapture.speakerYou"),
+      });
       speakerSegments.unshift({
         start: 0,
         end: 0,
@@ -479,23 +710,25 @@ async function buildCallCaptureHistoryEntry({
 export async function transcribeCallCaptureSession(
   params: TranscribeCallCaptureSessionParams,
 ): Promise<HistoryEntry> {
-  const id = crypto.randomUUID();
-  const timestamp = new Date().toISOString();
+  const id = params.entryId || params.baseEntry?.id || crypto.randomUUID();
+  const timestamp = params.baseEntry?.timestamp || new Date().toISOString();
   const duration = params.startedAt
     ? Math.max(0, Math.round((Date.now() - params.startedAt) / 1000))
-    : 0;
+    : params.baseEntry?.duration || 0;
 
   // Show the call as a live "processing" row (with a stop button) while its
   // tracks transcribe — call/file STT can take a long time.
   const baseEntry: HistoryEntry = {
+    ...params.baseEntry,
     id,
     timestamp,
     duration,
-    raw: "",
-    cleaned: "",
+    raw: params.baseEntry?.raw || "",
+    cleaned: params.baseEntry?.cleaned || "",
     source: "call",
     fileName: tn("callCapture.fileName"),
     status: "processing",
+    callCapturePhase: "finalizing",
     callSessionId: params.session.id,
     callTracks: params.session.tracks.map((track) => ({
       kind: track.kind,
@@ -507,14 +740,26 @@ export async function transcribeCallCaptureSession(
   const interruptedEntry = (): HistoryEntry => ({
     ...baseEntry,
     status: "interrupted",
+    callCapturePhase: undefined,
     errorMessage: callInterruptedMessage(),
   });
 
-  const handle = await beginProcessing(baseEntry, "add");
+  const shouldReuseEntry = Boolean(params.baseEntry || params.entryId);
+  const entryAlreadyPersisted =
+    shouldReuseEntry &&
+    (await getHistory()).some((entry) => entry.id === baseEntry.id);
+  const handle = await beginProcessing(
+    baseEntry,
+    entryAlreadyPersisted ? "update" : "add",
+  );
   params.onStarted?.(id);
 
   try {
-    const built = await buildCallCaptureHistoryEntry(params, { id, timestamp, duration });
+    const built = await buildCallCaptureHistoryEntry(params, {
+      id,
+      timestamp,
+      duration,
+    });
 
     // STT via `invoke` can't be aborted mid-flight; if the user stopped while it
     // ran, discard the late result and mark the row interrupted.
@@ -533,10 +778,14 @@ export async function transcribeCallCaptureSession(
       return interrupted;
     }
 
-    void logError("CALL_CAPTURE", `Call transcription failed: ${errorMessage(error)}`);
+    void logError(
+      "CALL_CAPTURE",
+      `Call transcription failed: ${errorMessage(error)}`,
+    );
     const failed: HistoryEntry = {
       ...baseEntry,
       status: "failed",
+      callCapturePhase: undefined,
       errorMessage: tn("callCapture.errProcessRetry"),
     };
     await finishProcessing(failed);
@@ -558,9 +807,10 @@ function sessionFromHistoryEntry(entry: HistoryEntry): CallCaptureSession {
       kind: track.kind,
       label: track.label,
       path: track.path,
-      channels: track.kind === "mic" ? 1 : 2,
-      sampleRate: 48_000,
+      channels: 1,
+      sampleRate: 16_000,
     })),
+    nativeMicActive: false,
   };
 }
 
@@ -612,7 +862,9 @@ export async function retryCallCaptureHistoryEntry(
       return interrupted;
     }
 
-    const userFacingMessage = toFileTranscriptionErrorMessage(error, { settings });
+    const userFacingMessage = toFileTranscriptionErrorMessage(error, {
+      settings,
+    });
     const failedEntry: HistoryEntry = {
       ...entry,
       status: "failed",
@@ -620,7 +872,10 @@ export async function retryCallCaptureHistoryEntry(
     };
 
     await finishProcessing(failedEntry);
-    void logError("CALL_CAPTURE", `Retry call capture failed: ${errorMessage(error)}`);
+    void logError(
+      "CALL_CAPTURE",
+      `Retry call capture failed: ${errorMessage(error)}`,
+    );
     throw new Error(userFacingMessage);
   } finally {
     handle.finish();

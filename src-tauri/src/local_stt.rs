@@ -5,6 +5,7 @@ use std::fs;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Command as StdCommand, Stdio};
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_shell::ShellExt;
@@ -13,9 +14,12 @@ use tokio::process::Command as TokioCommand;
 
 const WHISPER_RUNTIME_NAME: &str = "talkis-stt";
 const DIARIZATION_RUNTIME_NAME: &str = "talkis-diarize";
+const WHISPER_RUNTIME_API_VERSION: u32 = 2;
 const DEFAULT_RUNTIME_MANIFEST_URL: &str = "https://talkis.ru/downloads/talkis-stt/manifest.json";
 pub const MODEL_DOWNLOAD_PROGRESS_EVENT: &str = "local-stt-model-download-progress";
 pub const LOCAL_DIARIZATION_MODEL_ID: &str = "sherpa-diarization-pyannote-titanet-int8";
+const MODEL_DOWNLOAD_MAX_ATTEMPTS: usize = 3;
+const MODEL_DOWNLOAD_RETRY_DELAYS_MS: [u64; MODEL_DOWNLOAD_MAX_ATTEMPTS - 1] = [750, 1_500];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LocalRuntimeKind {
@@ -53,6 +57,51 @@ impl LocalRuntimeKind {
     }
 }
 
+#[derive(Default)]
+struct ManagedRuntimeEndpoints {
+    whisper: Option<String>,
+    diarization: Option<String>,
+}
+
+static MANAGED_RUNTIME_ENDPOINTS: OnceLock<Mutex<ManagedRuntimeEndpoints>> = OnceLock::new();
+static MANAGED_RUNTIME_START_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+
+fn managed_runtime_endpoints() -> &'static Mutex<ManagedRuntimeEndpoints> {
+    MANAGED_RUNTIME_ENDPOINTS.get_or_init(|| Mutex::new(ManagedRuntimeEndpoints::default()))
+}
+
+fn managed_runtime_start_lock() -> &'static tokio::sync::Mutex<()> {
+    MANAGED_RUNTIME_START_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+fn remembered_runtime_endpoint(kind: LocalRuntimeKind) -> Option<String> {
+    managed_runtime_endpoints()
+        .lock()
+        .ok()
+        .and_then(|endpoints| match kind {
+            LocalRuntimeKind::Whisper => endpoints.whisper.clone(),
+            LocalRuntimeKind::Diarization => endpoints.diarization.clone(),
+        })
+}
+
+fn remember_runtime_endpoint(kind: LocalRuntimeKind, endpoint: String) {
+    if let Ok(mut endpoints) = managed_runtime_endpoints().lock() {
+        match kind {
+            LocalRuntimeKind::Whisper => endpoints.whisper = Some(endpoint),
+            LocalRuntimeKind::Diarization => endpoints.diarization = Some(endpoint),
+        }
+    }
+}
+
+fn forget_runtime_endpoint(kind: LocalRuntimeKind) {
+    if let Ok(mut endpoints) = managed_runtime_endpoints().lock() {
+        match kind {
+            LocalRuntimeKind::Whisper => endpoints.whisper = None,
+            LocalRuntimeKind::Diarization => endpoints.diarization = None,
+        }
+    }
+}
+
 #[derive(Deserialize)]
 struct RuntimeManifest {
     version: String,
@@ -73,6 +122,7 @@ struct HealthResponse {
     status: Option<String>,
     runtime: Option<String>,
     engine: Option<String>,
+    api_version: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -174,6 +224,11 @@ const LOCAL_WHISPER_MODELS: &[LocalModelInfo] = &[
         id: "Qwen/Qwen3-ASR-0.6B",
         file_name: "Qwen3-ASR-0.6B-Q8_0.gguf",
         url: "https://huggingface.co/handy-computer/Qwen3-ASR-0.6B-gguf/resolve/main/Qwen3-ASR-0.6B-Q8_0.gguf",
+    },
+    LocalModelInfo {
+        id: "ai-sage/GigaAM-v3",
+        file_name: "gigaam-v3-e2e-rnnt-Q4_K_M.gguf",
+        url: "https://huggingface.co/handy-computer/gigaam-v3-e2e-rnnt-gguf/resolve/main/gigaam-v3-e2e-rnnt-Q4_K_M.gguf",
     },
 ];
 
@@ -362,6 +417,12 @@ fn local_model_info(value: &str) -> Option<&'static LocalModelInfo> {
                 .iter()
                 .find(|model| model.id == LOCAL_QWEN_MODEL_ID)
         }
+        "ai-sage/gigaam-v3"
+        | "gigaam-v3"
+        | "gigaam-v3-e2e-rnnt"
+        | "gigaam-v3-e2e-rnnt-q4_k_m.gguf" => LOCAL_WHISPER_MODELS
+            .iter()
+            .find(|model| model.id == "ai-sage/GigaAM-v3"),
         _ => None,
     }
 }
@@ -374,6 +435,13 @@ fn progress_percent(downloaded: u64, total: Option<u64>) -> Option<u8> {
     total
         .filter(|value| *value > 0)
         .map(|value| ((downloaded.saturating_mul(100) / value).min(100)) as u8)
+}
+
+fn model_download_retry_delay(failed_attempt: usize) -> Option<Duration> {
+    MODEL_DOWNLOAD_RETRY_DELAYS_MS
+        .get(failed_attempt.saturating_sub(1))
+        .copied()
+        .map(Duration::from_millis)
 }
 
 fn model_download_progress(
@@ -442,11 +510,54 @@ pub async fn download_model_with_progress(
         .connect_timeout(Duration::from_secs(30))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
-    let mut response = download_client
-        .get(info.url)
-        .send()
-        .await
-        .map_err(|err| format!("Не удалось скачать модель «{}»: {}", info.id, err))?
+    let mut attempt = 1usize;
+    let response = loop {
+        if crate::download_cancel::is_any_cancel_requested(&[model, info.id]) {
+            let _ = tokio::fs::remove_file(&temp_path).await;
+            crate::download_cancel::clear(model);
+            crate::download_cancel::clear(info.id);
+            emit_download_progress(app, model_download_progress(model, "cancelled", 0, None));
+            return Err(crate::download_cancel::CANCELLED_MESSAGE.to_string());
+        }
+
+        match download_client.get(info.url).send().await {
+            Ok(response) => break response,
+            Err(err) => {
+                let Some(delay) = model_download_retry_delay(attempt) else {
+                    return Err(format!(
+                        "Не удалось скачать модель «{}» после {} попыток: {}",
+                        info.id, attempt, err
+                    ));
+                };
+                let next_attempt = attempt + 1;
+                logger::log_info(
+                    "LOCAL_STT",
+                    &format!(
+                        "Retrying model download after transport error: model={}, attempt={}/{}, delay_ms={}, error={}",
+                        info.id,
+                        next_attempt,
+                        MODEL_DOWNLOAD_MAX_ATTEMPTS,
+                        delay.as_millis(),
+                        err
+                    ),
+                );
+                emit_model_download_progress_message(
+                    app,
+                    model,
+                    "preparing",
+                    0,
+                    None,
+                    &format!(
+                        "Не удалось подключиться. Повторяем скачивание ({}/{}).",
+                        next_attempt, MODEL_DOWNLOAD_MAX_ATTEMPTS
+                    ),
+                );
+                tokio::time::sleep(delay).await;
+                attempt = next_attempt;
+            }
+        }
+    };
+    let mut response = response
         .error_for_status()
         .map_err(|err| format!("Скачивание модели «{}» вернуло ошибку: {}", info.id, err))?;
     let total_bytes = response.content_length();
@@ -777,7 +888,7 @@ async fn download_runtime(app: &AppHandle, client: &reqwest::Client) -> Result<P
 }
 
 fn is_expected_runtime_health(health: &HealthResponse, kind: LocalRuntimeKind) -> bool {
-    health
+    let identity_matches = health
         .status
         .as_deref()
         .map(|value| value.eq_ignore_ascii_case("ok"))
@@ -791,7 +902,11 @@ fn is_expected_runtime_health(health: &HealthResponse, kind: LocalRuntimeKind) -
             .engine
             .as_deref()
             .map(|value| value.eq_ignore_ascii_case(kind.engine_name()))
-            .unwrap_or(false)
+            .unwrap_or(false);
+
+    identity_matches
+        && (kind != LocalRuntimeKind::Whisper
+            || health.api_version.unwrap_or_default() >= WHISPER_RUNTIME_API_VERSION)
 }
 
 fn is_stale_managed_runtime_health(health: &HealthResponse, kind: LocalRuntimeKind) -> bool {
@@ -803,22 +918,28 @@ fn is_stale_managed_runtime_health(health: &HealthResponse, kind: LocalRuntimeKi
         && !is_expected_runtime_health(health, kind)
 }
 
-async fn whisper_runtime_supports_streaming_endpoint(
+async fn whisper_runtime_supports_streaming_endpoints(
     client: &reqwest::Client,
     base_url: &str,
 ) -> bool {
-    let stream_url = format!(
-        "{}/v1/audio/transcriptions/stream",
-        base_url.trim_end_matches('/')
-    );
+    for path in [
+        "/v1/audio/transcriptions/stream",
+        "/v1/audio/transcriptions/live",
+    ] {
+        let url = format!("{}{}", base_url.trim_end_matches('/'), path);
+        let available = client
+            .post(&url)
+            .timeout(Duration::from_secs(3))
+            .send()
+            .await
+            .map(|response| response.status().as_u16() != 404)
+            .unwrap_or(false);
+        if !available {
+            return false;
+        }
+    }
 
-    client
-        .post(&stream_url)
-        .timeout(Duration::from_secs(3))
-        .send()
-        .await
-        .map(|response| response.status().as_u16() != 404)
-        .unwrap_or(false)
+    true
 }
 
 async fn probe_local_stt(
@@ -839,11 +960,11 @@ async fn probe_local_stt(
                 if let Ok(health) = serde_json::from_str::<HealthResponse>(&text) {
                     if is_expected_runtime_health(&health, kind) {
                         if kind == LocalRuntimeKind::Whisper
-                            && !whisper_runtime_supports_streaming_endpoint(client, base_url).await
+                            && !whisper_runtime_supports_streaming_endpoints(client, base_url).await
                         {
                             logger::log_info(
                                 "LOCAL_STT",
-                                "Detected stale managed Whisper runtime: missing streaming endpoint",
+                                "Detected stale managed Whisper runtime: missing streaming/live endpoint",
                             );
                             return LocalSttProbe::StaleManagedRuntime;
                         }
@@ -948,6 +1069,18 @@ async fn runtime_models_match_disk(
 }
 
 #[cfg(unix)]
+fn command_has_port_argument(command: &str, port: u16) -> bool {
+    let port = port.to_string();
+    let mut parts = command.split_whitespace();
+    while let Some(part) = parts.next() {
+        if part == "--port" && parts.next().is_some_and(|value| value == port.as_str()) {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(unix)]
 fn stop_stale_managed_runtime(kind: LocalRuntimeKind, port: u16) -> Result<(), String> {
     let output = StdCommand::new("ps")
         .args(["-ax", "-o", "pid=,command="])
@@ -962,10 +1095,7 @@ fn stop_stale_managed_runtime(kind: LocalRuntimeKind, port: u16) -> Result<(), S
             continue;
         };
 
-        if !command.contains(kind.runtime_name())
-            || !command.contains("--port")
-            || !command.contains(&port.to_string())
-        {
+        if !command.contains(kind.runtime_name()) || !command_has_port_argument(command, port) {
             continue;
         }
 
@@ -1002,6 +1132,7 @@ fn stop_stale_managed_runtime(_kind: LocalRuntimeKind, _port: u16) -> Result<(),
 }
 
 pub fn stop_managed_runtime(kind: LocalRuntimeKind, port: u16) -> Result<(), String> {
+    forget_runtime_endpoint(kind);
     stop_stale_managed_runtime(kind, port)
 }
 
@@ -1098,6 +1229,7 @@ pub async fn ensure_runtime(
     models_url: &str,
     custom_models_dir: Option<&str>,
 ) -> Result<String, String> {
+    let _start_guard = managed_runtime_start_lock().lock().await;
     let kind = managed_runtime_kind(models_url).ok_or_else(|| {
         "Автоматический запуск локального runtime поддержан только для портов Talkis 8000/8003."
             .to_string()
@@ -1106,9 +1238,39 @@ pub async fn ensure_runtime(
     let base_url = resolve_stt_base_url_from_models_url(models_url);
     let preferred_port = requested_port(&base_url, kind);
     let models_dir = resolve_models_dir(app, custom_models_dir)?;
+
+    if let Some(runtime_base_url) = remembered_runtime_endpoint(kind) {
+        let runtime_models_url = managed_models_url(&runtime_base_url);
+        if local_stt_is_ready(client, kind, &runtime_base_url, &runtime_models_url).await
+            && runtime_models_match_disk(client, kind, &runtime_models_url, &models_dir).await
+        {
+            logger::log_info(
+                "LOCAL_STT",
+                &format!(
+                    "Reusing managed local {} STT runtime at {}",
+                    kind.label(),
+                    runtime_base_url
+                ),
+            );
+            return Ok(runtime_base_url);
+        }
+
+        forget_runtime_endpoint(kind);
+        if let Some(port) = url::Url::parse(&runtime_base_url)
+            .ok()
+            .and_then(|url| url.port())
+        {
+            if let Err(err) = stop_stale_managed_runtime(kind, port) {
+                logger::log_error("LOCAL_STT", &err);
+            }
+            tokio::time::sleep(Duration::from_millis(700)).await;
+        }
+    }
+
     match probe_local_stt(client, kind, &base_url, models_url).await {
         LocalSttProbe::Ready => {
             if runtime_models_match_disk(client, kind, models_url, &models_dir).await {
+                remember_runtime_endpoint(kind, base_url.clone());
                 return Ok(base_url);
             }
 
@@ -1171,6 +1333,7 @@ pub async fn ensure_runtime(
     )
     .await
     {
+        remember_runtime_endpoint(kind, runtime_base_url.clone());
         Ok(runtime_base_url)
     } else {
         Err("Локальный STT runtime запущен, но не успел стать доступным. Повторите установку модели через минуту.".to_string())
@@ -1195,6 +1358,39 @@ mod tests {
             local_model_marker_path(&models_dir, model),
             models_dir.join("nvidia_nemotron-3.5-asr-streaming-0.6b.json")
         );
+    }
+
+    #[test]
+    fn whisper_runtime_health_requires_current_live_api_version() {
+        let stale = HealthResponse {
+            status: Some("ok".to_string()),
+            runtime: Some("talkis-stt".to_string()),
+            engine: Some("transcribe.cpp".to_string()),
+            api_version: None,
+        };
+        let current = HealthResponse {
+            status: Some("ok".to_string()),
+            runtime: Some("talkis-stt".to_string()),
+            engine: Some("transcribe.cpp".to_string()),
+            api_version: Some(WHISPER_RUNTIME_API_VERSION),
+        };
+
+        assert!(!is_expected_runtime_health(
+            &stale,
+            LocalRuntimeKind::Whisper,
+        ));
+        assert!(is_expected_runtime_health(
+            &current,
+            LocalRuntimeKind::Whisper,
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stale_runtime_match_requires_the_exact_port_argument() {
+        let command = "/Applications/Talkis Dev.app/talkis-stt --host 127.0.0.1 --port 18000";
+        assert!(command_has_port_argument(command, 18000));
+        assert!(!command_has_port_argument(command, 8000));
     }
 
     #[test]
@@ -1231,5 +1427,37 @@ mod tests {
                 models_dir.join(expected_marker)
             );
         }
+    }
+
+    #[test]
+    fn gigaam_resolves_base_model_and_gguf_aliases() {
+        let models_dir = PathBuf::from("/tmp/talkis-models");
+        let model = local_model_info("ai-sage/GigaAM-v3").expect("model");
+
+        assert_eq!(model.id, "ai-sage/GigaAM-v3");
+        assert_eq!(model.file_name, "gigaam-v3-e2e-rnnt-Q4_K_M.gguf");
+        assert_eq!(
+            local_model_info("gigaam-v3-e2e-rnnt-Q4_K_M.gguf")
+                .expect("gguf alias")
+                .id,
+            model.id
+        );
+        assert_eq!(
+            local_model_marker_path(&models_dir, model),
+            models_dir.join("ai-sage_GigaAM-v3.json")
+        );
+    }
+
+    #[test]
+    fn model_download_retries_use_bounded_backoff() {
+        assert_eq!(
+            model_download_retry_delay(1),
+            Some(Duration::from_millis(750))
+        );
+        assert_eq!(
+            model_download_retry_delay(2),
+            Some(Duration::from_millis(1_500))
+        );
+        assert_eq!(model_download_retry_delay(3), None);
     }
 }

@@ -113,9 +113,16 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
+      - name: Verify Windows x64 release architecture
+        if: matrix.platform == 'windows'
+        run: bun run verify:windows-release
+
       - name: Postprocess macOS release
         if: matrix.platform == 'macos'
         run: bun run postprocess:macos-release
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Archive macOS app bundle
         if: matrix.platform == 'macos'

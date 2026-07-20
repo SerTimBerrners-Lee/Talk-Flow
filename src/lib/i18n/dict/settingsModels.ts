@@ -2,21 +2,44 @@
 export const settingsModels = {
   // ── Account / subscription cards ──
   "models.account.logout": { ru: "Выйти", en: "Log out" },
-  "models.cta.upgradePro": { ru: "Пополнить баланс", en: "Top up balance" },
-  "models.cta.freeTrial": { ru: "500 токенов новым пользователям", en: "500 tokens for new users" },
+  "models.cta.upgradePro": { ru: "Перейти на PRO", en: "Go PRO" },
   "models.guest.title": { ru: "Облачный баланс", en: "Cloud balance" },
-  "models.guest.benefit1": { ru: "• Без подписки и автоплатежей", en: "• No subscription or recurring charges" },
-  "models.guest.benefit2": { ru: "• Токены не сгорают", en: "• Tokens do not expire" },
-  "models.guest.benefit3": { ru: "• Локальные модели остаются бесплатными", en: "• Local models remain free" },
-  "models.subscription.active": { ru: "Облако доступно", en: "Cloud is available" },
-  "models.subscription.balance": { ru: "Доступно {tokens} токенов", en: "{tokens} tokens available" },
-  "models.subscription.reserved": { ru: "Зарезервировано: {tokens}", en: "Reserved: {tokens}" },
-  "models.subscription.low": { ru: "Осталось меньше 20%", en: "Less than 20% remaining" },
+  "models.guest.benefit1": {
+    ru: "• Без подписки и автоплатежей",
+    en: "• No subscription or recurring charges",
+  },
+  "models.guest.benefit2": {
+    ru: "• Токены не сгорают",
+    en: "• Tokens do not expire",
+  },
+  "models.guest.benefit3": {
+    ru: "• Локальные модели остаются бесплатными",
+    en: "• Local models remain free",
+  },
+  "models.subscription.active": {
+    ru: "Облако доступно",
+    en: "Cloud is available",
+  },
+  "models.subscription.balance": {
+    ru: "Доступно {tokens} токенов",
+    en: "{tokens} tokens available",
+  },
+  "models.subscription.reserved": {
+    ru: "Зарезервировано: {tokens}",
+    en: "Reserved: {tokens}",
+  },
+  "models.subscription.low": {
+    ru: "Осталось меньше 20%",
+    en: "Less than 20% remaining",
+  },
   "models.subscription.topUp": { ru: "Пополнить", en: "Top up" },
 
   // ── Prompt library ──
   "models.prompt.nameLabel": { ru: "Название", en: "Name" },
-  "models.prompt.namePlaceholder": { ru: "Например: Протокол встречи", en: "For example: Meeting minutes" },
+  "models.prompt.namePlaceholder": {
+    ru: "Например: Протокол встречи",
+    en: "For example: Meeting minutes",
+  },
   "models.prompt.promptLabel": { ru: "Промпт", en: "Prompt" },
   "models.prompt.noModelHint": {
     ru: "Выберите текстовую модель во вкладке «Модели», чтобы сгенерировать промпт.",
@@ -33,7 +56,10 @@ export const settingsModels = {
     en: "Choose a summary prompt. It is offered by default on the transcription result screen.",
   },
   "models.prompt.create": { ru: "Создать промпт", en: "Create prompt" },
-  "models.prompt.improve": { ru: "Сгенерировать промпт", en: "Generate prompt" },
+  "models.prompt.improve": {
+    ru: "Сгенерировать промпт",
+    en: "Generate prompt",
+  },
   "models.prompt.improving": { ru: "Генерирую…", en: "Generating…" },
 
   // ── Text (summary) model card ──
@@ -42,7 +68,10 @@ export const settingsModels = {
     ru: "OpenAI-совместимый endpoint для саммари и обработки текста. Оставьте endpoint пустым, чтобы использовать OpenAI с вашим API-ключом.",
     en: "An OpenAI-compatible endpoint for summaries and text processing. Leave the endpoint empty to use OpenAI with your API key.",
   },
-  "models.textModel.apiKeyPlaceholder": { ru: "Необязательно для локального endpoint", en: "Optional for a local endpoint" },
+  "models.textModel.apiKeyPlaceholder": {
+    ru: "Необязательно для локального endpoint",
+    en: "Optional for a local endpoint",
+  },
   "models.textModel.statusSet": { ru: "Настроена", en: "Configured" },
   "models.textModel.statusUnset": { ru: "Не настроена", en: "Not configured" },
   "models.textModel.statusTesting": { ru: "Проверяем", en: "Testing" },
@@ -66,7 +95,10 @@ export const settingsModels = {
   "models.modeCommit.active": { ru: "Используется", en: "In use" },
 
   // ── Recognition mode section ──
-  "models.modeSection.title": { ru: "Режим распознавания", en: "Recognition mode" },
+  "models.modeSection.title": {
+    ru: "Режим распознавания",
+    en: "Recognition mode",
+  },
   "models.modeSection.desc": {
     ru: "Вы можете в любой момент переключаться между облаком, своим API-ключом и локальной моделью.",
     en: "You can switch between the cloud, your own API key, and a local model at any time.",
@@ -83,16 +115,28 @@ export const settingsModels = {
     ru: "Для облачного режима нужна авторизация и положительный баланс. После входа данные обновятся автоматически.",
     en: "Cloud mode requires sign-in and a positive balance. The data refreshes automatically after you log in.",
   },
-  "models.cloud.proReady": { ru: "Облачный режим готов к выбору", en: "Cloud mode is ready to select" },
-  "models.cloud.needPro": { ru: "Пополните баланс для облачного режима", en: "Top up your balance for cloud mode" },
+  "models.cloud.proReady": {
+    ru: "Облачный режим готов к выбору",
+    en: "Cloud mode is ready to select",
+  },
+  "models.cloud.needPro": {
+    ru: "Пополните баланс для облачного режима",
+    en: "Top up your balance for cloud mode",
+  },
 
   // ── API adapters section ──
-  "models.apiSection.title": { ru: "Доступные API-адаптеры", en: "Available API adapters" },
+  "models.apiSection.title": {
+    ru: "Доступные API-адаптеры",
+    en: "Available API adapters",
+  },
   "models.apiSection.desc": {
     ru: "Выберите адаптер, раскройте его и укажите ключ вместе с названием модели распознавания.",
     en: "Pick an adapter, expand it, and enter your key along with the recognition model name.",
   },
-  "models.adapter.recommendedModel": { ru: "Рекомендуемая модель: {model}.", en: "Recommended model: {model}." },
+  "models.adapter.recommendedModel": {
+    ru: "Рекомендуемая модель: {model}.",
+    en: "Recommended model: {model}.",
+  },
 
   // Per-adapter descriptions (ru = the original constant text)
   "models.adapter.openai.description": {
@@ -138,33 +182,81 @@ export const settingsModels = {
 
   // ── Adapter status badges ──
   "models.adapterStatus.selected": { ru: "Выбран", en: "Selected" },
-  "models.adapterStatus.needApiKey": { ru: "Нужен API-ключ", en: "API key required" },
-  "models.adapterStatus.needModel": { ru: "Нужна модель", en: "Model required" },
+  "models.adapterStatus.needApiKey": {
+    ru: "Нужен API-ключ",
+    en: "API key required",
+  },
+  "models.adapterStatus.needModel": {
+    ru: "Нужна модель",
+    en: "Model required",
+  },
   "models.adapterStatus.ready": { ru: "Готов", en: "Ready" },
   "models.adapterStatus.error": { ru: "Ошибка", en: "Error" },
   "models.adapterStatus.testing": { ru: "Проверяем", en: "Testing" },
-  "models.adapterStatus.readyToTest": { ru: "Готов к проверке", en: "Ready to test" },
-  "models.adapterStatus.readyToSelect": { ru: "Готов к выбору", en: "Ready to select" },
+  "models.adapterStatus.readyToTest": {
+    ru: "Готов к проверке",
+    en: "Ready to test",
+  },
+  "models.adapterStatus.readyToSelect": {
+    ru: "Готов к выбору",
+    en: "Ready to select",
+  },
 
   // ── Connection labels / messages ──
-  "models.connection.noApiKey": { ru: "API-ключ не указан", en: "No API key entered" },
-  "models.connection.usedForRecognition": { ru: "Используется для распознавания", en: "Used for recognition" },
-  "models.connection.working": { ru: "Соединение работает", en: "Connection working" },
-  "models.connection.error": { ru: "Ошибка соединения", en: "Connection error" },
-  "models.connection.testing": { ru: "Проверяем соединение...", en: "Testing connection..." },
-  "models.connection.notTested": { ru: "Соединение не проверено", en: "Connection not tested" },
-  "models.connection.keyModelSaved": { ru: "Ключ и модель сохранены", en: "Key and model saved" },
-  "models.connection.readyToSelect": { ru: "Готов к выбору", en: "Ready to select" },
-  "models.connection.fillKeyModel": { ru: "Заполните ключ и модель", en: "Fill in the key and model" },
+  "models.connection.noApiKey": {
+    ru: "API-ключ не указан",
+    en: "No API key entered",
+  },
+  "models.connection.usedForRecognition": {
+    ru: "Используется для распознавания",
+    en: "Used for recognition",
+  },
+  "models.connection.working": {
+    ru: "Соединение работает",
+    en: "Connection working",
+  },
+  "models.connection.error": {
+    ru: "Ошибка соединения",
+    en: "Connection error",
+  },
+  "models.connection.testing": {
+    ru: "Проверяем соединение...",
+    en: "Testing connection...",
+  },
+  "models.connection.notTested": {
+    ru: "Соединение не проверено",
+    en: "Connection not tested",
+  },
+  "models.connection.keyModelSaved": {
+    ru: "Ключ и модель сохранены",
+    en: "Key and model saved",
+  },
+  "models.connection.readyToSelect": {
+    ru: "Готов к выбору",
+    en: "Ready to select",
+  },
+  "models.connection.fillKeyModel": {
+    ru: "Заполните ключ и модель",
+    en: "Fill in the key and model",
+  },
 
   // ── Adapter form fields ──
   "models.field.apiKey": { ru: "API-ключ", en: "API key" },
   "models.field.model": { ru: "Модель", en: "Model" },
   "models.field.customModel": { ru: "Своя модель...", en: "Custom model..." },
-  "models.field.customModelPlaceholder": { ru: "Введите ID модели", en: "Enter model ID" },
-  "models.field.recommended": { ru: "Рекомендуем: {model}", en: "Recommended: {model}" },
+  "models.field.customModelPlaceholder": {
+    ru: "Введите ID модели",
+    en: "Enter model ID",
+  },
+  "models.field.recommended": {
+    ru: "Рекомендуем: {model}",
+    en: "Recommended: {model}",
+  },
   "models.field.host": { ru: "Хост", en: "Host" },
-  "models.field.hostDefaultPlaceholder": { ru: "По умолчанию: {endpoint}", en: "Default: {endpoint}" },
+  "models.field.hostDefaultPlaceholder": {
+    ru: "По умолчанию: {endpoint}",
+    en: "Default: {endpoint}",
+  },
   "models.field.hostPlaceholder": {
     ru: "https://api.example.com или http://localhost:8000",
     en: "https://api.example.com or http://localhost:8000",
@@ -184,12 +276,21 @@ export const settingsModels = {
     en: "{name}: key and model saved. A live connection test will be available once the backend adapter is connected.",
   },
   "models.test.checking": { ru: "Проверяем...", en: "Testing..." },
-  "models.test.testAndSave": { ru: "Тестировать и сохранить", en: "Test and save" },
+  "models.test.testAndSave": {
+    ru: "Тестировать и сохранить",
+    en: "Test and save",
+  },
   "models.test.saveButton": { ru: "Сохранить", en: "Save" },
 
   // ── Local model statuses ──
-  "models.local.modelNotConnected": { ru: "Модель не подключена", en: "Model not connected" },
-  "models.local.engineNotConnected": { ru: "Движок не подключен", en: "Engine not connected" },
+  "models.local.modelNotConnected": {
+    ru: "Модель не подключена",
+    en: "Model not connected",
+  },
+  "models.local.engineNotConnected": {
+    ru: "Движок не подключен",
+    en: "Engine not connected",
+  },
   "models.local.runtimeReadyModelOff": {
     ru: "{runtime} runtime работает, но эта модель ещё не включена.",
     en: "The {runtime} runtime is running, but this model is not enabled yet.",
@@ -210,7 +311,10 @@ export const settingsModels = {
   "models.local.downloading": { ru: "Скачивается", en: "Downloading" },
   "models.local.selected": { ru: "Выбрана", en: "Selected" },
   "models.local.ready": { ru: "Готова", en: "Ready" },
-  "models.local.prepareFailed": { ru: "Не удалось подготовить модель", en: "Failed to prepare the model" },
+  "models.local.prepareFailed": {
+    ru: "Не удалось подготовить модель",
+    en: "Failed to prepare the model",
+  },
   "models.local.notDownloaded": { ru: "Не скачана", en: "Not downloaded" },
 
   // ── Local models section ──
@@ -274,6 +378,10 @@ export const settingsModels = {
     ru: "Английская streaming ASR-модель Nemotron с минимальной задержкой для live-диктовки.",
     en: "An English Nemotron streaming ASR model with minimal latency for live dictation.",
   },
+  "models.local.gigaam-v3-e2e-rnnt.description": {
+    ru: "Русская ASR-модель с пунктуацией и нормализацией текста для качественной локальной диктовки.",
+    en: "A Russian ASR model with punctuation and text normalization for high-quality local dictation.",
+  },
   "models.local.moonshine-streaming-tiny.description": {
     ru: "Очень лёгкая английская streaming-модель для мгновенного локального распознавания.",
     en: "A very small English streaming model for instant local recognition.",
@@ -293,8 +401,14 @@ export const settingsModels = {
     ru: "Локальные модели и компоненты, которые используются не для распознавания или основной текстовой модели.",
     en: "Local models and components used outside recognition or the primary text model.",
   },
-  "models.localOther.status.notInstalled": { ru: "Не установлен", en: "Not installed" },
-  "models.localOther.status.downloading": { ru: "Скачивается", en: "Downloading" },
+  "models.localOther.status.notInstalled": {
+    ru: "Не установлен",
+    en: "Not installed",
+  },
+  "models.localOther.status.downloading": {
+    ru: "Скачивается",
+    en: "Downloading",
+  },
   "models.localOther.status.ready": { ru: "Готов", en: "Ready" },
   "models.localOther.status.error": { ru: "Ошибка", en: "Error" },
   "models.localOther.selected": {
@@ -334,16 +448,28 @@ export const settingsModels = {
   "models.accuracyValue.lowPlus": { ru: "низкая+", en: "low+" },
   "models.accuracyValue.utility": { ru: "служебная", en: "utility" },
   "models.languageValue.english": { ru: "Английский", en: "English" },
-  "models.languageValue.count": { ru: "{value} языков", en: "{value} languages" },
+  "models.languageValue.count": {
+    ru: "{value} языков",
+    en: "{value} languages",
+  },
 
   // ── Stat labels / titles ──
   "models.stat.speed": { ru: "Скорость", en: "Speed" },
   "models.stat.accuracy": { ru: "Точность", en: "Accuracy" },
   "models.stat.streaming": { ru: "Стриминг", en: "Streaming" },
   "models.stat.speedTitle": { ru: "Скорость: {value}", en: "Speed: {value}" },
-  "models.stat.accuracyTitle": { ru: "Точность: {value}", en: "Accuracy: {value}" },
-  "models.stat.languagesTitle": { ru: "Языки: {value}", en: "Languages: {value}" },
-  "models.stat.downloadSizeTitle": { ru: "Размер загрузки: {value}", en: "Download size: {value}" },
+  "models.stat.accuracyTitle": {
+    ru: "Точность: {value}",
+    en: "Accuracy: {value}",
+  },
+  "models.stat.languagesTitle": {
+    ru: "Языки: {value}",
+    en: "Languages: {value}",
+  },
+  "models.stat.downloadSizeTitle": {
+    ru: "Размер загрузки: {value}",
+    en: "Download size: {value}",
+  },
 
   // ── Download size formatting ──
   "models.size.zero": { ru: "0 Б", en: "0 B" },
@@ -353,17 +479,32 @@ export const settingsModels = {
   "models.size.notConnected": { ru: "Не подключено", en: "Not connected" },
 
   // ── Install / download progress ──
-  "models.install.preparingRuntime": { ru: "Готовим локальный STT runtime.", en: "Preparing the local STT runtime." },
-  "models.delete.removingFile": { ru: "Удаляем локальный файл модели.", en: "Removing the local model file." },
-  "models.download.progress": { ru: "Скачиваем модель: {percent}%", en: "Downloading model: {percent}%" },
-  "models.download.inProgress": { ru: "Скачиваем модель.", en: "Downloading model." },
+  "models.install.preparingRuntime": {
+    ru: "Готовим локальный STT runtime.",
+    en: "Preparing the local STT runtime.",
+  },
+  "models.delete.removingFile": {
+    ru: "Удаляем локальный файл модели.",
+    en: "Removing the local model file.",
+  },
+  "models.download.progress": {
+    ru: "Скачиваем модель: {percent}%",
+    en: "Downloading model: {percent}%",
+  },
+  "models.download.inProgress": {
+    ru: "Скачиваем модель.",
+    en: "Downloading model.",
+  },
   "models.download.done": { ru: "Модель скачана.", en: "Model downloaded." },
   "models.download.loading": { ru: "Загрузка модели", en: "Downloading model" },
   "models.download.preparing": { ru: "Подготовка", en: "Preparing" },
   "models.download.of": { ru: "из {total}", en: "of {total}" },
 
   // ── Delete confirmation dialog ──
-  "models.deleteDialog.title": { ru: "Вы действительно хотите удалить?", en: "Are you sure you want to delete?" },
+  "models.deleteDialog.title": {
+    ru: "Вы действительно хотите удалить?",
+    en: "Are you sure you want to delete?",
+  },
   "models.deleteDialog.body": {
     ru: "{name} будет удалена с диска. При необходимости модель можно скачать заново.",
     en: "{name} will be removed from disk. You can download the model again if needed.",
@@ -384,7 +525,10 @@ export const settingsModels = {
   // ── Style / text-processing tab ──
   "models.styleTab.style": { ru: "Стиль", en: "Style" },
   "models.styleTab.prompts": { ru: "Промпты", en: "Prompts" },
-  "models.textProcessing.title": { ru: "Обработка текста", en: "Text processing" },
+  "models.textProcessing.title": {
+    ru: "Обработка текста",
+    en: "Text processing",
+  },
   "models.textProcessing.desc": {
     ru: "Стиль очистки расшифровки и Промпты для саммари.",
     en: "Transcript cleanup style and summary prompts.",
@@ -396,9 +540,15 @@ export const settingsModels = {
     ru: "Итоговый prompt для текущего языка и стиля обработки.",
     en: "The final prompt for the current language and processing style.",
   },
-  "models.preview.buildError": { ru: "Не удалось собрать preview prompt: {error}", en: "Failed to build the preview prompt: {error}" },
+  "models.preview.buildError": {
+    ru: "Не удалось собрать preview prompt: {error}",
+    en: "Failed to build the preview prompt: {error}",
+  },
   "models.preview.profile": { ru: "Профиль", en: "Profile" },
   "models.preview.layers": { ru: "Слои", en: "Layers" },
   "models.preview.promptText": { ru: "Текст prompt", en: "Prompt text" },
-  "models.preview.building": { ru: "Собираем preview...", en: "Building preview..." },
+  "models.preview.building": {
+    ru: "Собираем preview...",
+    en: "Building preview...",
+  },
 } as const;

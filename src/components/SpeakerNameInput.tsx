@@ -4,12 +4,14 @@ interface SpeakerNameInputProps {
   value: string;
   ariaLabel: string;
   onCommit: (value: string) => Promise<void> | void;
+  readOnly?: boolean;
 }
 
 export function SpeakerNameInput({
   value,
   ariaLabel,
   onCommit,
+  readOnly = false,
 }: SpeakerNameInputProps): ReactElement {
   const [draft, setDraft] = useState(value);
   const focusedRef = useRef(false);
@@ -22,6 +24,7 @@ export function SpeakerNameInput({
   }, [value]);
 
   const commit = (): void => {
+    if (readOnly) return;
     focusedRef.current = false;
     if (cancelledRef.current) {
       cancelledRef.current = false;
@@ -43,14 +46,20 @@ export function SpeakerNameInput({
     <input
       className="input"
       value={draft}
+      readOnly={readOnly}
       onFocus={() => {
-        focusedRef.current = true;
+        if (!readOnly) {
+          focusedRef.current = true;
+        }
       }}
       onChange={(event) => {
-        setDraft(event.currentTarget.value);
+        if (!readOnly) {
+          setDraft(event.currentTarget.value);
+        }
       }}
       onBlur={commit}
       onKeyDown={(event) => {
+        if (readOnly) return;
         if (event.key === "Enter") {
           event.currentTarget.blur();
         } else if (event.key === "Escape") {
@@ -64,6 +73,7 @@ export function SpeakerNameInput({
         padding: "7px 10px",
         fontSize: 12,
         fontWeight: 650,
+        cursor: readOnly ? "default" : undefined,
       }}
       aria-label={ariaLabel}
     />

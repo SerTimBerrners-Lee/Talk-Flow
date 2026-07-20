@@ -58,14 +58,22 @@ import { cancelProcessing } from "../../../lib/processingControl";
 import { formatDurationMs } from "../../../lib/utils";
 import { logError, logInfo } from "../../../lib/logger";
 import { TranscriptionStatsPanel } from "../../../components/TranscriptionStatsPanel";
-import { RowActionsMenu, type RowActionItem } from "../../../components/RowActionsMenu";
+import {
+  RowActionsMenu,
+  type RowActionItem,
+} from "../../../components/RowActionsMenu";
 import {
   HistoryAudioTrack,
   HistoryAudioTrackPlaceholder,
 } from "../../../components/HistoryAudioTrack";
 import { SpeakerNameInput } from "../../../components/SpeakerNameInput";
 import { retryHistoryEntry } from "../../widget/services/transcriptionPipeline";
-import { useI18n, type TFunc, type UiLanguage, type MsgKey } from "../../../lib/i18n";
+import {
+  useI18n,
+  type TFunc,
+  type UiLanguage,
+  type MsgKey,
+} from "../../../lib/i18n";
 
 const LazySummaryModal = lazy(() =>
   import("../../../components/SummaryModal").then((module) => ({
@@ -119,7 +127,9 @@ const MAIN_HERO_SLIDES = [
   actionKey: MsgKey;
 }[];
 
-function getHistorySource(entry: { source?: HistoryEntry["source"] }): HistorySource {
+function getHistorySource(entry: {
+  source?: HistoryEntry["source"];
+}): HistorySource {
   if (
     entry.source === "file" ||
     entry.source === "call" ||
@@ -260,16 +270,12 @@ function ExpandableHistoryText({
   expanded: boolean;
   editing: boolean;
   loading?: boolean;
-  onSpeakerRename: (
-    speakerId: string,
-    label: string,
-  ) => Promise<void> | void;
+  onSpeakerRename: (speakerId: string, label: string) => Promise<void> | void;
   onToggle: () => void;
 }): ReactElement {
   const { t } = useI18n();
   const speakerSegments = segments?.length ? segments : null;
-  const textTooLong =
-    (textLength ?? text.length) > HISTORY_TEXT_PREVIEW_LIMIT;
+  const textTooLong = (textLength ?? text.length) > HISTORY_TEXT_PREVIEW_LIMIT;
   const shouldCollapse =
     textTooLong || Boolean(speakerSegments) || Boolean(hasSpeakerTranscript);
   const visibleText =
@@ -296,7 +302,9 @@ function ExpandableHistoryText({
                 <SpeakerNameInput
                   key={speaker.id}
                   value={speaker.label}
-                  ariaLabel={t("mainTab.speakerNameAria", { name: speaker.label })}
+                  ariaLabel={t("mainTab.speakerNameAria", {
+                    name: speaker.label,
+                  })}
                   onCommit={(label) => onSpeakerRename(speaker.id, label)}
                 />
               ))}
@@ -478,60 +486,79 @@ export function MainTab({
       try {
         setHistory(await getHistoryIndex());
       } catch (error) {
-        void logError("HISTORY", `Failed to load history: ${error instanceof Error ? error.message : String(error)}`);
+        void logError(
+          "HISTORY",
+          `Failed to load history: ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
     };
 
     void loadHistoryIndex();
     void syncHotkeyLabel();
 
-    const unlistenHistory = listen<HistoryEntry>(HISTORY_UPDATED_EVENT, ({ payload }) => {
-      if (!payload?.id) {
-        void loadHistoryIndex();
-        return;
-      }
-
-      const listEntry = toHistoryListEntry(payload);
-      setHistory((current) => {
-        const existingIndex = current.findIndex((entry) => entry.id === listEntry.id);
-        if (existingIndex === -1) {
-          return [listEntry, ...current];
+    const unlistenHistory = listen<HistoryEntry>(
+      HISTORY_UPDATED_EVENT,
+      ({ payload }) => {
+        if (!payload?.id) {
+          void loadHistoryIndex();
+          return;
         }
 
-        const next = [...current];
-        next[existingIndex] = listEntry;
-        return next;
-      });
+        const listEntry = toHistoryListEntry(payload);
+        setHistory((current) => {
+          const existingIndex = current.findIndex(
+            (entry) => entry.id === listEntry.id,
+          );
+          if (existingIndex === -1) {
+            return [listEntry, ...current];
+          }
 
-      const shouldKeepFullEntry =
-        expandedIdsRef.current.has(payload.id) ||
-        summaryEntryRef.current?.id === payload.id ||
-        Boolean(activeAudioIdRef.current?.startsWith(`${payload.id}:`));
-      if (shouldKeepFullEntry) {
-        setFullEntryCache((current) => addFullEntryToCache(current, payload));
-      }
-      setSummaryEntry((current) => (current?.id === payload.id ? payload : current));
-    });
+          const next = [...current];
+          next[existingIndex] = listEntry;
+          return next;
+        });
 
-    const unlistenDeleted = listen<{ id: string }>(HISTORY_DELETED_EVENT, ({ payload }) => {
-      if (!payload?.id) {
-        void loadHistoryIndex();
-        return;
-      }
+        const shouldKeepFullEntry =
+          expandedIdsRef.current.has(payload.id) ||
+          summaryEntryRef.current?.id === payload.id ||
+          Boolean(activeAudioIdRef.current?.startsWith(`${payload.id}:`));
+        if (shouldKeepFullEntry) {
+          setFullEntryCache((current) => addFullEntryToCache(current, payload));
+        }
+        setSummaryEntry((current) =>
+          current?.id === payload.id ? payload : current,
+        );
+      },
+    );
 
-      setHistory((current) => current.filter((entry) => entry.id !== payload.id));
-      setFullEntryCache((current) => {
-        if (!current.has(payload.id)) return current;
-        const next = new Map(current);
-        next.delete(payload.id);
-        return next;
-      });
-      setActiveAudioId((current) =>
-        current?.startsWith(`${payload.id}:`) ? null : current,
-      );
-      setEditingSpeakerEntryId((current) => (current === payload.id ? null : current));
-      setSummaryEntry((current) => (current?.id === payload.id ? null : current));
-    });
+    const unlistenDeleted = listen<{ id: string }>(
+      HISTORY_DELETED_EVENT,
+      ({ payload }) => {
+        if (!payload?.id) {
+          void loadHistoryIndex();
+          return;
+        }
+
+        setHistory((current) =>
+          current.filter((entry) => entry.id !== payload.id),
+        );
+        setFullEntryCache((current) => {
+          if (!current.has(payload.id)) return current;
+          const next = new Map(current);
+          next.delete(payload.id);
+          return next;
+        });
+        setActiveAudioId((current) =>
+          current?.startsWith(`${payload.id}:`) ? null : current,
+        );
+        setEditingSpeakerEntryId((current) =>
+          current === payload.id ? null : current,
+        );
+        setSummaryEntry((current) =>
+          current?.id === payload.id ? null : current,
+        );
+      },
+    );
 
     const unlistenCleared = listen(HISTORY_CLEARED_EVENT, () => {
       setHistory([]);
@@ -590,7 +617,9 @@ export function MainTab({
       return;
     }
 
-    const focusedIndex = history.findIndex((entry) => entry.id === focusedEntryId);
+    const focusedIndex = history.findIndex(
+      (entry) => entry.id === focusedEntryId,
+    );
     if (focusedIndex >= visibleHistoryLimit) {
       setVisibleHistoryLimit(focusedIndex + 1);
       return;
@@ -604,7 +633,13 @@ export function MainTab({
     });
 
     return () => window.cancelAnimationFrame(frame);
-  }, [focusedEntryId, focusedEntryNonce, history, historyFilter, visibleHistoryLimit]);
+  }, [
+    focusedEntryId,
+    focusedEntryNonce,
+    history,
+    historyFilter,
+    visibleHistoryLimit,
+  ]);
 
   useEffect(() => {
     setVisibleHistoryLimit(HISTORY_INITIAL_RENDER_LIMIT);
@@ -665,9 +700,7 @@ export function MainTab({
     const subject = encodeURIComponent(
       t("settingsGeneralExtra.support.mailSubject"),
     );
-    const body = encodeURIComponent(
-      t("settingsGeneralExtra.support.mailBody"),
-    );
+    const body = encodeURIComponent(t("settingsGeneralExtra.support.mailBody"));
     const mailto = `mailto:${SUPPORT_EMAIL}?subject=${subject}&body=${body}`;
 
     try {
@@ -805,9 +838,7 @@ export function MainTab({
       }, 1800);
     } catch (error) {
       const message =
-        error instanceof Error
-          ? error.message
-          : t("mainTab.retryFailed");
+        error instanceof Error ? error.message : t("mainTab.retryFailed");
 
       setHistory((current) =>
         current.map((item) =>
@@ -831,11 +862,14 @@ export function MainTab({
       });
     } finally {
       if (source === "voice" || source === "call") {
-        await emit<WidgetRetryProcessingPayload>(WIDGET_RETRY_PROCESSING_EVENT, {
-          active: false,
-          source,
-          entryId: entry.id,
-        });
+        await emit<WidgetRetryProcessingPayload>(
+          WIDGET_RETRY_PROCESSING_EVENT,
+          {
+            active: false,
+            source,
+            entryId: entry.id,
+          },
+        );
       }
       setRetryingId((current) => (current === entry.id ? null : current));
     }
@@ -867,9 +901,12 @@ export function MainTab({
 
     // Broadcast a stop request: the widget cancels fresh recordings, this window
     // cancels in-window retries. Whichever process owns the job aborts it.
-    await emit<ProcessingCancelRequestPayload>(PROCESSING_CANCEL_REQUEST_EVENT, {
-      entryId: id,
-    });
+    await emit<ProcessingCancelRequestPayload>(
+      PROCESSING_CANCEL_REQUEST_EVENT,
+      {
+        entryId: id,
+      },
+    );
   };
 
   const filteredHistory = useMemo<HistoryListEntry[]>(() => {
@@ -941,9 +978,7 @@ export function MainTab({
     heroPointerStartX.current = event.clientX;
   };
 
-  const handleHeroPointerUp = (
-    event: ReactPointerEvent<HTMLElement>,
-  ): void => {
+  const handleHeroPointerUp = (event: ReactPointerEvent<HTMLElement>): void => {
     const startX = heroPointerStartX.current;
     heroPointerStartX.current = null;
 
@@ -1287,7 +1322,9 @@ export function MainTab({
                     <thead>
                       <tr>
                         <th style={{ width: 108 }}>{t("mainTab.colTime")}</th>
-                        <th style={{ paddingLeft: 8 }}>{t("mainTab.colText")}</th>
+                        <th style={{ paddingLeft: 8 }}>
+                          {t("mainTab.colText")}
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1295,8 +1332,9 @@ export function MainTab({
                         const source = getHistorySource(item);
                         const fullEntry = fullEntryCache.get(item.id);
                         const isExpanded = expandedIds.has(item.id);
-                        const isLoadingFullEntry =
-                          loadingFullEntryIds.has(item.id);
+                        const isLoadingFullEntry = loadingFullEntryIds.has(
+                          item.id,
+                        );
                         const displayText =
                           isExpanded && fullEntry
                             ? fullEntry.cleaned
@@ -1363,7 +1401,10 @@ export function MainTab({
                                       whiteSpace: "nowrap",
                                     }}
                                   >
-                                    {formatDurationMs(item.processingTime, lang)}
+                                    {formatDurationMs(
+                                      item.processingTime,
+                                      lang,
+                                    )}
                                   </span>
                                 )}
                                 {historyFilter === "all" && (
@@ -1403,29 +1444,35 @@ export function MainTab({
                                     gap: 8,
                                   }}
                                 >
-                                  {item.status === "processing" ? (
-                                    <div
-                                      style={{
-                                        display: "inline-flex",
-                                        alignItems: "center",
-                                        gap: 8,
-                                        padding: "6px 10px",
-                                        borderRadius: 999,
-                                        background: "var(--control-muted)",
-                                        border: "1px solid var(--border)",
-                                        color: "var(--text-mid)",
-                                        fontSize: 12,
-                                        lineHeight: 1.4,
-                                        width: "fit-content",
-                                      }}
-                                    >
-                                      <IconLoader2
-                                        className="loading-soft-icon"
-                                        size={13}
-                                        stroke={2}
-                                      />
-                                      <span>{t("mainTab.processing")}</span>
-                                    </div>
+                                  {item.status === "recording" ||
+                                  item.status === "processing" ? (
+                                    <>
+                                      {displayText ? (
+                                        <ExpandableHistoryText
+                                          text={displayText}
+                                          textLength={displayTextLength}
+                                          hasSpeakerTranscript={false}
+                                          expanded={isExpanded}
+                                          editing={false}
+                                          loading={false}
+                                          onSpeakerRename={() => {}}
+                                          onToggle={() =>
+                                            toggleExpanded(item.id)
+                                          }
+                                        />
+                                      ) : null}
+                                      {item.errorMessage ? (
+                                        <div
+                                          style={{
+                                            color: "var(--text-low)",
+                                            fontSize: 12,
+                                            lineHeight: 1.55,
+                                          }}
+                                        >
+                                          {item.errorMessage}
+                                        </div>
+                                      ) : null}
+                                    </>
                                   ) : item.status === "failed" ||
                                     item.status === "interrupted" ? (
                                     <>
@@ -1445,10 +1492,7 @@ export function MainTab({
                                           width: "fit-content",
                                         }}
                                       >
-                                        <IconAlertCircle
-                                          size={13}
-                                          stroke={2}
-                                        />
+                                        <IconAlertCircle size={13} stroke={2} />
                                         <span>
                                           {item.status === "interrupted"
                                             ? t("mainTab.statusInterrupted")
@@ -1471,14 +1515,24 @@ export function MainTab({
                                     <ExpandableHistoryText
                                       text={displayText}
                                       textLength={displayTextLength}
-                                      hasSpeakerTranscript={item.mode === "speakers"}
+                                      hasSpeakerTranscript={
+                                        item.mode === "speakers"
+                                      }
                                       speakers={fullEntry?.speakers}
-                                      segments={isExpanded ? fullEntry?.segments : undefined}
+                                      segments={
+                                        isExpanded
+                                          ? fullEntry?.segments
+                                          : undefined
+                                      }
                                       expanded={isExpanded}
                                       editing={
                                         editingSpeakerEntryId === item.id
                                       }
-                                      loading={isExpanded && isLoadingFullEntry && !fullEntry}
+                                      loading={
+                                        isExpanded &&
+                                        isLoadingFullEntry &&
+                                        !fullEntry
+                                      }
                                       onSpeakerRename={(speakerId, label) => {
                                         if (fullEntry) {
                                           return renameSpeaker(
@@ -1527,7 +1581,12 @@ export function MainTab({
                                     flexShrink: 0,
                                   }}
                                 >
-                                  {item.status === "processing" ? (
+                                  {item.status === "recording" ? (
+                                    <span
+                                      aria-hidden="true"
+                                      style={{ width: 32, height: 32 }}
+                                    />
+                                  ) : item.status === "processing" ? (
                                     <button
                                       onClick={() => cancelEntry(item.id)}
                                       className="btn btn-danger"
@@ -1550,8 +1609,7 @@ export function MainTab({
                                     </button>
                                   ) : (item.status === "failed" ||
                                       item.status === "interrupted") &&
-                                    ((source === "voice" &&
-                                      item.hasAudio) ||
+                                    ((source === "voice" && item.hasAudio) ||
                                       (source === "call" &&
                                         item.hasCallTracks) ||
                                       (source === "file" &&
@@ -1586,81 +1644,92 @@ export function MainTab({
                                   ) : (
                                     <RowActionsMenu
                                       label={t("rowMenu.actions")}
-                                      items={[
-                                        (source === "file" ||
-                                          source === "call") && {
-                                          key: "edit",
-                                          label: t("rowMenu.edit"),
-                                          icon: (
-                                            <IconPencil size={14} stroke={2} />
-                                          ),
-                                          onSelect: () => {
-                                            void editEntry(item.id);
-                                          },
-                                        },
-                                        {
-                                          key: "copy",
-                                          label:
-                                            copied === item.id ||
-                                            retrySucceededId === item.id
-                                              ? t("mainTab.success")
-                                              : t("rowMenu.copy"),
-                                          icon:
-                                            copied === item.id ||
-                                            retrySucceededId === item.id ? (
-                                              <IconCheck
+                                      items={
+                                        [
+                                          (source === "file" ||
+                                            source === "call") && {
+                                            key: "edit",
+                                            label: t("rowMenu.edit"),
+                                            icon: (
+                                              <IconPencil
                                                 size={14}
-                                                stroke={2.5}
+                                                stroke={2}
                                               />
-                                            ) : (
-                                              <IconCopy size={14} stroke={2} />
                                             ),
-                                          onSelect: () => {
-                                            void copyEntryText(item.id);
+                                            onSelect: () => {
+                                              void editEntry(item.id);
+                                            },
                                           },
-                                        },
-                                        {
-                                          key: "summarize",
-                                          label: t("rowMenu.summarize"),
-                                          icon: (
-                                            <IconListCheck
-                                              size={14}
-                                              stroke={2}
-                                            />
-                                          ),
-                                          disabled: !summaryAvailable,
-                                          hint: t("summary.unavailable.tooltip"),
-                                          onSelect: () => {
-                                            void loadFullEntry(item.id).then(
-                                              (entry) => {
-                                                if (entry) {
-                                                  setSummaryEntry(entry);
-                                                }
-                                              },
-                                            );
+                                          {
+                                            key: "copy",
+                                            label:
+                                              copied === item.id ||
+                                              retrySucceededId === item.id
+                                                ? t("mainTab.success")
+                                                : t("rowMenu.copy"),
+                                            icon:
+                                              copied === item.id ||
+                                              retrySucceededId === item.id ? (
+                                                <IconCheck
+                                                  size={14}
+                                                  stroke={2.5}
+                                                />
+                                              ) : (
+                                                <IconCopy
+                                                  size={14}
+                                                  stroke={2}
+                                                />
+                                              ),
+                                            onSelect: () => {
+                                              void copyEntryText(item.id);
+                                            },
                                           },
-                                        },
-                                      ].filter(Boolean) as RowActionItem[]}
+                                          {
+                                            key: "summarize",
+                                            label: t("rowMenu.summarize"),
+                                            icon: (
+                                              <IconListCheck
+                                                size={14}
+                                                stroke={2}
+                                              />
+                                            ),
+                                            disabled: !summaryAvailable,
+                                            hint: t(
+                                              "summary.unavailable.tooltip",
+                                            ),
+                                            onSelect: () => {
+                                              void loadFullEntry(item.id).then(
+                                                (entry) => {
+                                                  if (entry) {
+                                                    setSummaryEntry(entry);
+                                                  }
+                                                },
+                                              );
+                                            },
+                                          },
+                                        ].filter(Boolean) as RowActionItem[]
+                                      }
                                     />
                                   )}
-                                  {item.status !== "processing" && (
-                                    <button
-                                      onClick={() => deleteEntry(item.id)}
-                                      className="btn btn-danger"
-                                      style={{
-                                        width: 32,
-                                        minWidth: 32,
-                                        height: 32,
-                                        minHeight: 32,
-                                        padding: 0,
-                                        flexShrink: 0,
-                                        borderRadius: 8,
-                                      }}
-                                      title={t("mainTab.delete")}
-                                    >
-                                      <IconTrash size={12} stroke={2} />
-                                    </button>
-                                  )}
+                                  {item.status !== "processing" &&
+                                    item.status !== "recording" && (
+                                      <button
+                                        onClick={() => deleteEntry(item.id)}
+                                        className="btn btn-danger"
+                                        style={{
+                                          width: 32,
+                                          minWidth: 32,
+                                          height: 32,
+                                          minHeight: 32,
+                                          padding: 0,
+                                          flexShrink: 0,
+                                          borderRadius: 8,
+                                        }}
+                                        title={t("mainTab.delete")}
+                                      >
+                                        <IconTrash size={12} stroke={2} />
+                                      </button>
+                                    )}
                                 </div>
                               </div>
                             </td>
@@ -1693,7 +1762,10 @@ export function MainTab({
                   }}
                 >
                   {t("mainTab.showMoreHistory", {
-                    count: Math.min(HISTORY_RENDER_INCREMENT, hiddenHistoryCount),
+                    count: Math.min(
+                      HISTORY_RENDER_INCREMENT,
+                      hiddenHistoryCount,
+                    ),
                   })}
                 </button>
               )}

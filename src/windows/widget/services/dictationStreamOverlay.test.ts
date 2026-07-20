@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  createCallLiveDictationOptions,
   createNativeLiveDictationOptions,
   createDictationOverlayState,
   dictationOverlayStateFromStreamUpdate,
   isCloudSttStreamingEnabled,
   isLocalSttStreamingEnabled,
+  resolveLiveDictationRuntimeEndpoint,
   shouldApplyDictationStreamUpdate,
 } from "./dictationStreamOverlay";
 import type { AppSettings } from "../../../lib/store";
@@ -106,8 +108,47 @@ describe("dictation stream overlay state", () => {
     ).toBeNull();
   });
 
+  test("uses an installed streaming model for call preview when the final local model is batch-only", () => {
+    const settings = {
+      useOwnKey: true,
+      whisperEndpoint: "http://127.0.0.1:8000",
+      whisperModel: "ai-sage/GigaAM-v3",
+      language: "ru",
+      realtimeTranscriptionEnabled: true,
+      localModels: {
+        "gigaam-v3-e2e-rnnt": { status: "downloaded" },
+        "nemotron-35-asr-streaming-06b": { status: "downloaded" },
+      },
+    } as AppSettings;
+
+    expect(createNativeLiveDictationOptions(settings, "dictation")).toBeNull();
+    expect(createCallLiveDictationOptions(settings, "call")).toEqual({
+      requestId: "call",
+      provider: "local",
+      apiKey: "",
+      model: "nvidia/nemotron-3.5-asr-streaming-0.6b",
+      language: "ru",
+      endpoint: "http://127.0.0.1:8000",
+      streamingEnabled: true,
+    });
+  });
+
+  test("uses the effective managed runtime endpoint returned by warm-up", () => {
+    expect(
+      resolveLiveDictationRuntimeEndpoint(
+        "http://127.0.0.1:8000",
+        "http://127.0.0.1:18018",
+      ),
+    ).toBe("http://127.0.0.1:18018");
+    expect(
+      resolveLiveDictationRuntimeEndpoint("http://127.0.0.1:8000", null),
+    ).toBe("http://127.0.0.1:8000");
+  });
+
   test("enables an API streaming model after its exact configuration was verified", () => {
-    const adapter = STREAMING_STT_ADAPTERS.find((item) => item.id === "openai")!;
+    const adapter = STREAMING_STT_ADAPTERS.find(
+      (item) => item.id === "openai",
+    )!;
     const values = {
       apiKey: "secret",
       model: "gpt-realtime-whisper",
@@ -146,13 +187,15 @@ describe("dictation stream overlay state", () => {
       },
     } as AppSettings;
 
-    expect(createNativeLiveDictationOptions(settings, "req-api")).toMatchObject({
-      requestId: "req-api",
-      provider: "openai",
-      model: "gpt-realtime-whisper",
-      endpoint: "https://api.openai.com",
-      streamingEnabled: true,
-    });
+    expect(createNativeLiveDictationOptions(settings, "req-api")).toMatchObject(
+      {
+        requestId: "req-api",
+        provider: "openai",
+        model: "gpt-realtime-whisper",
+        endpoint: "https://api.openai.com",
+        streamingEnabled: true,
+      },
+    );
   });
 
   test("enables cloud realtime transcription with the device token", () => {

@@ -36,8 +36,12 @@ function extractTokenFromUrl(url: string): string | null {
 
 export function UserPanel() {
   const { t, lang } = useI18n();
-  const [profile, setProfile] = useState<CloudProfile | null | undefined>(() => getCachedCloudProfile());
-  const [loading, setLoading] = useState(() => getCachedCloudProfile() === undefined);
+  const [profile, setProfile] = useState<CloudProfile | null | undefined>(() =>
+    getCachedCloudProfile(),
+  );
+  const [loading, setLoading] = useState(
+    () => getCachedCloudProfile() === undefined,
+  );
   const [waitingForAuth, setWaitingForAuth] = useState(false);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const exchangeCodeRef = useRef<string | null>(null);
@@ -58,17 +62,23 @@ export function UserPanel() {
     clearLocalAuthPolling();
   }, [clearLocalAuthPolling]);
 
-  const applyAuthTokenForCurrentFlow = useCallback(async (token: string): Promise<CloudProfile | null> => {
-    const flowId = authFlowRef.current;
-    if (!isCloudAuthFlowActive(flowId)) {
-      logInfo("USER_PANEL", "Ignoring auth token without an active local auth flow");
-      return null;
-    }
+  const applyAuthTokenForCurrentFlow = useCallback(
+    async (token: string): Promise<CloudProfile | null> => {
+      const flowId = authFlowRef.current;
+      if (!isCloudAuthFlowActive(flowId)) {
+        logInfo(
+          "USER_PANEL",
+          "Ignoring auth token without an active local auth flow",
+        );
+        return null;
+      }
 
-    const data = await handleAuthToken(token, { authFlowId: flowId });
-    clearLocalAuthPolling();
-    return data;
-  }, [clearLocalAuthPolling]);
+      const data = await handleAuthToken(token, { authFlowId: flowId });
+      clearLocalAuthPolling();
+      return data;
+    },
+    [clearLocalAuthPolling],
+  );
 
   const loadProfile = useCallback(async () => {
     if (getCachedCloudProfile() === undefined) {
@@ -168,14 +178,22 @@ export function UserPanel() {
       return;
     }
 
-    logInfo("USER_PANEL", `Starting auth polling with code: ${exchangeCodeRef.current?.slice(0, 8)}...`);
+    logInfo(
+      "USER_PANEL",
+      `Starting auth polling with code: ${exchangeCodeRef.current?.slice(0, 8)}...`,
+    );
     pollingRef.current = setInterval(async () => {
       const code = exchangeCodeRef.current;
       const flowId = authFlowRef.current;
       if (!code || !isCloudAuthFlowActive(flowId)) return;
 
       const token = await pollForToken(code);
-      if (token && exchangeCodeRef.current === code && authFlowRef.current === flowId && isCloudAuthFlowActive(flowId)) {
+      if (
+        token &&
+        exchangeCodeRef.current === code &&
+        authFlowRef.current === flowId &&
+        isCloudAuthFlowActive(flowId)
+      ) {
         logInfo("USER_PANEL", "Auth polling: token received!");
         const data = await handleAuthToken(token, { authFlowId: flowId });
         if (data) {
@@ -248,7 +266,9 @@ export function UserPanel() {
         {profile.wallet?.low && (
           <button onClick={handleActivate} style={styles.compactCta}>
             <IconCrown size={13} stroke={2} color="var(--accent-contrast)" />
-            <span style={styles.compactCtaLabel}>{t("userPanel.upgradeToPro")}</span>
+            <span style={styles.compactCtaLabel}>
+              {t("userPanel.upgradeToPro")}
+            </span>
           </button>
         )}
       </div>
@@ -262,7 +282,9 @@ export function UserPanel() {
         <ProfileRow profile={profile} onLogout={handleLogout} />
         <button onClick={handleActivate} style={styles.compactCta}>
           <IconCrown size={13} stroke={2} color="var(--accent-contrast)" />
-          <span style={styles.compactCtaLabel}>{t("userPanel.upgradeToPro")}</span>
+          <span style={styles.compactCtaLabel}>
+            {t("userPanel.upgradeToPro")}
+          </span>
         </button>
       </div>
     );
@@ -284,7 +306,13 @@ function formatCloudBalance(value: string, locale: string): string {
   }
 }
 
-function ProfileRow({ profile, onLogout }: { profile: CloudProfile; onLogout: () => void }) {
+function ProfileRow({
+  profile,
+  onLogout,
+}: {
+  profile: CloudProfile;
+  onLogout: () => void;
+}) {
   const { t } = useI18n();
   return (
     <div style={styles.profileRow}>
@@ -293,7 +321,12 @@ function ProfileRow({ profile, onLogout }: { profile: CloudProfile; onLogout: ()
           <img
             src={profile.user.avatarUrl}
             alt=""
-            style={{ width: "100%", height: "100%", borderRadius: "50%", objectFit: "cover" }}
+            style={{
+              width: "100%",
+              height: "100%",
+              borderRadius: "50%",
+              objectFit: "cover",
+            }}
           />
         ) : (
           <IconUser size={16} stroke={1.5} color="var(--text-low)" />
@@ -305,7 +338,11 @@ function ProfileRow({ profile, onLogout }: { profile: CloudProfile; onLogout: ()
         </div>
         <div style={styles.profileEmail}>{profile.user.email}</div>
       </div>
-      <button onClick={onLogout} style={styles.logoutButton} title={t("userPanel.logout")}>
+      <button
+        onClick={onLogout}
+        style={styles.logoutButton}
+        title={t("userPanel.logout")}
+      >
         <IconLogout size={14} stroke={1.8} />
       </button>
     </div>
@@ -318,7 +355,14 @@ function SubscriptionCTA({ onActivate }: { onActivate: () => void }) {
     <div style={styles.ctaBox}>
       <div style={styles.ctaHeader}>
         <IconCrown size={14} stroke={2} color="var(--text-hi)" />
-        <span style={{ fontWeight: 700, fontSize: 12, letterSpacing: "-0.02em", color: "var(--text-hi)" }}>
+        <span
+          style={{
+            fontWeight: 700,
+            fontSize: 12,
+            letterSpacing: "-0.02em",
+            color: "var(--text-hi)",
+          }}
+        >
           {t("userPanel.cta.title")}
         </span>
       </div>
@@ -327,7 +371,6 @@ function SubscriptionCTA({ onActivate }: { onActivate: () => void }) {
         <li>{t("userPanel.cta.feature.unlimited")}</li>
         <li>{t("userPanel.cta.feature.noVpn")}</li>
         <li>{t("userPanel.cta.feature.deviceSync")}</li>
-        <li>{t("userPanel.cta.feature.freeTrial")}</li>
       </ul>
 
       <button onClick={onActivate} style={styles.ctaButton}>
