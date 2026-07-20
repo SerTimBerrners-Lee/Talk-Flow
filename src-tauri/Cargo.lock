@@ -5739,7 +5739,6 @@ dependencies = [
  "hex",
  "hound",
  "include_dir",
- "llama-cpp-2",
  "objc2 0.6.4",
  "objc2-app-kit",
  "objc2-core-audio",
@@ -5771,6 +5770,14 @@ dependencies = [
  "window-vibrancy 0.7.1",
  "windows-sys 0.61.2",
  "x11rb",
+]
+
+[[package]]
+name = "talkis-llm"
+version = "0.4.1"
+dependencies = [
+ "llama-cpp-2",
+ "serde_json",
 ]
 
 [[package]]

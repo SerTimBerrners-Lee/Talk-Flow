@@ -1,4 +1,4 @@
-//! Bundled local LLM runtime (`talkis-llm` sidecar). Mirrors `talkis-stt`: a tiny
+//! Bundled local LLM runtime (`talkis-llm` sidecar). It mirrors `talkis-stt`: a tiny
 //! raw-TCP HTTP server, but backed by llama.cpp (via `llama-cpp-2`) and exposing
 //! an OpenAI-compatible `/v1/chat/completions` endpoint so the desktop app can
 //! run summary locally. The GGUF model path is passed with `-m`.

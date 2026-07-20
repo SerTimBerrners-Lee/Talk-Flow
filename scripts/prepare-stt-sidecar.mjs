@@ -16,9 +16,11 @@ import { fileURLToPath } from "node:url";
 
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const tauriDir = join(rootDir, "src-tauri");
+const llmManifest = join(tauriDir, "sidecars", "talkis-llm", "Cargo.toml");
 const binariesDir = join(tauriDir, "binaries");
 const placeholderContents = "#!/usr/bin/env sh\nexit 1\n";
 const staticMsvcRuntimeArg = "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded";
+const dynamicMsvcRuntimeArg = "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL";
 const commonLibraryDirectories = [
   "/lib",
   "/lib64",
@@ -202,22 +204,56 @@ function copyFileIfChanged(source, destination) {
 
 function appendUniqueArgument(value, argument) {
   const current = value?.trim() || "";
-  if (current.includes(argument)) return current;
+  if (current.split(/\s+/).includes(argument)) return current;
   return [current, argument].filter(Boolean).join(" ");
 }
 
-function cargoBuildEnvironment(targetTriple, sourceEnv = process.env) {
-  const env = { ...sourceEnv };
-  const usesStaticMsvcRuntime =
-    targetTriple.includes("windows-msvc") &&
-    (env.RUSTFLAGS || "").includes("+crt-static");
+function replaceArgument(value, previous, next) {
+  const current = (value || "")
+    .split(/\s+/)
+    .filter(
+      (argument) => argument && argument !== previous && argument !== next,
+    )
+    .join(" ");
+  return appendUniqueArgument(current, next);
+}
 
-  if (usesStaticMsvcRuntime) {
+function setMsvcRustCrtFeature(value, mode) {
+  const withoutCrtFeature = (value || "")
+    .replaceAll("-C target-feature=+crt-static", " ")
+    .replaceAll("-Ctarget-feature=+crt-static", " ")
+    .replaceAll("-C target-feature=-crt-static", " ")
+    .replaceAll("-Ctarget-feature=-crt-static", " ")
+    .trim();
+  const feature =
+    mode === "static"
+      ? "-C target-feature=+crt-static"
+      : "-C target-feature=-crt-static";
+  return appendUniqueArgument(withoutCrtFeature, feature);
+}
+
+function cargoBuildEnvironment(
+  targetTriple,
+  runtimeMode,
+  sourceEnv = process.env,
+) {
+  const env = { ...sourceEnv };
+  if (!targetTriple.includes("windows-msvc")) return env;
+
+  if (runtimeMode === "static") {
+    env.RUSTFLAGS = setMsvcRustCrtFeature(env.RUSTFLAGS, "static");
     env.TRANSCRIBE_CMAKE_ARGS = appendUniqueArgument(
       env.TRANSCRIBE_CMAKE_ARGS,
       staticMsvcRuntimeArg,
     );
-    env.LLAMA_STATIC_CRT = "1";
+  } else if (runtimeMode === "dynamic") {
+    env.RUSTFLAGS = setMsvcRustCrtFeature(env.RUSTFLAGS, "dynamic");
+    env.TRANSCRIBE_CMAKE_ARGS = replaceArgument(
+      env.TRANSCRIBE_CMAKE_ARGS,
+      staticMsvcRuntimeArg,
+      dynamicMsvcRuntimeArg,
+    );
+    env.LLAMA_STATIC_CRT = "0";
   }
 
   return env;
@@ -237,25 +273,47 @@ function removePlaceholder(path) {
 }
 
 if (process.argv.includes("--self-test")) {
-  const dynamicEnv = cargoBuildEnvironment("x86_64-pc-windows-msvc", {
+  const staticEnv = cargoBuildEnvironment("x86_64-pc-windows-msvc", "static", {
     RUSTFLAGS: "",
-  });
-  const staticEnv = cargoBuildEnvironment("x86_64-pc-windows-msvc", {
-    RUSTFLAGS: "-C target-feature=+crt-static",
     TRANSCRIBE_CMAKE_ARGS: "-DTRANSCRIBE_X86_CONSERVATIVE=ON",
   });
+  const dynamicEnv = cargoBuildEnvironment(
+    "x86_64-pc-windows-msvc",
+    "dynamic",
+    {
+      RUSTFLAGS: "-C target-feature=+crt-static",
+      TRANSCRIBE_CMAKE_ARGS: staticMsvcRuntimeArg,
+      LLAMA_STATIC_CRT: "1",
+    },
+  );
 
-  if (dynamicEnv.TRANSCRIBE_CMAKE_ARGS) {
-    throw new Error("Dynamic MSVC self-test unexpectedly forced a static CRT");
-  }
   if (!staticEnv.TRANSCRIBE_CMAKE_ARGS.includes(staticMsvcRuntimeArg)) {
     throw new Error(
       "Static MSVC self-test did not configure transcribe.cpp for /MT",
     );
   }
-  if (staticEnv.LLAMA_STATIC_CRT !== "1") {
+  if (!staticEnv.RUSTFLAGS.includes("+crt-static")) {
+    throw new Error("Static MSVC self-test did not configure Rust for /MT");
+  }
+  if (dynamicEnv.RUSTFLAGS.includes("+crt-static")) {
+    throw new Error("Dynamic MSVC self-test retained Rust's static CRT");
+  }
+  if (!dynamicEnv.RUSTFLAGS.includes("-crt-static")) {
+    throw new Error("Dynamic MSVC self-test did not configure Rust for /MD");
+  }
+  if (!dynamicEnv.TRANSCRIBE_CMAKE_ARGS.includes(dynamicMsvcRuntimeArg)) {
     throw new Error(
-      "Static MSVC self-test did not configure llama.cpp for /MT",
+      "Dynamic MSVC self-test did not configure native code for /MD",
+    );
+  }
+  if (
+    dynamicEnv.TRANSCRIBE_CMAKE_ARGS.split(/\s+/).includes(staticMsvcRuntimeArg)
+  ) {
+    throw new Error("Dynamic MSVC self-test retained native code's static CRT");
+  }
+  if (dynamicEnv.LLAMA_STATIC_CRT !== "0") {
+    throw new Error(
+      "Dynamic MSVC self-test did not configure llama.cpp for /MD",
     );
   }
   console.log("STT sidecar build-environment self-test passed");
@@ -264,19 +322,35 @@ if (process.argv.includes("--self-test")) {
 
 const targetTriple = readTargetTriple();
 ensureLinuxBuildDependencies(targetTriple);
-const cargoEnv = cargoBuildEnvironment(targetTriple);
+const sttCargoEnv = cargoBuildEnvironment(targetTriple, "static");
+const llmCargoEnv = cargoBuildEnvironment(targetTriple, "dynamic");
 
 const extension = targetTriple.includes("windows") ? ".exe" : "";
 const profile = process.env.TALKIS_STT_RELEASE === "1" ? "release" : "debug";
 const sidecars = ["talkis-stt", "talkis-diarize", "talkis-llm"];
-const cargoArgs = ["build", "--manifest-path", join(tauriDir, "Cargo.toml")];
-
-for (const sidecar of sidecars) {
-  cargoArgs.push("--bin", sidecar);
-}
+const baseCargoArgs = [
+  "build",
+  "--manifest-path",
+  join(tauriDir, "Cargo.toml"),
+];
+const sttCargoArgs = [
+  ...baseCargoArgs,
+  "--bin",
+  "talkis-stt",
+  "--bin",
+  "talkis-diarize",
+];
+const llmCargoArgs = [
+  "build",
+  "--manifest-path",
+  llmManifest,
+  "--bin",
+  "talkis-llm",
+];
 
 if (profile === "release") {
-  cargoArgs.push("--release");
+  sttCargoArgs.push("--release");
+  llmCargoArgs.push("--release");
 }
 
 mkdirSync(binariesDir, { recursive: true });
@@ -293,7 +367,14 @@ for (const sidecar of sidecars) {
 }
 
 try {
-  execFileSync("cargo", cargoArgs, { env: cargoEnv, stdio: "inherit" });
+  execFileSync("cargo", sttCargoArgs, {
+    env: sttCargoEnv,
+    stdio: "inherit",
+  });
+  execFileSync("cargo", llmCargoArgs, {
+    env: llmCargoEnv,
+    stdio: "inherit",
+  });
 } catch (error) {
   for (const sidecar of sidecars) {
     removePlaceholder(

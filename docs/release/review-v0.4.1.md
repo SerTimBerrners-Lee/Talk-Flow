@@ -49,6 +49,9 @@
   - TypeScript and `cargo check` passed.
   - Hotkey smoke tests passed, `6/6`.
   - Vite production build passed.
+- `cargo check --manifest-path src-tauri/Cargo.toml --workspace`: passed with the isolated `talkis-llm` workspace crate.
+- `cargo test --manifest-path src-tauri/sidecars/talkis-llm/Cargo.toml --bin talkis-llm`: passed; the runtime currently has no unit tests, and compilation/linking completed successfully on macOS.
+- `bun scripts/prepare-stt-sidecar.mjs --self-test`: passed for the split Windows `/MT` STT and `/MD` LLM build environments.
 - `cargo test --manifest-path src-tauri/Cargo.toml --lib`: passed, `107/107` active tests; one installed-model NLLB test is ignored by default.
 - `cargo test --manifest-path src-tauri/Cargo.toml --bin talkis-stt`: passed, `15/15`.
 - Focused tray and shutdown tests: passed, `2/2`.
@@ -64,7 +67,8 @@
   - All `tauri dev` and managed runtime processes were stopped before the successful clean release build to avoid the known shared-staging race.
   - macOS postprocessing now recreates and signs the updater archive after applying the stable ad-hoc application identifier. The app extracted from `.app.tar.gz` passes strict `codesign` verification with `Identifier=com.trixter.talkis`.
   - `hdiutil verify` reports the final DMG checksum as valid.
-  - Final SHA-256: DMG `0a9b0732997b711e3510e987454f24aa42d83285e4ef5c25569ca1d337b96d40`; updater archive `ee5abff3291dc7f8618510cf3472fe6abc184f2a5f63f8a311887148c604fa4c`.
+  - The signed build was repeated after moving `talkis-llm` into its isolated workspace crate; strict app verification and DMG verification passed with every bundled sidecar present.
+  - Final SHA-256: DMG `622f6074f012a2b76671d627cf0d1b990a7c2503b824c082fa169d84ee0290cb`; updater archive `5222fdef3fa44635caa810f17958fa5f48ecb9d9a9e98cef700509736b367e4c`.
   - GitHub preflight and release workflows now pass updater signing credentials to the macOS postprocess step.
   - GitHub preflight and release workflows now run the Windows x64 architecture verifier after bundling; the published stable Windows installer also receives a `.sha256` file.
 - GitHub Release Preflight run `29779118499` on commit `8e2a40a`: Linux and macOS passed; Windows failed at the new PE architecture gate because `talkis-stt.exe` was still a placeholder after its static-CRT link failed.
@@ -72,7 +76,10 @@
   - The corrective patch aligns transcribe.cpp's MSVC runtime with Rust/CTranslate2 `/MT`, removes placeholders after failed sidecar builds, and runs release checks through one fail-fast command so PowerShell cannot mask an earlier native-command failure.
 - GitHub Release Preflight run `29782225252` on commit `aee8809`: Linux and macOS passed; Windows now failed fast during release checks instead of packaging placeholders.
   - The transcribe.cpp runtime mismatch was fixed; the remaining link failure was isolated to `talkis-llm.exe`, because `llama-cpp-sys-2` requires its independent `LLAMA_STATIC_CRT=1` build setting.
-  - The complete correction now keeps the static transcribe.cpp and llama.cpp CRT settings active across release checks, sidecar preparation, and the final Tauri bundle build.
+  - The attempted correction kept both native CRT settings active across release checks, sidecar preparation, and the final Tauri bundle build; the next run showed that llama.cpp still overrode its setting.
+- GitHub Release Preflight run `29783890745` on commit `fe0daff`: Linux and macOS passed; Windows confirmed that `LLAMA_STATIC_CRT=1` alone is insufficient because llama.cpp's CMake targets still append `/MD` after cmake-rs flags.
+  - The follow-up isolates `talkis-llm` in its own workspace crate and build invocation. STT, diarization, the main app, and CTranslate2 use the static CRT; the independent LLM sidecar uses the dynamic CRT consistently across Rust and llama.cpp.
+  - This also prevents the main Tauri application and non-LLM sidecars from compiling unused llama.cpp code.
 - Exact-commit Release Preflight after the Windows corrective patch: pending.
 - Additional manual checks:
   - The exact reported multi-sentence translation regression was reproduced as an installed-model integration test and now passes.

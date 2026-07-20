@@ -8,7 +8,7 @@ const staticMsvcRuntimeArg = "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded";
 
 function appendUniqueArgument(value, argument) {
   const current = value?.trim() || "";
-  if (current.includes(argument)) return current;
+  if (current.split(/\s+/).includes(argument)) return current;
   return [current, argument].filter(Boolean).join(" ");
 }
 
@@ -53,7 +53,6 @@ if (platform === "windows") {
     env.TRANSCRIBE_CMAKE_ARGS,
     staticMsvcRuntimeArg,
   );
-  env.LLAMA_STATIC_CRT = "1";
 }
 
 if (platform === "macos") {

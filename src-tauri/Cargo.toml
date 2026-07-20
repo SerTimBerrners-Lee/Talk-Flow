@@ -7,6 +7,16 @@ license = "AGPL-3.0-or-later"
 edition = "2021"
 default-run = "talkis"
 
+[workspace]
+members = ["sidecars/talkis-llm"]
+default-members = ["."]
+resolver = "2"
+
+[workspace.package]
+version = "0.4.1"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+
 [lib]
 name = "talkis_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
@@ -44,13 +54,8 @@ hound = "3.5.1"
 tauri-plugin-dialog = "2"
 handy-keys = "0.2.4"
 ct2rs = { version = "0.9.19", default-features = false, features = ["all-tokenizers", "ruy"] }
-# Local LLM runtime engine (talkis-llm sidecar) — llama.cpp bindings, compiled
-# and bundled with the app like transcribe-cpp. Metal acceleration added on macOS.
-llama-cpp-2 = { version = "0.1.150", default-features = false, features = ["openmp", "sampler"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-# Adds Metal GPU acceleration to the bundled local LLM runtime on macOS.
-llama-cpp-2 = { version = "0.1.150", default-features = false, features = ["metal"] }
 transcribe-cpp = { version = "0.1.1", default-features = false, features = ["metal"] }
 block2 = "0.6"
 objc2 = "0.6"
