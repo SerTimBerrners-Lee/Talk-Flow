@@ -217,6 +217,7 @@ function cargoBuildEnvironment(targetTriple, sourceEnv = process.env) {
       env.TRANSCRIBE_CMAKE_ARGS,
       staticMsvcRuntimeArg,
     );
+    env.LLAMA_STATIC_CRT = "1";
   }
 
   return env;
@@ -250,6 +251,11 @@ if (process.argv.includes("--self-test")) {
   if (!staticEnv.TRANSCRIBE_CMAKE_ARGS.includes(staticMsvcRuntimeArg)) {
     throw new Error(
       "Static MSVC self-test did not configure transcribe.cpp for /MT",
+    );
+  }
+  if (staticEnv.LLAMA_STATIC_CRT !== "1") {
+    throw new Error(
+      "Static MSVC self-test did not configure llama.cpp for /MT",
     );
   }
   console.log("STT sidecar build-environment self-test passed");

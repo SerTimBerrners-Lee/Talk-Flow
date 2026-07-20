@@ -45,6 +45,8 @@ jobs:
       TALKIS_UPDATER_PLATFORM: ${{ matrix.updater_platform }}
       RELEASE_LABEL: ${{ github.event.inputs.release_tag || github.ref_name }}
       RUSTFLAGS: ${{ matrix.platform == 'windows' && '-C target-feature=+crt-static' || '' }}
+      TRANSCRIBE_CMAKE_ARGS: ${{ matrix.platform == 'windows' && '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded' || '' }}
+      LLAMA_STATIC_CRT: ${{ matrix.platform == 'windows' && '1' || '' }}
 
     steps:
       - name: Checkout repository

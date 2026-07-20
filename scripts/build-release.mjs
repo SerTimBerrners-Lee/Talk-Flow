@@ -4,6 +4,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
+const staticMsvcRuntimeArg = "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded";
+
+function appendUniqueArgument(value, argument) {
+  const current = value?.trim() || "";
+  if (current.includes(argument)) return current;
+  return [current, argument].filter(Boolean).join(" ");
+}
 
 function detectPlatform() {
   if (process.platform === "darwin") return "macos";
@@ -39,6 +46,14 @@ if (platform === "windows" && !(env.RUSTFLAGS || "").includes("+crt-static")) {
   env.RUSTFLAGS = [env.RUSTFLAGS, "-C target-feature=+crt-static"]
     .filter(Boolean)
     .join(" ");
+}
+
+if (platform === "windows") {
+  env.TRANSCRIBE_CMAKE_ARGS = appendUniqueArgument(
+    env.TRANSCRIBE_CMAKE_ARGS,
+    staticMsvcRuntimeArg,
+  );
+  env.LLAMA_STATIC_CRT = "1";
 }
 
 if (platform === "macos") {

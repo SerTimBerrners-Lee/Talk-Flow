@@ -70,6 +70,9 @@
 - GitHub Release Preflight run `29779118499` on commit `8e2a40a`: Linux and macOS passed; Windows failed at the new PE architecture gate because `talkis-stt.exe` was still a placeholder after its static-CRT link failed.
   - The gate prevented the invalid Windows payload from being published.
   - The corrective patch aligns transcribe.cpp's MSVC runtime with Rust/CTranslate2 `/MT`, removes placeholders after failed sidecar builds, and runs release checks through one fail-fast command so PowerShell cannot mask an earlier native-command failure.
+- GitHub Release Preflight run `29782225252` on commit `aee8809`: Linux and macOS passed; Windows now failed fast during release checks instead of packaging placeholders.
+  - The transcribe.cpp runtime mismatch was fixed; the remaining link failure was isolated to `talkis-llm.exe`, because `llama-cpp-sys-2` requires its independent `LLAMA_STATIC_CRT=1` build setting.
+  - The complete correction now keeps the static transcribe.cpp and llama.cpp CRT settings active across release checks, sidecar preparation, and the final Tauri bundle build.
 - Exact-commit Release Preflight after the Windows corrective patch: pending.
 - Additional manual checks:
   - The exact reported multi-sentence translation regression was reproduced as an installed-model integration test and now passes.
