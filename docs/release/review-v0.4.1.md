@@ -80,7 +80,9 @@
 - GitHub Release Preflight run `29783890745` on commit `fe0daff`: Linux and macOS passed; Windows confirmed that `LLAMA_STATIC_CRT=1` alone is insufficient because llama.cpp's CMake targets still append `/MD` after cmake-rs flags.
   - The follow-up isolates `talkis-llm` in its own workspace crate and build invocation. STT, diarization, the main app, and CTranslate2 use the static CRT; the independent LLM sidecar uses the dynamic CRT consistently across Rust and llama.cpp.
   - This also prevents the main Tauri application and non-LLM sidecars from compiling unused llama.cpp code.
-- Exact-commit Release Preflight after the Windows corrective patch: pending.
+- GitHub Release Preflight run `29786671948` on commit `098d6d1`: macOS, Linux, and Windows passed.
+  - Windows compiled and linked the static-CRT STT/diarization phase and the isolated dynamic-CRT LLM phase, then built the NSIS installer successfully.
+  - The architecture gate verified `Talkis.exe` and every bundled sidecar, including `talkis-stt.exe` and `talkis-llm.exe`, as AMD64 PE binaries.
 - Additional manual checks:
   - The exact reported multi-sentence translation regression was reproduced as an installed-model integration test and now passes.
   - The configured GigaAM GGUF URL responds and reports the expected 183,948,704-byte artifact.
@@ -97,7 +99,7 @@
 ## Findings
 
 - Blockers:
-  - Require green `Preflight macos`, `Preflight windows`, and `Preflight linux` checks on the exact corrected release commit before merging or tagging.
+  - None.
 - Accepted release risk:
   - The existing P1 cloud-recognition incident `talkis-pc-5vt` remains open: realtime returns HTTP 400 and batch currently reaches a cloud-billing 503. The user explicitly accepted this known risk for `v0.4.1`; the release does not claim a cloud-STT fix.
 - Non-blocking issues:
@@ -110,6 +112,6 @@
 
 ## Decision
 
-- Ready for `main` merge: no.
-- Release preflight green on exact tag commit: no.
-- Ready for tag publish: no.
+- Ready for `main` merge: yes.
+- Release preflight green on the reviewed implementation commit: yes.
+- Ready for tag publish: yes, after the mandatory exact-commit preflight check on this final review commit.
