@@ -42,6 +42,14 @@ It is designed for practical daily work: IDEs, chats, notes, CRM fields, email, 
 
 ## Latest Changes
 
+### v0.4.2
+
+- Added a guided first-run flow that grants permissions, downloads and activates a local STT model, and verifies dictation with the configured global hotkey before setup completes.
+- Unified dictation hotkey controls and live key previews across onboarding and Settings, while keeping apply-without-restart behavior and conflict handling.
+- Reused one local-model card pattern across onboarding and Settings, and added a way to deselect the active local text model without deleting its downloaded file.
+- Added managed OPUS-MT English-to-Russian translation, reverse-pair fallback selection, and removal of model reasoning blocks from selected-text translation results.
+- Hardened microphone routing for voice and call capture, prevented batch-only local STT models from inheriting API streaming capability, and fixed onboarding when an empty recording produces no transcript.
+
 ### v0.4.1
 
 - Added GigaAM v3 E2E RNNT as a managed local Russian speech-recognition model, with short file-transcription chunks matched to the model's 25-second window.
