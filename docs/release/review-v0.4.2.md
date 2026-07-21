@@ -51,9 +51,10 @@
   - Strict recursive `codesign` verification passed with `Identifier=com.trixter.talkis`.
   - `hdiutil verify` reports the final DMG checksum as valid.
   - SHA-256: DMG `f355b730161c5f7d36752f673d39e0d5c0964d1466ab57a00eadb86cc5d1cf07`; updater archive `b3cca3a7f42e571fba37b2eb234a988714b87391154447132cc37215d6c15bbf`; signature file `6d95237eba6599922ae09b1de1191bb222d529d24ac19b843a850afd07068808`.
-- GitHub Release Preflight: pending for the exact final release commit.
-- Native/GitHub Windows build: pending Release Preflight.
-- Native/GitHub Linux build: pending Release Preflight.
+- GitHub Release Preflight run `29859133520` on commit `dd0e252`: passed for `Preflight macos`, `Preflight windows`, and `Preflight linux`.
+  - The review-result-only commit created after this run must receive the same exact-commit preflight before merge or tag.
+- Native/GitHub Windows build: passed in Release Preflight run `29859133520`, including the x86-64 PE architecture gate for the app and bundled sidecars.
+- Native/GitHub Linux build: passed in Release Preflight run `29859133520` on Ubuntu 24.04 with PipeWire development dependencies installed.
 - Additional manual checks:
   - Reviewed the complete `v0.4.1..release/v0.4.2` diff and the onboarding terminal-event fix recorded as `talkis-pc-d62`.
   - No OS-level microphone, permission-dialog, or global-hotkey session was run during this release pass; automated state, routing, and hotkey checks are green.
@@ -69,7 +70,7 @@
 ## Findings
 
 - Blockers:
-  - Do not merge or tag until `Preflight macos`, `Preflight windows`, and `Preflight linux` are green on the exact final release commit.
+  - Do not merge or tag until the review-result-only commit receives green `Preflight macos`, `Preflight windows`, and `Preflight linux` checks.
 - Non-blocking issues:
   - `talkis-pc-884`: Vite reports a mixed static/dynamic `SummaryModal.tsx` import and an 893.69 kB main JavaScript chunk.
   - Bun 1.2.13 full-suite auto-discovery intermittently exhausts file descriptors on this removable-volume workspace; explicit focused invocations and the release smoke suite pass.
@@ -79,6 +80,6 @@
 
 ## Decision
 
-- Ready for `main` merge: no, pending exact-commit Release Preflight.
-- Release preflight green on exact tag commit: pending.
-- Ready for tag publish: no, pending exact-commit Release Preflight.
+- Ready for `main` merge: yes after exact-commit Release Preflight passes on this review update.
+- Release preflight green on reviewed implementation commit: yes, run `29859133520` on `dd0e252`.
+- Ready for tag publish: yes after the same final exact-commit gate passes.
