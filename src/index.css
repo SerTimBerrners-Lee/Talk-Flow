@@ -131,11 +131,14 @@
   --shadow-modal: 0 18px 50px rgba(0, 0, 0, 0.58);
 }
 
-*, *::before, *::after {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
-html, body {
+html,
+body {
   height: 100%;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
@@ -165,8 +168,17 @@ select {
   color: var(--text-hi);
   background:
     radial-gradient(circle at top left, var(--app-gradient-a), transparent 30%),
-    radial-gradient(circle at right 20%, var(--app-gradient-b), transparent 24%),
-    linear-gradient(180deg, var(--app-gradient-start) 0%, var(--bg) 42%, var(--app-gradient-end) 100%);
+    radial-gradient(
+      circle at right 20%,
+      var(--app-gradient-b),
+      transparent 24%
+    ),
+    linear-gradient(
+      180deg,
+      var(--app-gradient-start) 0%,
+      var(--bg) 42%,
+      var(--app-gradient-end) 100%
+    );
   border-radius: var(--radius-app);
   clip-path: inset(0 round var(--radius-app));
   overflow: hidden;
@@ -309,6 +321,75 @@ select {
   transform: translateY(0);
 }
 
+.hotkey-keycap {
+  min-width: 30px;
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: var(--surface-hi);
+  color: var(--text-hi);
+  font-size: 11px;
+  box-shadow:
+    0 2px 0 var(--border-strong),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  transform: translateY(0) scale(1);
+  transition:
+    transform 0.14s var(--ease-standard),
+    background-color 0.14s ease,
+    border-color 0.14s ease,
+    color 0.14s ease,
+    box-shadow 0.14s ease;
+}
+
+.hotkey-keycap.is-large {
+  min-width: 48px;
+  min-height: 48px;
+  padding: 0 16px;
+  border-radius: 11px;
+  font-size: 14px;
+  box-shadow:
+    0 3px 0 var(--border-strong),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+.hotkey-keycap.is-pressed {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  box-shadow:
+    0 5px 14px rgba(0, 0, 0, 0.2),
+    0 0 0 4px rgba(15, 118, 110, 0.1);
+  transform: translateY(-2px) scale(1.12);
+}
+
+.onboarding-test-spinner {
+  animation: spin 1s linear infinite;
+}
+
+.onboarding-success-reveal {
+  animation: onboarding-success-reveal 0.42s var(--ease-standard) both;
+}
+
+.onboarding-confetti {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+
+.onboarding-confetti-particle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 8px;
+  height: 14px;
+  border-radius: 2px;
+  opacity: 0;
+  animation: onboarding-confetti-burst 1.35s var(--ease-standard) both;
+}
+
 .btn-primary {
   background: var(--surface-inverse);
   border-color: var(--surface-inverse);
@@ -364,7 +445,9 @@ select {
   font-weight: 400;
   letter-spacing: -0.01em;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
   color: var(--text-mid);
   border: none;
   user-select: none;
@@ -438,8 +521,11 @@ select {
 
 .stats-glass-card {
   position: relative;
-  background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.26), rgba(255, 255, 255, 0.07));
+  background: linear-gradient(
+    145deg,
+    rgba(255, 255, 255, 0.26),
+    rgba(255, 255, 255, 0.07)
+  );
   border: 1px solid transparent;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.68),
@@ -480,8 +566,11 @@ select {
 }
 
 :root[data-theme="dark"] .stats-glass-card {
-  background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.085), rgba(255, 255, 255, 0.025));
+  background: linear-gradient(
+    145deg,
+    rgba(255, 255, 255, 0.085),
+    rgba(255, 255, 255, 0.025)
+  );
   border-color: transparent;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.13),
@@ -500,6 +589,20 @@ select {
   .main-hero-slide {
     animation: none;
   }
+
+  .hotkey-keycap {
+    transition: none;
+  }
+
+  .onboarding-test-spinner,
+  .onboarding-success-reveal,
+  .onboarding-confetti-particle {
+    animation: none;
+  }
+
+  .onboarding-confetti-particle {
+    display: none;
+  }
 }
 
 ::-webkit-scrollbar {
@@ -517,8 +620,40 @@ select {
 }
 
 @keyframes slide-down {
-  from { opacity: 0; transform: translateY(-8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes onboarding-success-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes onboarding-confetti-burst {
+  0% {
+    opacity: 0;
+    transform: translate3d(-50%, 4px, 0) rotate(0deg) scale(0.65);
+  }
+  12% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--confetti-x), var(--confetti-y), 0)
+      rotate(var(--confetti-rotation)) scale(1);
+  }
 }
 
 @keyframes widget-pill-morph-in {
@@ -533,12 +668,19 @@ select {
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 0.45; }
-  50% { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @keyframes loading-spinner-rotate {
@@ -586,12 +728,21 @@ select {
 }
 
 @keyframes voice-logo-pulse {
-  0%, 100% { transform: scaleY(1); opacity: 1; }
-  50% { transform: scaleY(0.58); opacity: 0.7; }
+  0%,
+  100% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scaleY(0.58);
+    opacity: 0.7;
+  }
 }
 
 @keyframes widget-processing-dot {
-  0%, 80%, 100% {
+  0%,
+  80%,
+  100% {
     transform: translateY(0);
     opacity: 0.38;
   }
@@ -653,8 +804,20 @@ select {
 }
 
 .flow-recording-widget svg {
-  -webkit-mask-image: linear-gradient(90deg, transparent, #000 22%, #000 78%, transparent);
-  mask-image: linear-gradient(90deg, transparent, #000 22%, #000 78%, transparent);
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    transparent,
+    #000 22%,
+    #000 78%,
+    transparent
+  );
+  mask-image: linear-gradient(
+    90deg,
+    transparent,
+    #000 22%,
+    #000 78%,
+    transparent
+  );
   opacity: var(--widget-wave-opacity);
   transform: scaleY(var(--widget-wave-scale));
   transform-origin: center;

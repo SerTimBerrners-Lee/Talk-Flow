@@ -7,6 +7,7 @@ import {
   dictationOverlayStateFromStreamUpdate,
   isCloudSttStreamingEnabled,
   isLocalSttStreamingEnabled,
+  isSttStreamingEnabled,
   resolveLiveDictationRuntimeEndpoint,
   shouldApplyDictationStreamUpdate,
 } from "./dictationStreamOverlay";
@@ -106,6 +107,40 @@ describe("dictation stream overlay state", () => {
         "req-3",
       ),
     ).toBeNull();
+  });
+
+  test("does not inherit API streaming capability for a batch-only local model", () => {
+    const adapter = STREAMING_STT_ADAPTERS.find(
+      (item) => item.id === "openai",
+    )!;
+    const apiValues = {
+      apiKey: "secret",
+      model: "gpt-realtime-whisper",
+      endpoint: "",
+    };
+    const fingerprint = realtimeConfigurationFingerprint({
+      provider: "openai",
+      ...apiValues,
+      defaultEndpoint: adapter.defaultEndpoint,
+    });
+    const settings = {
+      useOwnKey: true,
+      whisperEndpoint: "http://127.0.0.1:8000",
+      whisperModel: "whisper-large-v3-turbo",
+      realtimeTranscriptionEnabled: true,
+      selectedApiAdapter: "openai",
+      apiAdapters: {
+        openai: {
+          ...apiValues,
+          connectionStatus: "verified",
+          streamingCapability: "supported",
+          streamingCapabilityFingerprint: fingerprint,
+        },
+      },
+    } as AppSettings;
+
+    expect(isLocalSttStreamingEnabled(settings)).toBe(false);
+    expect(isSttStreamingEnabled(settings)).toBe(false);
   });
 
   test("uses an installed streaming model for call preview when the final local model is batch-only", () => {

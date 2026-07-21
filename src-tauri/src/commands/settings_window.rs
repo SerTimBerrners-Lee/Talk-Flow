@@ -4,6 +4,8 @@ use crate::{logger, media_permissions};
 
 const SETTINGS_NAVIGATE_EVENT: &str = "settings-navigate";
 const APP_UPDATE_CHECK_REQUEST_EVENT: &str = "app-update-check-request";
+#[cfg(debug_assertions)]
+const DEV_ONBOARDING_REQUEST_EVENT: &str = "dev-onboarding-request";
 
 fn show_and_focus_window(win: &tauri::WebviewWindow) {
     if let Err(err) = win.show() {
@@ -102,5 +104,18 @@ pub async fn open_update_check(app: AppHandle) -> Result<(), String> {
         &app,
         "index.html?window=settings&tab=settings&checkUpdate=1",
     )?;
+    Ok(())
+}
+
+#[cfg(debug_assertions)]
+pub async fn open_dev_onboarding(app: AppHandle) -> Result<(), String> {
+    if let Some(win) = app.get_webview_window("settings") {
+        show_and_focus_window(&win);
+        app.emit_to("settings", DEV_ONBOARDING_REQUEST_EVENT, ())
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    create_settings_window(&app, "index.html?window=settings&onboarding=1")?;
     Ok(())
 }

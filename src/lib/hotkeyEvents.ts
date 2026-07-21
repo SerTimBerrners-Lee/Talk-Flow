@@ -9,6 +9,7 @@ export const HOTKEY_CAPTURE_STATE_EVENT = "hotkey-capture-state";
 export const HANDY_HOTKEY_EVENT = "handy-hotkey-event";
 export const SETTINGS_NAVIGATE_EVENT = "settings-navigate";
 export const APP_UPDATE_CHECK_REQUEST_EVENT = "app-update-check-request";
+export const DEV_ONBOARDING_REQUEST_EVENT = "dev-onboarding-request";
 export const CALL_CAPTURE_STOP_REQUEST_EVENT = "call-capture-stop-request";
 export const WIDGET_RETRY_PROCESSING_EVENT = "widget-retry-processing";
 export const PROCESSING_CANCEL_REQUEST_EVENT = "processing-cancel-request";

@@ -23,9 +23,10 @@ import { SettingsTab } from "./tabs/SettingsTab";
 import { SettingsTabs } from "./tabs/SettingsTabs";
 import { DevChatTab } from "./tabs/DevChatTab";
 import { TranslationTab } from "./tabs/TranslationTab";
-import { PermissionScreen } from "../../components/PermissionScreen";
+import { OnboardingFlow } from "../../components/onboarding/OnboardingFlow";
 import {
   APP_UPDATE_CHECK_REQUEST_EVENT,
+  DEV_ONBOARDING_REQUEST_EVENT,
   SETTINGS_NAVIGATE_EVENT,
   SETTINGS_UPDATED_EVENT,
   SELECTION_TEXT_REQUEST_EVENT,
@@ -53,7 +54,8 @@ import {
 } from "../../lib/updater";
 import { useI18n, type MsgKey } from "../../lib/i18n";
 
-type Tab = "main" | "file" | "interpreter" | "chat" | "settings" | "model" | "style";
+type Tab =
+  "main" | "file" | "interpreter" | "chat" | "settings" | "model" | "style";
 
 const SHOW_INTERPRETER_TAB = true;
 const SHOW_DEV_CHAT_TAB = import.meta.env.DEV;
@@ -83,7 +85,12 @@ function resolveInitialTab(): Tab {
 }
 
 const TABS: { id: Tab; labelKey: MsgKey; icon: Icon; note: string }[] = [
-  { id: "main", labelKey: "settingsApp.tab.main", icon: IconHome, note: "История записей" },
+  {
+    id: "main",
+    labelKey: "settingsApp.tab.main",
+    icon: IconHome,
+    note: "История записей",
+  },
   {
     id: "file",
     labelKey: "settingsApp.tab.file",
@@ -108,7 +115,12 @@ const TABS: { id: Tab; labelKey: MsgKey; icon: Icon; note: string }[] = [
     icon: IconLanguage,
     note: "Перевод диктовки, выделения и живой речи",
   },
-  { id: "style", labelKey: "settingsApp.tab.style", icon: IconSparkles, note: "Стиль обработки и Промпты для саммари" },
+  {
+    id: "style",
+    labelKey: "settingsApp.tab.style",
+    icon: IconSparkles,
+    note: "Стиль обработки и Промпты для саммари",
+  },
   {
     id: "settings",
     labelKey: "settingsApp.tab.settings",
@@ -375,7 +387,9 @@ function getCurrentDomSelectionText(): string {
     return "";
   }
 
-  const activeElementSelection = getTextControlSelection(document.activeElement);
+  const activeElementSelection = getTextControlSelection(
+    document.activeElement,
+  );
   if (activeElementSelection.trim()) {
     return activeElementSelection;
   }
@@ -385,13 +399,18 @@ function getCurrentDomSelectionText(): string {
 
 export function SettingsApp() {
   const { t } = useI18n();
-  const checkUpdateAtStartup =
-    new URLSearchParams(window.location.search).get("checkUpdate") === "1";
+  const initialQuery = new URLSearchParams(window.location.search);
+  const checkUpdateAtStartup = initialQuery.get("checkUpdate") === "1";
+  const [devOnboardingRequestId, setDevOnboardingRequestId] = useState(
+    import.meta.env.DEV && initialQuery.get("onboarding") === "1" ? 1 : 0,
+  );
   const [activeTab, setActiveTab] = useState<Tab>(resolveInitialTab);
   const [focusedFileResultId, setFocusedFileResultId] = useState<string | null>(
     () => new URLSearchParams(window.location.search).get("resultId"),
   );
-  const [focusedHistoryEntryId, setFocusedHistoryEntryId] = useState<string | null>(null);
+  const [focusedHistoryEntryId, setFocusedHistoryEntryId] = useState<
+    string | null
+  >(null);
   const [focusedHistoryEntryNonce, setFocusedHistoryEntryNonce] = useState(0);
   const [themePreference, setThemePreference] =
     useState<ThemePreference>("system");
@@ -470,6 +489,18 @@ export function SettingsApp() {
   }, []);
 
   useEffect(() => {
+    if (!import.meta.env.DEV) return;
+
+    const unlistenPromise = listen(DEV_ONBOARDING_REQUEST_EVENT, () => {
+      setDevOnboardingRequestId((current) => current + 1);
+    });
+
+    return () => {
+      unlistenPromise.then((dispose) => dispose());
+    };
+  }, []);
+
+  useEffect(() => {
     const unlisten = listen<SettingsNavigatePayload>(
       SETTINGS_NAVIGATE_EVENT,
       ({ payload }) => {
@@ -513,6 +544,7 @@ export function SettingsApp() {
   const handlePermissionsComplete = async () => {
     await setPermissionsPassed(true);
     setShowPermissions(false);
+    setDevOnboardingRequestId(0);
     await emit(SETTINGS_UPDATED_EVENT);
   };
 
@@ -546,14 +578,16 @@ export function SettingsApp() {
   return (
     <div className={isMacPlatform() ? "app-root" : "app-root native-frame"}>
       <div
-        style={{
-          "--summary-modal-top-offset": isMacPlatform() ? "48px" : "0px",
-          display: "flex",
-          flexDirection: "column",
-          height: "100vh",
-          position: "relative",
-          zIndex: 1,
-        } as CSSProperties}
+        style={
+          {
+            "--summary-modal-top-offset": isMacPlatform() ? "48px" : "0px",
+            display: "flex",
+            flexDirection: "column",
+            height: "100vh",
+            position: "relative",
+            zIndex: 1,
+          } as CSSProperties
+        }
       >
         {/* Windows/Linux use the native title bar + system window controls. */}
         {isMacPlatform() && <TitleBar />}
@@ -680,8 +714,11 @@ export function SettingsApp() {
         </div>
       </div>
 
-      {showPermissions && (
-        <PermissionScreen onComplete={handlePermissionsComplete} />
+      {(showPermissions || devOnboardingRequestId > 0) && (
+        <OnboardingFlow
+          key={`onboarding-${devOnboardingRequestId}`}
+          onComplete={handlePermissionsComplete}
+        />
       )}
     </div>
   );

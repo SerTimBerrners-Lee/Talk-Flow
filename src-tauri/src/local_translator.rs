@@ -12,6 +12,7 @@ use tauri::{AppHandle, Manager};
 
 const NLLB_TRANSLATOR_PROVIDER: &str = "nllb-200";
 const OPUS_RU_EN_TRANSLATOR_PROVIDER: &str = "opus-mt-ru-en";
+const OPUS_EN_RU_TRANSLATOR_PROVIDER: &str = "opus-mt-en-ru";
 const LEGACY_TRAD_PROVIDER: &str = "trad";
 const FAST_TRANSLATION_BEAM_SIZE: usize = 1;
 
@@ -28,6 +29,16 @@ const NLLB_MODEL_FILES: &[&str] = &[
 const OPUS_RU_EN_MODEL_FILES: &[&str] = &[
     "config.json",
     "generation_config.json",
+    "model.bin",
+    "shared_vocabulary.json",
+    "source.spm",
+    "target.spm",
+    "tokenizer_config.json",
+    "vocab.json",
+];
+
+const OPUS_EN_RU_MODEL_FILES: &[&str] = &[
+    "config.json",
     "model.bin",
     "shared_vocabulary.json",
     "source.spm",
@@ -113,6 +124,29 @@ const OPUS_RU_EN_TRANSLATOR: LocalTranslatorDefinition = LocalTranslatorDefiniti
     },
 };
 
+const OPUS_EN_RU_TRANSLATOR: LocalTranslatorDefinition = LocalTranslatorDefinition {
+    provider: OPUS_EN_RU_TRANSLATOR_PROVIDER,
+    legacy_providers: &NO_LEGACY_PROVIDERS,
+    name: "OPUS-MT EN -> RU",
+    model_repo: "manancode/opus-mt-en-ru-ctranslate2-android",
+    model_label: "OPUS-MT en-ru CTranslate2 INT8",
+    model_files: OPUS_EN_RU_MODEL_FILES,
+    status_message: "английский -> русский",
+    installed_message: "Локальный переводчик OPUS-MT EN -> RU установлен.",
+    deleted_message: "Локальный переводчик OPUS-MT EN -> RU удалён.",
+    delete_error_prefix: "Не удалось удалить OPUS-MT EN -> RU",
+    not_installed_error: "Локальная модель OPUS-MT EN -> RU не установлена.",
+    empty_result_error: "Локальный переводчик OPUS-MT EN -> RU вернул пустой результат.",
+    unsupported_source_error: Some(
+        "OPUS-MT EN -> RU поддерживает только английский исходный текст.",
+    ),
+    unsupported_target_error: Some("OPUS-MT EN -> RU поддерживает только перевод на русский."),
+    kind: LocalTranslatorKind::MarianPair {
+        source_language: "eng_Latn",
+        target_language: "rus_Cyrl",
+    },
+};
+
 #[derive(Serialize)]
 pub struct LocalTranslatorInfo {
     provider: String,
@@ -151,8 +185,12 @@ fn translator_cache() -> &'static Mutex<HashMap<String, Arc<CtTranslator>>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn local_translator_definitions() -> [&'static LocalTranslatorDefinition; 2] {
-    [&NLLB_TRANSLATOR, &OPUS_RU_EN_TRANSLATOR]
+fn local_translator_definitions() -> [&'static LocalTranslatorDefinition; 3] {
+    [
+        &NLLB_TRANSLATOR,
+        &OPUS_RU_EN_TRANSLATOR,
+        &OPUS_EN_RU_TRANSLATOR,
+    ]
 }
 
 fn ensure_provider(provider: &str) -> Result<&'static LocalTranslatorDefinition, String> {
@@ -650,6 +688,7 @@ mod tests {
         assert!(ensure_provider("other").is_err());
         assert!(ensure_provider(NLLB_TRANSLATOR_PROVIDER).is_ok());
         assert!(ensure_provider(OPUS_RU_EN_TRANSLATOR_PROVIDER).is_ok());
+        assert!(ensure_provider(OPUS_EN_RU_TRANSLATOR_PROVIDER).is_ok());
         assert!(ensure_provider(LEGACY_TRAD_PROVIDER).is_ok());
     }
 
@@ -679,6 +718,38 @@ mod tests {
             source_language: "auto".to_string(),
             target_language: "en".to_string(),
             provider: OPUS_RU_EN_TRANSLATOR_PROVIDER.to_string(),
+        };
+        assert!(
+            resolve_translation_languages(definition, &wrong_source, &wrong_source.text).is_err()
+        );
+    }
+
+    #[test]
+    fn resolves_opus_en_ru_languages() {
+        let definition = ensure_provider(OPUS_EN_RU_TRANSLATOR_PROVIDER).unwrap();
+        let req = LocalTranslationRequest {
+            provider: OPUS_EN_RU_TRANSLATOR_PROVIDER.to_string(),
+            text: "Hello".to_string(),
+            source_language: "auto".to_string(),
+            target_language: "ru".to_string(),
+        };
+        let resolved = resolve_translation_languages(definition, &req, &req.text).unwrap();
+        assert_eq!(resolved.source_language, "eng_Latn");
+        assert_eq!(resolved.target_language, "rus_Cyrl");
+
+        let wrong_target = LocalTranslationRequest {
+            target_language: "de".to_string(),
+            ..req
+        };
+        assert!(
+            resolve_translation_languages(definition, &wrong_target, &wrong_target.text).is_err()
+        );
+
+        let wrong_source = LocalTranslationRequest {
+            text: "Привет".to_string(),
+            source_language: "auto".to_string(),
+            target_language: "ru".to_string(),
+            provider: OPUS_EN_RU_TRANSLATOR_PROVIDER.to_string(),
         };
         assert!(
             resolve_translation_languages(definition, &wrong_source, &wrong_source.text).is_err()

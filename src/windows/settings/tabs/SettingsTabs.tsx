@@ -70,6 +70,7 @@ import { isSummaryAvailable, generatePromptText } from "../../../lib/summarize";
 import { SETTINGS_UPDATED_EVENT } from "../../../lib/hotkeyEvents";
 import { useI18n, type MsgKey } from "../../../lib/i18n";
 import { Dropdown } from "../../../components/Dropdown";
+import { LocalSttModelCard } from "../../../components/LocalSttModelCard";
 import { ModelCardDisclosureButton } from "../../../components/ModelCardDisclosureButton";
 import { RealtimeTranslationModels } from "./RealtimeTranslationModels";
 import {
@@ -650,6 +651,22 @@ const LOCAL_OTHER_COMPONENTS: LocalOtherComponent[] = [
     accent: "#16a34a",
     runtimeReady: true,
     downloadBytes: 308_000_000,
+  },
+  {
+    id: "opus-mt-en-ru",
+    name: "OPUS-MT EN -> RU",
+    descriptionKey: "models.localOther.opus-mt-en-ru.description",
+    model: "manancode/opus-mt-en-ru-ctranslate2-android",
+    engineLabel: "CTranslate2",
+    runtime: "Talkis Local / CTranslate2",
+    size: "Marian CT2 INT8",
+    speed: "быстро",
+    accuracy: "средняя",
+    languageLabel: "EN -> RU",
+    initials: "ER",
+    accent: "#0f766e",
+    runtimeReady: true,
+    downloadBytes: 83_000_000,
   },
 ];
 
@@ -4839,374 +4856,202 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
                       );
 
                       return (
-                        <div
+                        <LocalSttModelCard
                           key={model.id}
-                          className="card"
-                          style={{
-                            padding: 0,
-                            overflow: "hidden",
-                            background: "var(--surface)",
+                          name={model.name}
+                          description={t(
+                            LOCAL_MODEL_DESCRIPTION_KEYS[model.id],
+                          )}
+                          recommendedLabel={
+                            model.recommended
+                              ? t("models.local.recommendedBadge")
+                              : undefined
+                          }
+                          statusLabel={modelStatus.label}
+                          statusColor={modelStatus.color}
+                          expanded={isExpanded}
+                          onToggle={() =>
+                            setExpandedLocalModel(isExpanded ? null : model.id)
+                          }
+                          disclosureLabel={t(
+                            isExpanded ? "mainTab.collapse" : "mainTab.expand",
+                          )}
+                          stats={{
+                            storageLabel: getLocalModelStorageLabel(model),
+                            storageTitle: t("models.stat.downloadSizeTitle", {
+                              value: getLocalModelStorageLabel(model),
+                            }),
+                            languageLabel: translateLanguageValue(
+                              model.languageLabel,
+                            ),
+                            languageTitle: t("models.stat.languagesTitle", {
+                              value: translateLanguageValue(
+                                model.languageLabel,
+                              ),
+                            }),
+                            speedLabel: translateSpeedValue(model.speed),
+                            speedTitle: t("models.stat.speedTitle", {
+                              value: translateSpeedValue(model.speed),
+                            }),
+                            accuracyLabel: translateAccuracyValue(
+                              model.accuracy,
+                            ),
+                            accuracyTitle: t("models.stat.accuracyTitle", {
+                              value: translateAccuracyValue(model.accuracy),
+                            }),
+                            streamingLabel: model.supportsStreaming
+                              ? t("models.stat.streaming")
+                              : undefined,
                           }}
-                        >
-                          <div
-                            style={{
-                              position: "relative",
-                              padding: "12px 14px",
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 12,
-                              textAlign: "left",
-                              fontFamily: "var(--font-main)",
-                            }}
-                          >
-                            <div
-                              style={{
-                                position: "relative",
-                                flex: 1,
-                                minWidth: 0,
-                              }}
-                            >
-                              <div
-                                style={{
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "space-between",
-                                  gap: 10,
-                                  marginBottom: 3,
-                                }}
-                              >
-                                <div
+                          notice={
+                            modelStatus.message &&
+                            modelStatus.status !== "installing" &&
+                            modelStatus.status !== "installed" &&
+                            modelStatus.status !== "selected"
+                              ? {
+                                  message: modelStatus.message,
+                                  tone:
+                                    modelStatus.status === "error"
+                                      ? "error"
+                                      : "neutral",
+                                }
+                              : undefined
+                          }
+                          progress={
+                            modelStatus.status === "installing"
+                              ? {
+                                  message:
+                                    modelActionState?.message ||
+                                    t("models.download.loading"),
+                                  percent: downloadProgress,
+                                  valueLabel:
+                                    downloadedLabel ||
+                                    t("models.download.preparing"),
+                                  downloadedLabel,
+                                  totalLabel,
+                                  totalTemplate: totalLabel
+                                    ? t("models.download.of", {
+                                        total: totalLabel,
+                                      })
+                                    : undefined,
+                                }
+                              : undefined
+                          }
+                          connectionLabel={
+                            modelStatus.connectionLabel || undefined
+                          }
+                          connectionColor={modelStatus.color}
+                          showConnectionCheck={
+                            modelStatus.status === "installed" ||
+                            modelStatus.status === "selected"
+                          }
+                          actions={
+                            <>
+                              {canSelect && !modelStatus.isSelected && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSelectLocalModel(model)}
                                   style={{
+                                    padding: "9px 12px",
+                                    borderRadius: 10,
+                                    border: "1px solid var(--border-dashed)",
+                                    background: "var(--control-muted)",
+                                    color: "var(--text-hi)",
+                                    fontSize: 12,
+                                    fontWeight: 700,
+                                    fontFamily: "var(--font-main)",
+                                    cursor: "pointer",
                                     display: "flex",
                                     alignItems: "center",
                                     gap: 8,
-                                    minWidth: 0,
                                   }}
                                 >
-                                  <div
-                                    style={{
-                                      fontSize: 15,
-                                      fontWeight: 700,
-                                      color: "var(--text-hi)",
-                                      whiteSpace: "nowrap",
-                                      overflow: "hidden",
-                                      textOverflow: "ellipsis",
-                                    }}
-                                  >
-                                    {model.name}
-                                  </div>
-                                  {model.recommended && (
-                                    <div
-                                      style={{
-                                        fontSize: 10,
-                                        fontWeight: 800,
-                                        color: "var(--text-hi)",
-                                        padding: "3px 7px",
-                                        borderRadius: 999,
-                                        background: "var(--control-muted)",
-                                        flexShrink: 0,
-                                      }}
-                                    >
-                                      {t("models.local.recommendedBadge")}
-                                    </div>
-                                  )}
-                                </div>
-                                <div
-                                  style={{
-                                    fontSize: 11,
-                                    fontWeight: 700,
-                                    color: modelStatus.color,
-                                    padding: "5px 9px",
-                                    borderRadius: 999,
-                                    background: "var(--control-muted)",
-                                    whiteSpace: "nowrap",
-                                  }}
-                                >
-                                  {modelStatus.label}
-                                </div>
-                              </div>
-                              <div style={{ paddingRight: 34 }}>
-                                <div
-                                  style={{
-                                    fontSize: 12,
-                                    lineHeight: 1.45,
-                                    color: "var(--text-mid)",
-                                  }}
-                                >
-                                  {t(LOCAL_MODEL_DESCRIPTION_KEYS[model.id])}
-                                </div>
-                                {renderLocalModelStats(model)}
-                              </div>
-                              <ModelCardDisclosureButton
-                                expanded={isExpanded}
-                                onToggle={() =>
-                                  setExpandedLocalModel(
-                                    isExpanded ? null : model.id,
-                                  )
-                                }
-                                label={t(
-                                  isExpanded
-                                    ? "mainTab.collapse"
-                                    : "mainTab.expand",
-                                )}
-                              />
-                            </div>
-                          </div>
-
-                          {isExpanded && (
-                            <div
-                              style={{
-                                borderTop: "1px solid var(--border-subtle)",
-                                padding: "12px 14px",
-                                display: "flex",
-                                flexDirection: "column",
-                                gap: 10,
-                              }}
-                            >
-                              {modelStatus.message &&
-                                modelStatus.status !== "installing" &&
-                                modelStatus.status !== "installed" &&
-                                modelStatus.status !== "selected" && (
-                                  <div
-                                    style={{
-                                      fontSize: 12,
-                                      lineHeight: 1.6,
-                                      padding: "8px 10px",
-                                      borderRadius: 8,
-                                      background:
-                                        modelStatus.status === "error"
-                                          ? "var(--danger-soft)"
-                                          : "var(--control-muted)",
-                                      color:
-                                        modelStatus.status === "error"
-                                          ? "var(--error-bright)"
-                                          : "var(--text-mid)",
-                                      border: `1px solid ${modelStatus.status === "error" ? "var(--danger-border)" : "var(--border-subtle)"}`,
-                                    }}
-                                  >
-                                    {modelStatus.message}
-                                  </div>
-                                )}
-
-                              {modelStatus.status === "installing" && (
-                                <div
-                                  style={{
-                                    display: "flex",
-                                    flexDirection: "column",
-                                    gap: 7,
-                                  }}
-                                >
-                                  <div
-                                    style={{
-                                      display: "flex",
-                                      alignItems: "center",
-                                      justifyContent: "space-between",
-                                      gap: 12,
-                                      fontSize: 12,
-                                      color: "var(--text-mid)",
-                                      fontWeight: 650,
-                                    }}
-                                  >
-                                    <span>
-                                      {modelActionState?.message ||
-                                        t("models.download.loading")}
-                                    </span>
-                                    <span style={{ color: "var(--text-hi)" }}>
-                                      {downloadProgress !== undefined
-                                        ? `${downloadProgress}%`
-                                        : downloadedLabel ||
-                                          t("models.download.preparing")}
-                                    </span>
-                                  </div>
-                                  <div
-                                    style={{
-                                      width: "100%",
-                                      height: 8,
-                                      borderRadius: 999,
-                                      background: "var(--progress-track)",
-                                      overflow: "hidden",
-                                    }}
-                                  >
-                                    <div
-                                      style={{
-                                        width: `${downloadProgress ?? 2}%`,
-                                        minWidth:
-                                          downloadProgress === undefined
-                                            ? 18
-                                            : 0,
-                                        height: "100%",
-                                        borderRadius: 999,
-                                        background: "var(--accent)",
-                                        transition: "width 0.2s ease",
-                                      }}
-                                    />
-                                  </div>
-                                  {(downloadedLabel || totalLabel) && (
-                                    <div
-                                      style={{
-                                        fontSize: 11,
-                                        color: "var(--text-low)",
-                                        lineHeight: 1.4,
-                                      }}
-                                    >
-                                      {downloadedLabel}
-                                      {totalLabel
-                                        ? ` ${t("models.download.of", { total: totalLabel })}`
-                                        : ""}
-                                    </div>
-                                  )}
-                                </div>
+                                  <IconCheck size={14} stroke={2.5} />
+                                  {t("models.common.select")}
+                                </button>
                               )}
 
-                              <div
-                                style={{
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "space-between",
-                                  gap: 10,
-                                  flexWrap: "wrap",
-                                }}
-                              >
-                                {modelStatus.connectionLabel && (
-                                  <div
-                                    style={{
-                                      display: "flex",
-                                      alignItems: "center",
-                                      gap: 8,
-                                      color: modelStatus.color,
-                                      fontSize: 12,
-                                      fontWeight: 600,
-                                    }}
-                                  >
-                                    {(modelStatus.status === "installed" ||
-                                      modelStatus.status === "selected") && (
-                                      <IconCheck size={15} stroke={2.5} />
-                                    )}
-                                    {modelStatus.connectionLabel}
-                                  </div>
-                                )}
+                              {!isModelBusy && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (isDownloaded) {
+                                      setPendingDeleteModel(model);
+                                      return;
+                                    }
 
-                                <div
+                                    void handleInstallLocalSttModel(model);
+                                  }}
+                                  disabled={isInstallDisabled}
                                   style={{
+                                    padding: "9px 12px",
+                                    borderRadius: 10,
+                                    border: "1px solid var(--border-dashed)",
+                                    background: isInstallDisabled
+                                      ? "var(--control-muted)"
+                                      : isDownloaded
+                                        ? "var(--control-muted)"
+                                        : "var(--accent)",
+                                    color: isInstallDisabled
+                                      ? "var(--text-mid)"
+                                      : isDownloaded
+                                        ? "var(--text-hi)"
+                                        : "var(--accent-contrast)",
+                                    fontSize: 12,
+                                    fontWeight: 700,
+                                    fontFamily: "var(--font-main)",
+                                    cursor: isInstallDisabled
+                                      ? "not-allowed"
+                                      : "pointer",
                                     display: "flex",
                                     alignItems: "center",
                                     gap: 8,
-                                    flexWrap: "wrap",
-                                    marginLeft: "auto",
                                   }}
                                 >
-                                  {canSelect && !modelStatus.isSelected && (
-                                    <button
-                                      onClick={() =>
-                                        handleSelectLocalModel(model)
-                                      }
-                                      style={{
-                                        padding: "9px 12px",
-                                        borderRadius: 10,
-                                        border:
-                                          "1px solid var(--border-dashed)",
-                                        background: "var(--control-muted)",
-                                        color: "var(--text-hi)",
-                                        fontSize: 12,
-                                        fontWeight: 700,
-                                        fontFamily: "var(--font-main)",
-                                        cursor: "pointer",
-                                        display: "flex",
-                                        alignItems: "center",
-                                        gap: 8,
-                                      }}
-                                    >
-                                      <IconCheck size={14} stroke={2.5} />
-                                      {t("models.common.select")}
-                                    </button>
+                                  {isDownloaded ? (
+                                    <>
+                                      <IconTrash size={14} stroke={2.2} />
+                                      {t("models.common.delete")}
+                                    </>
+                                  ) : (
+                                    <>
+                                      <IconDownload size={14} stroke={2.2} />
+                                      {isRuntimeReady
+                                        ? t("models.common.download")
+                                        : t("models.common.unavailable")}
+                                    </>
                                   )}
+                                </button>
+                              )}
 
-                                  {!isModelBusy && (
-                                    <button
-                                      onClick={() => {
-                                        if (isDownloaded) {
-                                          setPendingDeleteModel(model);
-                                          return;
-                                        }
-
-                                        void handleInstallLocalSttModel(model);
-                                      }}
-                                      disabled={isInstallDisabled}
-                                      style={{
-                                        padding: "9px 12px",
-                                        borderRadius: 10,
-                                        border:
-                                          "1px solid var(--border-dashed)",
-                                        background: isInstallDisabled
-                                          ? "var(--control-muted)"
-                                          : isDownloaded
-                                            ? "var(--control-muted)"
-                                            : "var(--accent)",
-                                        color: isInstallDisabled
-                                          ? "var(--text-mid)"
-                                          : isDownloaded
-                                            ? "var(--text-hi)"
-                                            : "var(--accent-contrast)",
-                                        fontSize: 12,
-                                        fontWeight: 700,
-                                        fontFamily: "var(--font-main)",
-                                        cursor: isInstallDisabled
-                                          ? "not-allowed"
-                                          : "pointer",
-                                        display: "flex",
-                                        alignItems: "center",
-                                        gap: 8,
-                                      }}
-                                    >
-                                      {isDownloaded ? (
-                                        <>
-                                          <IconTrash size={14} stroke={2.2} />
-                                          {t("models.common.delete")}
-                                        </>
-                                      ) : (
-                                        <>
-                                          <IconDownload
-                                            size={14}
-                                            stroke={2.2}
-                                          />
-                                          {isRuntimeReady
-                                            ? t("models.common.download")
-                                            : t("models.common.unavailable")}
-                                        </>
-                                      )}
-                                    </button>
-                                  )}
-
-                                  {modelStatus.status === "installing" && (
-                                    <button
-                                      onClick={() =>
-                                        void handleCancelLocalSttDownload(model)
-                                      }
-                                      style={{
-                                        padding: "9px 12px",
-                                        borderRadius: 10,
-                                        border:
-                                          "1px solid var(--border-dashed)",
-                                        background: "var(--control-muted)",
-                                        color: "var(--text-hi)",
-                                        fontSize: 12,
-                                        fontWeight: 700,
-                                        fontFamily: "var(--font-main)",
-                                        cursor: "pointer",
-                                        display: "flex",
-                                        alignItems: "center",
-                                        gap: 8,
-                                      }}
-                                    >
-                                      <IconX size={14} stroke={2.2} />
-                                      {t("models.common.cancel")}
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                        </div>
+                              {modelStatus.status === "installing" && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    void handleCancelLocalSttDownload(model)
+                                  }
+                                  style={{
+                                    padding: "9px 12px",
+                                    borderRadius: 10,
+                                    border: "1px solid var(--border-dashed)",
+                                    background: "var(--control-muted)",
+                                    color: "var(--text-hi)",
+                                    fontSize: 12,
+                                    fontWeight: 700,
+                                    fontFamily: "var(--font-main)",
+                                    cursor: "pointer",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 8,
+                                  }}
+                                >
+                                  <IconX size={14} stroke={2.2} />
+                                  {t("models.common.cancel")}
+                                </button>
+                              )}
+                            </>
+                          }
+                        />
                       );
                     })}
                   </div>

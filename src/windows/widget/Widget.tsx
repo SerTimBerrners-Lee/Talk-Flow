@@ -90,6 +90,7 @@ import {
   createCallLiveDictationOptions,
   warmUpLiveDictationRuntime,
 } from "./services/dictationStreamOverlay";
+import { requestCallMicrophoneStream } from "./services/callMicrophone";
 import {
   createLiveTranslationOverlayRenderer,
   type LiveTranslationOverlayRenderer,
@@ -270,49 +271,6 @@ function formatCallCaptureRawError(error: unknown): string {
   }
 
   return String(source);
-}
-
-async function requestCallMicrophoneStream(
-  micId: string,
-): Promise<MediaStream> {
-  if (!micId) {
-    return navigator.mediaDevices.getUserMedia({ audio: true });
-  }
-
-  try {
-    logInfo("CALL_CAPTURE", `Requesting selected call mic: ${micId}`);
-    return await navigator.mediaDevices.getUserMedia({
-      audio: { deviceId: { exact: micId } },
-    });
-  } catch (selectedError) {
-    if (isPermissionDeniedError(selectedError)) {
-      throw selectedError;
-    }
-
-    logError(
-      "CALL_CAPTURE",
-      `Selected call mic failed, trying default: ${formatCallCaptureRawError(
-        selectedError,
-      )}`,
-    );
-
-    try {
-      const defaultStream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-      });
-      logInfo(
-        "CALL_CAPTURE",
-        "Using default call mic after selected mic failed",
-      );
-      return defaultStream;
-    } catch (defaultError) {
-      throw new CallCaptureStartError(
-        microphoneStartErrorMessage(defaultError),
-        isPermissionDeniedError(defaultError),
-        defaultError,
-      );
-    }
-  }
 }
 
 function callCaptureStartErrorMessage(error: unknown): string {
@@ -995,8 +953,22 @@ export function Widget() {
       setCallSettings(settings);
 
       try {
+        if (settings.micId) {
+          logInfo(
+            "CALL_CAPTURE",
+            `Requesting selected call mic: ${settings.micId}`,
+          );
+        } else {
+          logInfo("CALL_CAPTURE", "Requesting system default call mic");
+        }
         micStream = await requestCallMicrophoneStream(settings.micId);
       } catch (error) {
+        logError(
+          "CALL_CAPTURE",
+          settings.micId
+            ? `Selected call mic unavailable; refusing default fallback to keep mic and system tracks separate: ${formatCallCaptureRawError(error)}`
+            : `Default call mic unavailable: ${formatCallCaptureRawError(error)}`,
+        );
         if (error instanceof CallCaptureStartError) {
           throw error;
         }

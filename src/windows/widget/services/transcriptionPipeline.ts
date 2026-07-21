@@ -18,7 +18,11 @@ import {
   HISTORY_DELETED_EVENT,
   type DictationStreamUpdatePayload,
 } from "../../../lib/hotkeyEvents";
-import { beginProcessing, finishProcessing, isAbortError } from "../../../lib/processingControl";
+import {
+  beginProcessing,
+  finishProcessing,
+  isAbortError,
+} from "../../../lib/processingControl";
 import { resolveSummaryBackend } from "../../../lib/summarize";
 import { LANGUAGES } from "../../../config/languages";
 import {
@@ -53,7 +57,10 @@ interface RecordingAudioSource {
   audioFileName: string;
 }
 
-type TranscriptionResult = Pick<HistoryEntry, "raw" | "cleaned" | "dictationTranslation">;
+type TranscriptionResult = Pick<
+  HistoryEntry,
+  "raw" | "cleaned" | "dictationTranslation"
+>;
 
 export interface DictationStreamOverlaySession {
   requestId: string;
@@ -86,7 +93,9 @@ async function saveCompletedRecordingAudio({
 }: RecordingAudioSource & {
   entryId: string;
   settings: AppSettings;
-}): Promise<Pick<HistoryEntry, "audioPath" | "audioMimeType" | "audioFileName">> {
+}): Promise<
+  Pick<HistoryEntry, "audioPath" | "audioMimeType" | "audioFileName">
+> {
   if (!settings.saveRecordingAudio) {
     return {
       audioPath: undefined,
@@ -109,7 +118,10 @@ async function saveCompletedRecordingAudio({
       audioFileName: saved.fileName || audioFileName,
     };
   } catch (error) {
-    logError("HISTORY", `Failed to save recording audio: ${formatErrorMessage(error)}`);
+    logError(
+      "HISTORY",
+      `Failed to save recording audio: ${formatErrorMessage(error)}`,
+    );
     return {
       audioPath: undefined,
       audioMimeType: undefined,
@@ -266,12 +278,17 @@ function isAuthFailureLike(normalized: string): boolean {
   );
 }
 
-function toUserFacingErrorMessage(error: unknown, settings: AppSettings): string {
+function toUserFacingErrorMessage(
+  error: unknown,
+  settings: AppSettings,
+): string {
   const raw = formatErrorMessage(error);
   const normalized = raw.toLowerCase();
   const isLocalStt = isLocalSttSettings(settings);
 
-  const missingModelMatch = raw.match(/Model ['"]([^'"]+)['"] is not installed locally/i);
+  const missingModelMatch = raw.match(
+    /Model ['"]([^'"]+)['"] is not installed locally/i,
+  );
   if (missingModelMatch) {
     const model = missingModelMatch[1];
     return tn("widget.error.modelNotDownloaded", { model });
@@ -288,7 +305,10 @@ function toUserFacingErrorMessage(error: unknown, settings: AppSettings): string
     return tn("widget.error.localRuntimeStartFailed");
   }
 
-  if (normalized.includes("unsupported_country_region_territory") || normalized.includes("country, region, or territory not supported")) {
+  if (
+    normalized.includes("unsupported_country_region_territory") ||
+    normalized.includes("country, region, or territory not supported")
+  ) {
     return tn("widget.error.regionUnsupported");
   }
 
@@ -304,14 +324,22 @@ function toUserFacingErrorMessage(error: unknown, settings: AppSettings): string
       return tn("widget.error.localRuntimeRejected");
     }
 
-    if (normalized.includes("subscription inactive") || normalized.includes("активная подписка") || normalized.includes("cloud mode")) {
+    if (
+      normalized.includes("subscription inactive") ||
+      normalized.includes("активная подписка") ||
+      normalized.includes("cloud mode")
+    ) {
       return tn("widget.error.subscriptionRequired");
     }
 
     return tn("widget.error.requestRejected");
   }
 
-  if (normalized.includes("invalid or expired token") || normalized.includes("token expired") || normalized.includes("token missing user id")) {
+  if (
+    normalized.includes("invalid or expired token") ||
+    normalized.includes("token expired") ||
+    normalized.includes("token missing user id")
+  ) {
     return tn("widget.error.cloudSessionExpired");
   }
 
@@ -323,7 +351,10 @@ function toUserFacingErrorMessage(error: unknown, settings: AppSettings): string
     return tn("widget.error.cloudInvalidResponse");
   }
 
-  if (normalized.includes("subscription check failed") || normalized.includes("cloud auth unavailable")) {
+  if (
+    normalized.includes("subscription check failed") ||
+    normalized.includes("cloud auth unavailable")
+  ) {
     return tn("widget.error.cloudUnavailable");
   }
 
@@ -339,15 +370,30 @@ function toUserFacingErrorMessage(error: unknown, settings: AppSettings): string
     return tn("widget.error.authFailed");
   }
 
-  if (normalized.includes("429") || normalized.includes("rate limit") || normalized.includes("quota")) {
+  if (
+    normalized.includes("429") ||
+    normalized.includes("rate limit") ||
+    normalized.includes("quota")
+  ) {
     return tn("widget.error.rateLimited");
   }
 
-  if (normalized.includes("network") || normalized.includes("fetch") || normalized.includes("failed to fetch") || normalized.includes("timed out")) {
+  if (
+    normalized.includes("network") ||
+    normalized.includes("fetch") ||
+    normalized.includes("failed to fetch") ||
+    normalized.includes("timed out")
+  ) {
     return tn("widget.error.networkFailed");
   }
 
-  if (normalized.includes("500") || normalized.includes("502") || normalized.includes("503") || normalized.includes("504") || normalized.includes("server")) {
+  if (
+    normalized.includes("500") ||
+    normalized.includes("502") ||
+    normalized.includes("503") ||
+    normalized.includes("504") ||
+    normalized.includes("server")
+  ) {
     return tn("widget.error.serverUnavailable");
   }
 
@@ -362,7 +408,10 @@ function normalizeTranscriptForPlaceholderCheck(value: string): string {
     .replace(/\s+/g, " ");
 }
 
-function hasRecognizedSpeech(result: { raw: string; cleaned: string }): boolean {
+function hasRecognizedSpeech(result: {
+  raw: string;
+  cleaned: string;
+}): boolean {
   const raw = result.raw.trim();
   const cleaned = result.cleaned.trim();
   const normalizedRaw = normalizeTranscriptForPlaceholderCheck(raw);
@@ -377,7 +426,10 @@ function hasRecognizedSpeech(result: { raw: string; cleaned: string }): boolean 
     return false;
   }
 
-  if (placeholderPhrases.has(normalizedRaw) && (!cleaned || placeholderPhrases.has(normalizedCleaned))) {
+  if (
+    placeholderPhrases.has(normalizedRaw) &&
+    (!cleaned || placeholderPhrases.has(normalizedCleaned))
+  ) {
     return false;
   }
 
@@ -441,10 +493,16 @@ async function transcribeViaProxy({
       cleaned: typeof parsed.cleaned === "string" ? parsed.cleaned : "",
     };
 
-    logInfo("API", `Proxy response parsed: raw_type=${typeof parsed.raw}, cleaned_type=${typeof parsed.cleaned}, cleaned_len=${result.cleaned.length}`);
+    logInfo(
+      "API",
+      `Proxy response parsed: raw_type=${typeof parsed.raw}, cleaned_type=${typeof parsed.cleaned}, cleaned_len=${result.cleaned.length}`,
+    );
     return result;
   } catch (error) {
-    logError("API", `Proxy success response parse failed: ${formatErrorMessage(error)}; body=${body}`);
+    logError(
+      "API",
+      `Proxy success response parse failed: ${formatErrorMessage(error)}; body=${body}`,
+    );
     throw new Error("Talkis Cloud returned an invalid response");
   }
 }
@@ -470,25 +528,28 @@ async function transcribeViaBackend({
   );
   logInfo("API", `Sending to backend, audio_size: ${audioBase64.length} chars`);
 
-  const result = await invoke<{ raw: string; cleaned: string }>("transcribe_and_clean", {
-    req: {
-      audio_base64: audioBase64,
-      language: settings.language,
-      api_key: settings.apiKey,
-      whisper_api_key: settings.whisperApiKey || null,
-      llm_api_key: null,
-      style: settings.style || "classic",
-      whisper_endpoint: settings.whisperEndpoint || null,
-      local_models_dir: settings.localModelsDir || null,
-      llm_endpoint: null,
-      whisper_model: whisperModel || null,
-      llm_model: "none",
-      file_name: audioFileName,
-      mime_type: audioMimeType,
-      streaming_enabled: isSttStreamingEnabled(settings),
-      streaming_request_id: streamingRequestId ?? null,
+  const result = await invoke<{ raw: string; cleaned: string }>(
+    "transcribe_and_clean",
+    {
+      req: {
+        audio_base64: audioBase64,
+        language: settings.language,
+        api_key: settings.apiKey,
+        whisper_api_key: settings.whisperApiKey || null,
+        llm_api_key: null,
+        style: settings.style || "classic",
+        whisper_endpoint: settings.whisperEndpoint || null,
+        local_models_dir: settings.localModelsDir || null,
+        llm_endpoint: null,
+        whisper_model: whisperModel || null,
+        llm_model: "none",
+        file_name: audioFileName,
+        mime_type: audioMimeType,
+        streaming_enabled: isSttStreamingEnabled(settings),
+        streaming_request_id: streamingRequestId ?? null,
+      },
     },
-  });
+  );
 
   return result;
 }
@@ -510,7 +571,13 @@ async function transcribeAudio({
 }): Promise<TranscriptionResult> {
   // Subscription mode: send to proxy
   if (!settings.useOwnKey && settings.deviceToken?.trim()) {
-    return transcribeViaProxy({ audioBase64, audioMimeType, audioFileName, settings, signal });
+    return transcribeViaProxy({
+      audioBase64,
+      audioMimeType,
+      audioFileName,
+      settings,
+      signal,
+    });
   }
 
   if (!settings.useOwnKey) {
@@ -559,13 +626,16 @@ async function resolveFinalTranscription({
     : null;
 
   if (!shouldReconcileOpenAiRealtime(settings, liveTranscription)) {
-    return liveResult || transcribeAudio({
-      audioBase64,
-      audioMimeType,
-      audioFileName,
-      settings,
-      signal,
-    });
+    return (
+      liveResult ||
+      transcribeAudio({
+        audioBase64,
+        audioMimeType,
+        audioFileName,
+        settings,
+        signal,
+      })
+    );
   }
 
   try {
@@ -621,11 +691,13 @@ async function applyDictationTranslation(
     `Translating dictation via ${backend.kind}: ${sourceLanguage} -> ${targetLanguage}, chars=${sourceText.length}`,
   );
 
-  const translatedText = (await backend.run({
-    text: sourceText,
-    prompt,
-    temperature: 0.1,
-  })).trim();
+  const translatedText = (
+    await backend.run({
+      text: sourceText,
+      prompt,
+      temperature: 0.1,
+    })
+  ).trim();
 
   if (!translatedText) {
     throw new Error("translation returned empty text");
@@ -647,7 +719,10 @@ async function applyDictationTranslation(
 async function pasteCleanedText(text: string): Promise<void> {
   logInfo("PASTE", "Sending cleaned text to paste_text");
   await invoke("paste_text", { text });
-  logInfo("PASTE", "paste_text command finished; target app insertion cannot be confirmed reliably");
+  logInfo(
+    "PASTE",
+    "paste_text command finished; target app insertion cannot be confirmed reliably",
+  );
 }
 
 export async function processRecordingBlob({
@@ -659,9 +734,13 @@ export async function processRecordingBlob({
 }: ProcessRecordingBlobParams): Promise<ProcessRecordingBlobResult> {
   const buffer = await blob.arrayBuffer();
   const base64Audio = arrayBufferToBase64(buffer);
-  const durationSeconds = Math.floor((Date.now() - recordingStartTimestamp) / 1000);
+  const durationSeconds = Math.floor(
+    (Date.now() - recordingStartTimestamp) / 1000,
+  );
   const audioMimeType = blob.type || "audio/webm";
-  const audioFileName = audioMimeType.includes("wav") ? "recording.wav" : "recording.webm";
+  const audioFileName = audioMimeType.includes("wav")
+    ? "recording.wav"
+    : "recording.webm";
 
   // Persist a lightweight "processing" entry up front so the recording shows as
   // a live row without keeping the audio payload in history/UI memory.
@@ -712,14 +791,23 @@ export async function processRecordingBlob({
       return { durationSeconds, hasTranscription: false };
     }
 
-    logInfo("API", `Pipeline result received: raw_type=${typeof transcription.raw}, cleaned_type=${typeof transcription.cleaned}`);
+    logInfo(
+      "API",
+      `Pipeline result received: raw_type=${typeof transcription.raw}, cleaned_type=${typeof transcription.cleaned}`,
+    );
 
     if (!hasRecognizedSpeech(transcription)) {
-      logInfo("API", "Nothing recognized, removing placeholder entry, skipping paste");
+      logInfo(
+        "API",
+        "Nothing recognized, removing placeholder entry, skipping paste",
+      );
       await deleteHistoryEntry(baseEntry.id);
       if (savedAudio.audioPath) {
         await deleteHistoryAudio(savedAudio.audioPath).catch((error) => {
-          logError("HISTORY", `Failed to delete unused recording audio: ${formatErrorMessage(error)}`);
+          logError(
+            "HISTORY",
+            `Failed to delete unused recording audio: ${formatErrorMessage(error)}`,
+          );
         });
       }
       await emit(HISTORY_DELETED_EVENT, { id: baseEntry.id });
@@ -736,7 +824,10 @@ export async function processRecordingBlob({
       return { durationSeconds, hasTranscription: false };
     }
 
-    logInfo("API", `Transcription complete in ${processingTime}ms: "${result.cleaned}"`);
+    logInfo(
+      "API",
+      `Transcription complete in ${processingTime}ms: "${result.cleaned}"`,
+    );
     await finishProcessing({
       ...entryWithSavedAudio,
       raw: result.raw,
@@ -764,7 +855,10 @@ export async function processRecordingBlob({
       });
     } catch (pasteError) {
       pasteFailed = true;
-      logError("PASTE", `Paste failed after successful transcription: ${formatErrorMessage(pasteError)}`);
+      logError(
+        "PASTE",
+        `Paste failed after successful transcription: ${formatErrorMessage(pasteError)}`,
+      );
       await dictationStream
         ?.showError(
           result.cleaned,
@@ -778,9 +872,12 @@ export async function processRecordingBlob({
         });
     }
 
-    logInfo("PASTE", pasteFailed
-      ? "Automatic paste command failed; latest text remains copyable from the idle widget"
-      : "Automatic paste command completed without OS-level errors");
+    logInfo(
+      "PASTE",
+      pasteFailed
+        ? "Automatic paste command failed; latest text remains copyable from the idle widget"
+        : "Automatic paste command completed without OS-level errors",
+    );
     return { durationSeconds, hasTranscription: true };
   } catch (error) {
     if (handle.isCancelled() || isAbortError(error)) {
@@ -790,9 +887,10 @@ export async function processRecordingBlob({
       return { durationSeconds, hasTranscription: false };
     }
 
-    const rawErrorMessage = error instanceof Error
-      ? `${error.name}: ${error.message}${error.stack ? `\n${error.stack}` : ""}`
-      : String(error);
+    const rawErrorMessage =
+      error instanceof Error
+        ? `${error.name}: ${error.message}${error.stack ? `\n${error.stack}` : ""}`
+        : String(error);
     logError("API", `Pipeline raw error: ${rawErrorMessage}`);
 
     const userFacingErrorMessage = toUserFacingErrorMessage(error, settings);
@@ -861,7 +959,10 @@ export async function retryHistoryEntry(
       throw new Error(tn("widget.error.speechNotRecognized"));
     }
 
-    const result = await applyDictationTranslation(transcription, retrySettings);
+    const result = await applyDictationTranslation(
+      transcription,
+      retrySettings,
+    );
 
     if (handle.isCancelled()) {
       const interrupted = buildInterruptedEntry(entry);
@@ -869,17 +970,18 @@ export async function retryHistoryEntry(
       return { hasTranscription: false, updatedEntry: interrupted };
     }
 
-    const savedAudio = entry.audioPath && settings.saveRecordingAudio
-      ? {
-          audioPath: entry.audioPath,
-          audioMimeType: entry.audioMimeType || audioSource.audioMimeType,
-          audioFileName: entry.audioFileName || audioSource.audioFileName,
-        }
-      : await saveCompletedRecordingAudio({
-          entryId: entry.id,
-          ...audioSource,
-          settings,
-        });
+    const savedAudio =
+      entry.audioPath && settings.saveRecordingAudio
+        ? {
+            audioPath: entry.audioPath,
+            audioMimeType: entry.audioMimeType || audioSource.audioMimeType,
+            audioFileName: entry.audioFileName || audioSource.audioFileName,
+          }
+        : await saveCompletedRecordingAudio({
+            entryId: entry.id,
+            ...audioSource,
+            settings,
+          });
 
     const updatedEntry: HistoryEntry = {
       ...entry,
@@ -897,7 +999,10 @@ export async function retryHistoryEntry(
     await finishProcessing(updatedEntry);
     if (!settings.saveRecordingAudio && entry.audioPath) {
       await deleteHistoryAudio(entry.audioPath).catch((error) => {
-        logError("HISTORY", `Failed to delete disabled recording audio: ${formatErrorMessage(error)}`);
+        logError(
+          "HISTORY",
+          `Failed to delete disabled recording audio: ${formatErrorMessage(error)}`,
+        );
       });
     }
 
@@ -905,7 +1010,10 @@ export async function retryHistoryEntry(
       try {
         await pasteCleanedText(result.cleaned);
       } catch (pasteError) {
-        logError("PASTE", `Retry paste failed: ${formatErrorMessage(pasteError)}`);
+        logError(
+          "PASTE",
+          `Retry paste failed: ${formatErrorMessage(pasteError)}`,
+        );
       }
     }
 
@@ -920,7 +1028,10 @@ export async function retryHistoryEntry(
       return { hasTranscription: false, updatedEntry: interrupted };
     }
 
-    const userFacingErrorMessage = toUserFacingErrorMessage(error, retrySettings);
+    const userFacingErrorMessage = toUserFacingErrorMessage(
+      error,
+      retrySettings,
+    );
     const failedEntry: HistoryEntry = {
       ...entry,
       status: "failed",

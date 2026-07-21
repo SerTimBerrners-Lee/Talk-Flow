@@ -21,6 +21,10 @@ import {
   type DictationStreamOverlaySession,
 } from "../services/transcriptionPipeline";
 import {
+  getVoiceAudioConstraints,
+  resolveSelectedMicLabel,
+} from "../services/recordingDevice";
+import {
   createNativeLiveDictationOptions,
   isLocalSttStreamingEnabled,
   isSttStreamingEnabled,
@@ -54,67 +58,6 @@ interface UseWidgetRecordingParams {
 interface UseWidgetRecordingResult {
   startRecording: () => Promise<void>;
   stopAndProcess: () => Promise<void>;
-}
-
-function getAudioConstraints(micId: string): MediaTrackConstraints | true {
-  const platform = `${navigator.platform} ${navigator.userAgent}`.toLowerCase();
-  const useMicProcessing =
-    platform.includes("linux") || platform.includes("x11");
-  const constraints: MediaTrackConstraints = {
-    echoCancellation: useMicProcessing,
-    noiseSuppression: useMicProcessing,
-    autoGainControl: useMicProcessing,
-    channelCount: { ideal: 1 },
-  };
-
-  if (micId) {
-    constraints.deviceId = { exact: micId };
-  }
-
-  return constraints;
-}
-
-async function resolveSelectedMicLabel(micId: string): Promise<string | null> {
-  if (!micId || !navigator.mediaDevices?.enumerateDevices) {
-    return null;
-  }
-
-  let permissionStream: MediaStream | null = null;
-  try {
-    let devices = await navigator.mediaDevices.enumerateDevices();
-    let selected = devices.find(
-      (device) => device.kind === "audioinput" && device.deviceId === micId,
-    );
-    const knownLabel = selected?.label?.trim();
-    if (knownLabel) {
-      return knownLabel;
-    }
-
-    // WebKit hides device labels until microphone permission has been granted.
-    // Open the exact selected device briefly so the native recorder can resolve
-    // the same microphone and feed its PCM directly to the realtime transport.
-    permissionStream = await navigator.mediaDevices.getUserMedia({
-      audio: getAudioConstraints(micId),
-    });
-    const trackLabel = permissionStream.getAudioTracks()[0]?.label?.trim();
-    if (trackLabel) {
-      return trackLabel;
-    }
-
-    devices = await navigator.mediaDevices.enumerateDevices();
-    selected = devices.find(
-      (device) => device.kind === "audioinput" && device.deviceId === micId,
-    );
-    return selected?.label?.trim() || null;
-  } catch (error) {
-    logError(
-      "RECORDING",
-      `Failed to resolve selected mic label: ${formatErrorMessage(error)}`,
-    );
-    return null;
-  } finally {
-    permissionStream?.getTracks().forEach((track) => track.stop());
-  }
 }
 
 async function waitForTrackReady(
@@ -514,7 +457,7 @@ export function useWidgetRecording({
         );
       }
 
-      const audioConstraints = getAudioConstraints(activeSettings.micId);
+      const audioConstraints = getVoiceAudioConstraints(activeSettings.micId);
       if (activeSettings.micId) {
         logInfo("RECORDING", `Using preferred mic: ${activeSettings.micId}`);
       } else {

@@ -5,6 +5,7 @@ import {
   isBundledLocalLlmEndpoint,
   isBundledLocalLlmModelId,
   isLocalLlmEndpoint,
+  localLlmDeselectionSettingsPatch,
   localLlmDeleteSettingsPatch,
   selectedLocalLlmModelId,
 } from "./localLlmSelection";
@@ -81,6 +82,14 @@ describe("local LLM selection helpers", () => {
         "qwen2.5-3b-instruct-q4",
       ),
     ).toBeNull();
+  });
+
+  it("clears the active text model without deleting its local file", () => {
+    expect(localLlmDeselectionSettingsPatch()).toEqual({
+      llmEndpoint: "",
+      llmModel: "none",
+      llmLocalModelId: "",
+    });
   });
 
   it("keeps a custom endpoint when deleting a bundled model file", () => {

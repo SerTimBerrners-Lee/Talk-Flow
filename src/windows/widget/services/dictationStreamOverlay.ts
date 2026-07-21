@@ -183,6 +183,7 @@ export function createCallLiveDictationOptions(
 export function isApiSttStreamingEnabled(settings: AppSettings): boolean {
   if (!settings.realtimeTranscriptionEnabled || !settings.useOwnKey)
     return false;
+  if (isLocalSttSettings(settings)) return false;
   const adapter = STREAMING_STT_ADAPTERS.find(
     (candidate) => candidate.id === settings.selectedApiAdapter,
   );

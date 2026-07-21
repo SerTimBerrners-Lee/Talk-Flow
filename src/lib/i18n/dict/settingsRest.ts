@@ -173,6 +173,7 @@ export const settingsRest = {
     en: "Select a text model. Summarization is unavailable without one (transcription still works).",
   },
   "localLlm.select": { ru: "Выбрать", en: "Select" },
+  "localLlm.deselect": { ru: "Отменить выбор", en: "Deselect" },
   "localLlm.delete": { ru: "Удалить", en: "Delete" },
 
   // ===== SettingsTab remaining literals (windows/settings/tabs/SettingsTab.tsx) =====

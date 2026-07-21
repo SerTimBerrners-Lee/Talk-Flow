@@ -435,6 +435,10 @@ export const settingsModels = {
     ru: "Быстрая локальная модель OPUS-MT для перевода с русского на английский через CTranslate2. Меньше и быстрее универсальной NLLB-200.",
     en: "A fast local OPUS-MT model for Russian to English translation via CTranslate2. Smaller and faster than the universal NLLB-200 model.",
   },
+  "models.localOther.opus-mt-en-ru.description": {
+    ru: "Быстрая локальная INT8-модель OPUS-MT для перевода с английского на русский через CTranslate2. Меньше и быстрее универсальной NLLB-200.",
+    en: "A fast local INT8 OPUS-MT model for English to Russian translation via CTranslate2. Smaller and faster than the universal NLLB-200 model.",
+  },
 
   // ── Speed / accuracy value labels ──
   "models.speedValue.veryFast": { ru: "очень быстро", en: "very fast" },

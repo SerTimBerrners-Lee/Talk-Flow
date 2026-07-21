@@ -25,6 +25,7 @@ import {
   widgetStackHeight,
   widgetStackWidth,
 } from "../windows/widget/widgetConstants";
+import { OnboardingProgress } from "./onboarding/OnboardingShell";
 
 interface PermissionRowProps {
   icon: React.ReactNode;
@@ -173,6 +174,7 @@ function PermissionRow({
 
 interface PermissionScreenProps {
   onComplete: () => void;
+  onboardingStep?: number;
 }
 
 interface AppRuntimeInfo {
@@ -218,7 +220,10 @@ function microphoneHelpText(platform: DesktopPlatform, t: TranslateFn): string {
   return t("permission.micHelp.default");
 }
 
-export function PermissionScreen({ onComplete }: PermissionScreenProps) {
+export function PermissionScreen({
+  onComplete,
+  onboardingStep,
+}: PermissionScreenProps) {
   const { t } = useI18n();
   const [micStatus, setMicStatus] = useState<PermissionStatus>("unknown");
   const [accStatus, setAccStatus] = useState<PermissionStatus>("unknown");
@@ -454,12 +459,13 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
         WebkitBackdropFilter: "blur(20px)",
         zIndex: 9999,
         padding: 24,
+        overflowY: "auto",
       }}
     >
       <div
         style={{
           width: "100%",
-          height: "100%",
+          minHeight: "100%",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -476,8 +482,13 @@ export function PermissionScreen({ onComplete }: PermissionScreenProps) {
             background: "var(--surface-hi)",
             border: "1px solid var(--border)",
             boxShadow: "var(--shadow-panel)",
+            position: "relative",
+            overflow: "hidden",
           }}
         >
+          {onboardingStep !== undefined && (
+            <OnboardingProgress currentStep={onboardingStep} />
+          )}
           {/* Header */}
           <div style={{ display: "grid", gap: 8 }}>
             <h1

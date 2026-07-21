@@ -3,6 +3,7 @@ import { describe, expect, it } from "bun:test";
 import {
   buildSelectionTranslationPrompt,
   buildSelectionTranslationSourcePayload,
+  sanitizeSelectionTranslationOutput,
   translateSelectedText,
   translateSelectedTextWithBackend,
 } from "./selectionTranslation";
@@ -26,6 +27,7 @@ describe("selected text translation prompt", () => {
     expect(prompt).toContain("Верни только перевод");
     expect(prompt).toContain("Исходный язык определи автоматически");
     expect(prompt).toContain("Не проси пользователя предоставить текст");
+    expect(prompt).toContain("Не выводи внутренние рассуждения");
     expect(prompt).toContain("переводи только содержимое между маркерами");
     expect(prompt).toContain("уже на целевом языке");
   });
@@ -41,6 +43,14 @@ describe("selected text translation prompt", () => {
       "Последние записи доступны для копирования и удаления.",
     );
     expect(payload).toContain("<<<END_TALKIS_TRANSLATION_SOURCE>>>");
+  });
+
+  it("removes a leading Qwen reasoning block from model output", () => {
+    expect(
+      sanitizeSelectionTranslationOutput(
+        "<think>Internal reasoning that must stay hidden.</think>\n\nПеревод",
+      ),
+    ).toBe("Перевод");
   });
 });
 
@@ -176,6 +186,120 @@ describe("selected text translation backend selection", () => {
     expect(result).toBe("Hello");
     expect(opusCalls).toEqual(["opus-mt-ru-en:Привет:en"]);
     expect(llmCalls).toEqual([]);
+  });
+
+  it("uses OPUS EN -> RU when the reverse pair translator is selected", async () => {
+    const translatorCalls: string[] = [];
+
+    const result = await translateSelectedText({
+      text: "Lawyers need this man",
+      settings: settings({
+        translation: {
+          selectionTargetLanguage: "ru",
+          selectionLocalTranslatorProvider: "opus-mt-en-ru",
+        },
+      }),
+      deps: {
+        listLocalTranslators: async () => [
+          { provider: "opus-mt-en-ru", status: "ready" },
+        ],
+        translateWithLocalTranslator: async ({
+          provider,
+          text,
+          target_language,
+        }) => {
+          translatorCalls.push(`${provider}:${text}:${target_language}`);
+          return "Адвокатам нужен этот человек";
+        },
+        resolveSummaryBackend: () => null,
+      },
+    });
+
+    expect(result).toBe("Адвокатам нужен этот человек");
+    expect(translatorCalls).toEqual(["opus-mt-en-ru:Lawyers need this man:ru"]);
+  });
+
+  it("uses installed OPUS EN -> RU as the reverse-pair fallback", async () => {
+    const translatorCalls: string[] = [];
+
+    const result = await translateSelectedText({
+      text: "This man needs a lawyer",
+      settings: settings({
+        translation: {
+          selectionTargetLanguage: "ru",
+          selectionLocalTranslatorProvider: "opus-mt-ru-en",
+        },
+      }),
+      deps: {
+        listLocalTranslators: async () => [
+          { provider: "opus-mt-ru-en", status: "ready" },
+          { provider: "opus-mt-en-ru", status: "ready" },
+          { provider: "nllb-200", status: "ready" },
+        ],
+        translateWithLocalTranslator: async ({ provider }) => {
+          translatorCalls.push(provider);
+          return "Этому человеку нужен адвокат";
+        },
+        resolveSummaryBackend: () => null,
+      },
+    });
+
+    expect(result).toBe("Этому человеку нужен адвокат");
+    expect(translatorCalls).toEqual(["opus-mt-en-ru"]);
+  });
+
+  it("uses installed NLLB when OPUS cannot translate to the selected target", async () => {
+    const translatorCalls: string[] = [];
+    const llmCalls: string[] = [];
+
+    const result = await translateSelectedText({
+      text: "This man needs a lawyer",
+      settings: settings({
+        translation: {
+          selectionTargetLanguage: "ru",
+          selectionLocalTranslatorProvider: "opus-mt-ru-en",
+        },
+      }),
+      deps: {
+        listLocalTranslators: async () => [
+          { provider: "opus-mt-ru-en", status: "ready" },
+          { provider: "nllb-200", status: "ready" },
+        ],
+        translateWithLocalTranslator: async ({ provider, target_language }) => {
+          translatorCalls.push(`${provider}:${target_language}`);
+          return "Этому человеку нужен адвокат";
+        },
+        resolveSummaryBackend: () => ({
+          kind: "local",
+          label: "test",
+          run: async ({ text }) => {
+            llmCalls.push(text);
+            return "LLM";
+          },
+        }),
+      },
+    });
+
+    expect(result).toBe("Этому человеку нужен адвокат");
+    expect(translatorCalls).toEqual(["nllb-200:ru"]);
+    expect(llmCalls).toEqual([]);
+  });
+
+  it("removes Qwen reasoning from an LLM fallback result", async () => {
+    const result = await translateSelectedText({
+      text: "Lawyers need this man",
+      settings: settings(),
+      deps: {
+        resolveSummaryBackend: () => ({
+          kind: "local",
+          label: "test",
+          run: async () =>
+            "<think>Explain the translation internally.</think>\nАдвокатам нужен этот человек",
+        }),
+      },
+    });
+
+    expect(result).toBe("Адвокатам нужен этот человек");
   });
 
   it("falls back to LLM when NLLB fails", async () => {

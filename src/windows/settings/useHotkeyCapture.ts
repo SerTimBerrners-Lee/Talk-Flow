@@ -393,6 +393,8 @@ export function useHotkeyCapture({
         return;
       }
       if (event.key !== "Enter" && event.key !== " ") return;
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey)
+        return;
       event.preventDefault();
       event.stopPropagation();
       void start();

@@ -63,6 +63,10 @@ export function isSelectedLocalLlmModel(
   return selectedLocalLlmModelId(settings) === modelId;
 }
 
+export function localLlmDeselectionSettingsPatch(): Partial<AppSettings> {
+  return { llmEndpoint: "", llmModel: "none", llmLocalModelId: "" };
+}
+
 export function localLlmDeleteSettingsPatch(
   settings: LocalLlmSelectionSettings,
   modelId: string,
@@ -71,7 +75,7 @@ export function localLlmDeleteSettingsPatch(
     return null;
   }
 
-  return { llmEndpoint: "", llmModel: "none", llmLocalModelId: "" };
+  return localLlmDeselectionSettingsPatch();
 }
 
 export function customLocalLlmEndpointSettingsPatch({

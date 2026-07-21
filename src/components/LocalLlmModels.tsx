@@ -19,6 +19,7 @@ import { useI18n } from "../lib/i18n";
 import { ModelCardDisclosureButton } from "./ModelCardDisclosureButton";
 import {
   isLocalLlmEndpoint,
+  localLlmDeselectionSettingsPatch,
   localLlmDeleteSettingsPatch,
   selectedLocalLlmModelId,
 } from "../lib/localLlmSelection";
@@ -70,7 +71,9 @@ export function LocalLlmModels({
 }) {
   const { t } = useI18n();
   const [models, setModels] = useState<LocalLlmModel[]>([]);
-  const [progress, setProgress] = useState<Record<string, DownloadProgress>>({});
+  const [progress, setProgress] = useState<Record<string, DownloadProgress>>(
+    {},
+  );
   const [busy, setBusy] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -183,14 +186,34 @@ export function LocalLlmModels({
     setBusy(model.id);
     setError(null);
     try {
-      const baseUrl = await invoke<string>("start_local_llm", { modelId: model.id });
+      const baseUrl = await invoke<string>("start_local_llm", {
+        modelId: model.id,
+      });
       // Mark this as the BUNDLED runtime so summary can auto-(re)start the sidecar
       // after an app restart (the process dies but the endpoint stays persisted).
-      update({ llmEndpoint: baseUrl, llmModel: model.id, llmLocalModelId: model.id });
+      update({
+        llmEndpoint: baseUrl,
+        llmModel: model.id,
+        llmLocalModelId: model.id,
+      });
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
+      setBusy(null);
+    }
+  };
+
+  const deselect = async (model: LocalLlmModel): Promise<void> => {
+    setBusy(model.id);
+    setError(null);
+    try {
+      await invoke<void>("stop_local_llm");
+    } catch {
+      // The persisted selection must still be cleared if the runtime has
+      // already stopped or is temporarily unavailable.
+    } finally {
+      update(localLlmDeselectionSettingsPatch());
       setBusy(null);
     }
   };
@@ -200,29 +223,42 @@ export function LocalLlmModels({
 
   const translateSpeedValue = (value: string): string => {
     switch (value) {
-      case "очень быстро": return t("models.speedValue.veryFast");
-      case "быстро": return t("models.speedValue.fast");
-      case "средне": return t("models.speedValue.medium");
-      default: return value;
+      case "очень быстро":
+        return t("models.speedValue.veryFast");
+      case "быстро":
+        return t("models.speedValue.fast");
+      case "средне":
+        return t("models.speedValue.medium");
+      default:
+        return value;
     }
   };
 
   const translateAccuracyValue = (value: string): string => {
     switch (value) {
-      case "максимальная": return t("models.accuracyValue.maximum");
-      case "высокая": return t("models.accuracyValue.high");
-      case "средняя": return t("models.accuracyValue.medium");
-      case "средняя+": return t("models.accuracyValue.mediumPlus");
-      case "базовая": return t("models.accuracyValue.basic");
-      case "низкая+": return t("models.accuracyValue.lowPlus");
-      case "служебная": return t("models.accuracyValue.utility");
-      default: return value;
+      case "максимальная":
+        return t("models.accuracyValue.maximum");
+      case "высокая":
+        return t("models.accuracyValue.high");
+      case "средняя":
+        return t("models.accuracyValue.medium");
+      case "средняя+":
+        return t("models.accuracyValue.mediumPlus");
+      case "базовая":
+        return t("models.accuracyValue.basic");
+      case "низкая+":
+        return t("models.accuracyValue.lowPlus");
+      case "служебная":
+        return t("models.accuracyValue.utility");
+      default:
+        return value;
     }
   };
 
   const translateLanguageValue = (value: string): string => {
     if (value === "English") return t("models.languageValue.english");
-    if (/^\d+\+?$/.test(value)) return t("models.languageValue.count", { value });
+    if (/^\d+\+?$/.test(value))
+      return t("models.languageValue.count", { value });
     return value;
   };
 
@@ -231,30 +267,82 @@ export function LocalLlmModels({
     const accuracyValueLabel = translateAccuracyValue(model.accuracy);
     const languageValueLabel = translateLanguageValue(model.language_label);
     const stats: { key: string; title: string; Icon: Icon; value: string }[] = [
-      { key: "speed", title: t("models.stat.speedTitle", { value: speedValueLabel }), Icon: IconGauge, value: speedValueLabel },
-      { key: "accuracy", title: t("models.stat.accuracyTitle", { value: accuracyValueLabel }), Icon: IconTargetArrow, value: accuracyValueLabel },
+      {
+        key: "speed",
+        title: t("models.stat.speedTitle", { value: speedValueLabel }),
+        Icon: IconGauge,
+        value: speedValueLabel,
+      },
+      {
+        key: "accuracy",
+        title: t("models.stat.accuracyTitle", { value: accuracyValueLabel }),
+        Icon: IconTargetArrow,
+        value: accuracyValueLabel,
+      },
     ];
 
     return (
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 9, flexWrap: "nowrap", minWidth: 0, overflow: "hidden" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          marginTop: 9,
+          flexWrap: "nowrap",
+          minWidth: 0,
+          overflow: "hidden",
+        }}
+      >
         <div
-          title={t("models.stat.downloadSizeTitle", { value: model.size_label })}
-          aria-label={t("models.stat.downloadSizeTitle", { value: model.size_label })}
-          style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}
+          title={t("models.stat.downloadSizeTitle", {
+            value: model.size_label,
+          })}
+          aria-label={t("models.stat.downloadSizeTitle", {
+            value: model.size_label,
+          })}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 5,
+            flexShrink: 0,
+          }}
         >
           <IconDownload size={14} stroke={1.9} color="var(--text-hi)" />
-          <span style={{ fontSize: 12, fontWeight: 650, color: "var(--text-hi)", lineHeight: 1, whiteSpace: "nowrap" }}>
+          <span
+            style={{
+              fontSize: 12,
+              fontWeight: 650,
+              color: "var(--text-hi)",
+              lineHeight: 1,
+              whiteSpace: "nowrap",
+            }}
+          >
             {model.size_label}
           </span>
         </div>
 
         <div
           title={t("models.stat.languagesTitle", { value: languageValueLabel })}
-          aria-label={t("models.stat.languagesTitle", { value: languageValueLabel })}
-          style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}
+          aria-label={t("models.stat.languagesTitle", {
+            value: languageValueLabel,
+          })}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 5,
+            flexShrink: 0,
+          }}
         >
           <IconGlobe size={14} stroke={1.9} color="var(--text-hi)" />
-          <span style={{ fontSize: 12, fontWeight: 650, color: "var(--text-hi)", lineHeight: 1, whiteSpace: "nowrap" }}>
+          <span
+            style={{
+              fontSize: 12,
+              fontWeight: 650,
+              color: "var(--text-hi)",
+              lineHeight: 1,
+              whiteSpace: "nowrap",
+            }}
+          >
             {languageValueLabel}
           </span>
         </div>
@@ -264,10 +352,23 @@ export function LocalLlmModels({
             key={key}
             title={title}
             aria-label={title}
-            style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 5,
+              flexShrink: 0,
+            }}
           >
             <Icon size={14} stroke={1.9} color="var(--text-hi)" />
-            <span style={{ fontSize: 12, fontWeight: 650, color: "var(--text-hi)", lineHeight: 1, whiteSpace: "nowrap" }}>
+            <span
+              style={{
+                fontSize: 12,
+                fontWeight: 650,
+                color: "var(--text-hi)",
+                lineHeight: 1,
+                whiteSpace: "nowrap",
+              }}
+            >
               {value}
             </span>
           </div>
@@ -279,10 +380,19 @@ export function LocalLlmModels({
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div>
-        <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-hi)", marginBottom: 4 }}>
+        <div
+          style={{
+            fontSize: 15,
+            fontWeight: 700,
+            color: "var(--text-hi)",
+            marginBottom: 4,
+          }}
+        >
           {t("localLlm.title")}
         </div>
-        <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>
+        <div
+          style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}
+        >
           {t("localLlm.desc")}
         </div>
       </div>
@@ -318,7 +428,11 @@ export function LocalLlmModels({
             border: "1px solid var(--border-subtle)",
           }}
         >
-          <IconAlertCircle size={15} stroke={2} style={{ flexShrink: 0, marginTop: 1, color: "var(--accent)" }} />
+          <IconAlertCircle
+            size={15}
+            stroke={2}
+            style={{ flexShrink: 0, marginTop: 1, color: "var(--accent)" }}
+          />
           <span>{t("localLlm.required")}</span>
         </div>
       )}
@@ -356,10 +470,23 @@ export function LocalLlmModels({
             <div
               key={model.id}
               className="card"
-              style={{ padding: 0, overflow: "hidden", position: "relative", background: "var(--surface)" }}
+              style={{
+                padding: 0,
+                overflow: "hidden",
+                position: "relative",
+                background: "var(--surface)",
+              }}
             >
               <div
-                style={{ position: "relative", padding: "12px 14px", display: "flex", alignItems: "center", gap: 12, textAlign: "left", fontFamily: "var(--font-main)" }}
+                style={{
+                  position: "relative",
+                  padding: "12px 14px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  textAlign: "left",
+                  fontFamily: "var(--font-main)",
+                }}
               >
                 <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
                   <div
@@ -371,7 +498,14 @@ export function LocalLlmModels({
                       marginBottom: 3,
                     }}
                   >
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        minWidth: 0,
+                      }}
+                    >
                       <div
                         style={{
                           fontSize: 15,
@@ -385,7 +519,17 @@ export function LocalLlmModels({
                         {model.label}
                       </div>
                       {model.recommended && (
-                        <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text-hi)", padding: "3px 7px", borderRadius: 999, background: "var(--control-muted)", flexShrink: 0 }}>
+                        <div
+                          style={{
+                            fontSize: 10,
+                            fontWeight: 800,
+                            color: "var(--text-hi)",
+                            padding: "3px 7px",
+                            borderRadius: 999,
+                            background: "var(--control-muted)",
+                            flexShrink: 0,
+                          }}
+                        >
                           {t("models.local.recommendedBadge")}
                         </div>
                       )}
@@ -405,156 +549,191 @@ export function LocalLlmModels({
                     </div>
                   </div>
                   <div style={{ paddingRight: 34 }}>
-                    <div style={{ fontSize: 12, lineHeight: 1.45, color: "var(--text-mid)" }}>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        lineHeight: 1.45,
+                        color: "var(--text-mid)",
+                      }}
+                    >
                       {model.description}
                     </div>
                     {renderLocalLlmStats(model)}
                   </div>
                   <ModelCardDisclosureButton
                     expanded={open}
-                    onToggle={() => setExpandedId(expandedId === model.id ? null : model.id)}
+                    onToggle={() =>
+                      setExpandedId(expandedId === model.id ? null : model.id)
+                    }
                     label={t(open ? "mainTab.collapse" : "mainTab.expand")}
                   />
                 </div>
               </div>
 
               {open && (
-              <div
-                style={{
-                  borderTop: "1px solid var(--border-subtle)",
-                  padding: "12px 14px",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 10,
-                }}
-              >
-                {isDownloading && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                <div
+                  style={{
+                    borderTop: "1px solid var(--border-subtle)",
+                    padding: "12px 14px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 10,
+                  }}
+                >
+                  {isDownloading && (
                     <div
                       style={{
                         display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        gap: 12,
-                        fontSize: 12,
-                        color: "var(--text-mid)",
-                        fontWeight: 650,
-                      }}
-                    >
-                      <span>{t("localLlm.downloadingModel")}</span>
-                      <span style={{ color: "var(--text-hi)" }}>
-                        {prog?.percent != null ? `${prog.percent}%` : t("localLlm.preparing")}
-                      </span>
-                    </div>
-                    <div
-                      style={{
-                        width: "100%",
-                        height: 8,
-                        borderRadius: 999,
-                        background: "var(--progress-track)",
-                        overflow: "hidden",
+                        flexDirection: "column",
+                        gap: 7,
                       }}
                     >
                       <div
                         style={{
-                          width: `${prog?.percent ?? 2}%`,
-                          minWidth: prog?.percent == null ? 18 : 0,
-                          height: "100%",
-                          borderRadius: 999,
-                          background: "var(--accent)",
-                          transition: "width 0.2s ease",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 12,
+                          fontSize: 12,
+                          color: "var(--text-mid)",
+                          fontWeight: 650,
                         }}
-                      />
+                      >
+                        <span>{t("localLlm.downloadingModel")}</span>
+                        <span style={{ color: "var(--text-hi)" }}>
+                          {prog?.percent != null
+                            ? `${prog.percent}%`
+                            : t("localLlm.preparing")}
+                        </span>
+                      </div>
+                      <div
+                        style={{
+                          width: "100%",
+                          height: 8,
+                          borderRadius: 999,
+                          background: "var(--progress-track)",
+                          overflow: "hidden",
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: `${prog?.percent ?? 2}%`,
+                            minWidth: prog?.percent == null ? 18 : 0,
+                            height: "100%",
+                            borderRadius: 999,
+                            background: "var(--accent)",
+                            transition: "width 0.2s ease",
+                          }}
+                        />
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
 
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 10,
-                    flexWrap: "wrap",
-                  }}
-                >
                   <div
                     style={{
                       display: "flex",
                       alignItems: "center",
-                      gap: 8,
+                      justifyContent: "space-between",
+                      gap: 10,
                       flexWrap: "wrap",
-                      marginLeft: "auto",
                     }}
                   >
-                    {!model.downloaded ? (
-                      isDownloading ? (
-                        <button
-                          onClick={() => void cancelDownload(model)}
-                          style={{
-                            ...ACTION_BUTTON_BASE,
-                            background: "var(--control-muted)",
-                            color: "var(--text-hi)",
-                          }}
-                        >
-                          <IconX size={14} stroke={2.2} />
-                          {t("localLlm.cancel")}
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => void download(model)}
-                          style={{
-                            ...ACTION_BUTTON_BASE,
-                            background: "var(--accent)",
-                            color: "var(--accent-contrast)",
-                          }}
-                        >
-                          <IconDownload size={14} stroke={2.2} />
-                          {t("localLlm.download")}
-                        </button>
-                      )
-                    ) : (
-                      <>
-                        {!isSelected && (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        flexWrap: "wrap",
+                        marginLeft: "auto",
+                      }}
+                    >
+                      {!model.downloaded ? (
+                        isDownloading ? (
                           <button
-                            onClick={() => void useForSummary(model)}
+                            onClick={() => void cancelDownload(model)}
+                            style={{
+                              ...ACTION_BUTTON_BASE,
+                              background: "var(--control-muted)",
+                              color: "var(--text-hi)",
+                            }}
+                          >
+                            <IconX size={14} stroke={2.2} />
+                            {t("localLlm.cancel")}
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => void download(model)}
+                            style={{
+                              ...ACTION_BUTTON_BASE,
+                              background: "var(--accent)",
+                              color: "var(--accent-contrast)",
+                            }}
+                          >
+                            <IconDownload size={14} stroke={2.2} />
+                            {t("localLlm.download")}
+                          </button>
+                        )
+                      ) : (
+                        <>
+                          {isSelected ? (
+                            <button
+                              type="button"
+                              onClick={() => void deselect(model)}
+                              disabled={isBusy}
+                              style={{
+                                ...ACTION_BUTTON_BASE,
+                                background: "var(--control-muted)",
+                                color: "var(--text-hi)",
+                                opacity: isBusy ? 0.7 : 1,
+                              }}
+                            >
+                              <IconX size={14} stroke={2.2} />
+                              {t("localLlm.deselect")}
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => void useForSummary(model)}
+                              disabled={isBusy}
+                              style={{
+                                ...ACTION_BUTTON_BASE,
+                                background: "var(--control-muted)",
+                                color: "var(--text-hi)",
+                                opacity: isBusy ? 0.7 : 1,
+                              }}
+                            >
+                              {isBusy ? (
+                                <IconLoader2
+                                  size={14}
+                                  stroke={2.2}
+                                  style={{
+                                    animation: "spin 1s linear infinite",
+                                  }}
+                                />
+                              ) : (
+                                <IconCheck size={14} stroke={2.5} />
+                              )}
+                              {t("localLlm.select")}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => void remove(model)}
                             disabled={isBusy}
                             style={{
                               ...ACTION_BUTTON_BASE,
                               background: "var(--control-muted)",
                               color: "var(--text-hi)",
-                              opacity: isBusy ? 0.7 : 1,
                             }}
                           >
-                            {isBusy ? (
-                              <IconLoader2
-                                size={14}
-                                stroke={2.2}
-                                style={{ animation: "spin 1s linear infinite" }}
-                              />
-                            ) : (
-                              <IconCheck size={14} stroke={2.5} />
-                            )}
-                            {t("localLlm.select")}
+                            <IconTrash size={14} stroke={2.2} />
+                            {t("localLlm.delete")}
                           </button>
-                        )}
-                        <button
-                          onClick={() => void remove(model)}
-                          disabled={isBusy}
-                          style={{
-                            ...ACTION_BUTTON_BASE,
-                            background: "var(--control-muted)",
-                            color: "var(--text-hi)",
-                          }}
-                        >
-                          <IconTrash size={14} stroke={2.2} />
-                          {t("localLlm.delete")}
-                        </button>
-                      </>
-                    )}
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
               )}
             </div>
           );
