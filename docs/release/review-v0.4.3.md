@@ -30,9 +30,10 @@
   - Strict recursive `codesign` verification passed with `Identifier=com.trixter.talkis`.
   - `hdiutil verify` reports the final DMG checksum as valid.
   - SHA-256: DMG `5ecac3ca2103e382dd4f09e62b2f43eec5d111a370826173fb744b4b6d6563eb`; updater archive `70d72135f438e465cdde6341f175a6a85614a6c5abee11ec3b00d76de2e59fc4`; signature file `00795453db718cf8c9cacfed7aed28787990b5a6a75dfa69ef0c72030e8bcfaa`.
-- GitHub Release Preflight: pending.
-- Native/GitHub Windows build: pending.
-- Native/GitHub Linux build: pending.
+- GitHub Release Preflight run `29903049523` on commit `785f57f`: passed for `Preflight macos`, `Preflight windows`, and `Preflight linux`.
+  - The review-result-only commit created after this run must receive the same exact-commit preflight before merge or tag.
+- Native/GitHub Windows build: passed in Release Preflight run `29903049523`, including the x86-64 PE architecture gate for the app and bundled sidecars.
+- Native/GitHub Linux build: passed in Release Preflight run `29903049523` on Ubuntu 24.04 with PipeWire development dependencies installed.
 - Additional manual checks:
   - Reviewed the complete `v0.4.2..release/v0.4.3` source/config/documentation diff and the rebuilt arm64 `talkis-llm` sidecar.
   - Verified the macOS app reports version `0.4.3`, bundle identifier `com.trixter.talkis`, and arm64 Mach-O application/LLM binaries.
@@ -48,7 +49,7 @@
 ## Findings
 
 - Blockers:
-  - Local release checks, signed macOS build, and exact-commit GitHub Release Preflight must pass before tagging.
+  - Do not merge or tag until the review-result-only commit receives green `Preflight macos`, `Preflight windows`, and `Preflight linux` checks.
 - Non-blocking issues:
   - `talkis-pc-884`: Vite reports a mixed static/dynamic `SummaryModal.tsx` import and an 894.00 kB main JavaScript chunk.
 - Follow-ups after release:
@@ -56,6 +57,6 @@
 
 ## Decision
 
-- Ready for `main` merge: no, pending exact-commit Release Preflight.
-- Release preflight green on exact tag commit: no, pending.
-- Ready for tag publish: no, pending.
+- Ready for `main` merge: yes after exact-commit Release Preflight passes on this review update.
+- Release preflight green on reviewed implementation commit: yes, run `29903049523` on `785f57f`.
+- Ready for tag publish: yes after the same final exact-commit gate passes.
