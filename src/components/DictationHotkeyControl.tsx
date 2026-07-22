@@ -79,8 +79,12 @@ export function DictationHotkeyControl({
           minHeight: 38,
           padding: appearance === "keycaps" ? "4px" : "0 10px",
           borderRadius: 8,
-          justifyContent: appearance === "keycaps" ? "center" : "space-between",
-          gap: 8,
+          display: appearance === "field" ? "grid" : undefined,
+          gridTemplateColumns:
+            appearance === "field" ? "minmax(0, 1fr) auto" : undefined,
+          alignItems: appearance === "field" ? "center" : undefined,
+          justifyContent: appearance === "keycaps" ? "center" : undefined,
+          gap: appearance === "keycaps" ? 8 : 10,
           background: appearance === "keycaps" ? "transparent" : undefined,
           border:
             appearance === "keycaps"
@@ -98,11 +102,27 @@ export function DictationHotkeyControl({
           justifySelf: appearance === "keycaps" ? "center" : undefined,
         }}
       >
-        <HotkeyKeycaps
-          label={displayValue}
-          pressedKeys={pressedKeys}
-          size={appearance === "keycaps" ? "large" : "default"}
-        />
+        {appearance === "keycaps" ? (
+          <HotkeyKeycaps
+            label={displayValue}
+            pressedKeys={pressedKeys}
+            size="large"
+          />
+        ) : (
+          <span
+            style={{
+              minWidth: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              color: "var(--text-hi)",
+              fontSize: 12,
+              fontWeight: 700,
+            }}
+          >
+            {displayValue}
+          </span>
+        )}
         {appearance === "field" && (
           <span
             style={{
@@ -110,6 +130,7 @@ export function DictationHotkeyControl({
               fontSize: 11,
               letterSpacing: "0.08em",
               textTransform: "uppercase",
+              fontWeight: 600,
               flexShrink: 0,
             }}
           >
