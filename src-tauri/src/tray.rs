@@ -11,6 +11,7 @@ const TRAY_ID: &str = "talkis-main-tray";
 const TRAY_OPEN_ID: &str = "talkis-tray-open";
 const TRAY_HISTORY_ID: &str = "talkis-tray-history";
 const TRAY_FILE_ID: &str = "talkis-tray-file";
+const TRAY_CHAT_ID: &str = "talkis-tray-chat";
 const TRAY_MODELS_ID: &str = "talkis-tray-models";
 const TRAY_TRANSLATOR_ID: &str = "talkis-tray-translator";
 const TRAY_PROMPTS_ID: &str = "talkis-tray-prompts";
@@ -36,6 +37,7 @@ enum TrayAction {
     Open,
     History,
     FileTranscription,
+    Chat,
     Models,
     Translator,
     Prompts,
@@ -54,6 +56,7 @@ fn tray_action(menu_id: &str) -> Option<TrayAction> {
         TRAY_OPEN_ID => Some(TrayAction::Open),
         TRAY_HISTORY_ID => Some(TrayAction::History),
         TRAY_FILE_ID => Some(TrayAction::FileTranscription),
+        TRAY_CHAT_ID => Some(TrayAction::Chat),
         TRAY_MODELS_ID => Some(TrayAction::Models),
         TRAY_TRANSLATOR_ID => Some(TrayAction::Translator),
         TRAY_PROMPTS_ID => Some(TrayAction::Prompts),
@@ -116,6 +119,7 @@ pub fn setup(app: &App) -> tauri::Result<()> {
     let history_item = MenuItem::with_id(app, TRAY_HISTORY_ID, "История", true, None::<&str>)?;
     let file_item =
         MenuItem::with_id(app, TRAY_FILE_ID, "Транскрибация файла", true, None::<&str>)?;
+    let chat_item = MenuItem::with_id(app, TRAY_CHAT_ID, "Чат", true, None::<&str>)?;
     let models_item =
         MenuItem::with_id(app, TRAY_MODELS_ID, "Диктовка и модели", true, None::<&str>)?;
     let translator_item =
@@ -177,6 +181,7 @@ pub fn setup(app: &App) -> tauri::Result<()> {
             &navigation_separator,
             &history_item,
             &file_item,
+            &chat_item,
             &models_item,
             &translator_item,
             &prompts_item,
@@ -202,6 +207,7 @@ pub fn setup(app: &App) -> tauri::Result<()> {
             Some(TrayAction::Open) => open_settings(app),
             Some(TrayAction::History) => open_settings_tab(app, "main"),
             Some(TrayAction::FileTranscription) => open_settings_tab(app, "file"),
+            Some(TrayAction::Chat) => open_settings_tab(app, "chat"),
             Some(TrayAction::Models) => open_settings_tab(app, "model"),
             Some(TrayAction::Translator) => open_settings_tab(app, "interpreter"),
             Some(TrayAction::Prompts) => open_settings_tab(app, "style"),
@@ -241,6 +247,7 @@ mod tests {
             tray_action(TRAY_FILE_ID),
             Some(TrayAction::FileTranscription)
         );
+        assert_eq!(tray_action(TRAY_CHAT_ID), Some(TrayAction::Chat));
         assert_eq!(tray_action(TRAY_MODELS_ID), Some(TrayAction::Models));
         assert_eq!(
             tray_action(TRAY_TRANSLATOR_ID),

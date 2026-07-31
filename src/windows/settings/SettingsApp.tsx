@@ -47,6 +47,11 @@ import { logError } from "../../lib/logger";
 import { UserPanel } from "../../components/UserPanel";
 import { watchThemePreference } from "../../lib/theme";
 import {
+  isSettingsTab,
+  resolveInitialSettingsTab,
+  type SettingsTab as Tab,
+} from "./settingsNavigation";
+import {
   checkForAppUpdateNow,
   installAvailableAppUpdate,
   subscribeToAppUpdateState,
@@ -54,34 +59,8 @@ import {
 } from "../../lib/updater";
 import { useI18n, type MsgKey } from "../../lib/i18n";
 
-type Tab =
-  "main" | "file" | "interpreter" | "chat" | "settings" | "model" | "style";
-
-const SHOW_INTERPRETER_TAB = true;
-const SHOW_DEV_CHAT_TAB = import.meta.env.DEV;
-
-function isVisibleTab(tab: Tab): boolean {
-  if (tab === "interpreter") return SHOW_INTERPRETER_TAB;
-  if (tab === "chat") return SHOW_DEV_CHAT_TAB;
-  return true;
-}
-
 function resolveInitialTab(): Tab {
-  const requestedTab = new URLSearchParams(window.location.search).get("tab");
-
-  if (
-    requestedTab === "file" ||
-    requestedTab === "chat" ||
-    requestedTab === "settings" ||
-    requestedTab === "model" ||
-    requestedTab === "style"
-  ) {
-    return isVisibleTab(requestedTab) ? requestedTab : "main";
-  }
-
-  if (requestedTab === "interpreter") return "interpreter";
-
-  return "main";
+  return resolveInitialSettingsTab(window.location.search);
 }
 
 const TABS: { id: Tab; labelKey: MsgKey; icon: Icon; note: string }[] = [
@@ -101,7 +80,7 @@ const TABS: { id: Tab; labelKey: MsgKey; icon: Icon; note: string }[] = [
     id: "chat",
     labelKey: "settingsApp.tab.chat",
     icon: IconMessage,
-    note: "Dev chat",
+    note: "Чат с записями и текстом",
   },
   {
     id: "model",
@@ -143,8 +122,10 @@ function TabButton({
 
   return (
     <button
+      type="button"
       onClick={onClick}
       className={`nav-item ${isActive ? "active" : ""}`}
+      aria-current={isActive ? "page" : undefined}
       style={{ width: "100%", textAlign: "left", font: "inherit" }}
     >
       <Icon size={18} stroke={isActive ? 2.2 : 1.6} />
@@ -504,7 +485,7 @@ export function SettingsApp() {
     const unlisten = listen<SettingsNavigatePayload>(
       SETTINGS_NAVIGATE_EVENT,
       ({ payload }) => {
-        const nextTab = isVisibleTab(payload.tab) ? payload.tab : "main";
+        const nextTab = isSettingsTab(payload.tab) ? payload.tab : "main";
         setActiveTab(nextTab);
         setFocusedFileResultId(
           nextTab === "file" ? payload.resultId || null : null,
@@ -609,7 +590,7 @@ export function SettingsApp() {
             <SidebarLogo />
 
             <nav style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {TABS.filter((tab) => isVisibleTab(tab.id)).map((t) => (
+              {TABS.map((t) => (
                 <TabButton
                   key={t.id}
                   tab={t}
@@ -683,21 +664,19 @@ export function SettingsApp() {
                 >
                   <FileTranscriptionTab focusedEntryId={focusedFileResultId} />
                 </div>
-                {SHOW_DEV_CHAT_TAB && (
-                  <div
-                    style={{
-                      display: activeTab === "chat" ? "block" : "none",
-                      height: "100%",
-                      minHeight: 0,
-                      overflow: "hidden",
-                    }}
-                  >
-                    <DevChatTab
-                      isActive={activeTab === "chat"}
-                      onOpenHistoryEntry={openHistoryEntryFromChat}
-                    />
-                  </div>
-                )}
+                <div
+                  style={{
+                    display: activeTab === "chat" ? "block" : "none",
+                    height: "100%",
+                    minHeight: 0,
+                    overflow: "hidden",
+                  }}
+                >
+                  <DevChatTab
+                    isActive={activeTab === "chat"}
+                    onOpenHistoryEntry={openHistoryEntryFromChat}
+                  />
+                </div>
                 <div
                   style={{
                     display: activeTab === "settings" ? "block" : "none",

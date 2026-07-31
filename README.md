@@ -37,10 +37,18 @@ It is designed for practical daily work: IDEs, chats, notes, CRM fields, email, 
 - Transcribe audio and video files from the Files tab or by dropping files onto the widget.
 - Record calls with separate microphone and system-audio tracks on macOS, Windows, and Linux.
 - Keep local history for voice recordings, file transcriptions, calls, and live translations.
+- Chat with the configured text model to search and analyze Talkis records, summarize calls, find tasks, and translate text.
 - Run managed local STT through one native `transcribe.cpp` runtime for Whisper, GigaAM, Qwen ASR, NVIDIA Parakeet, plus local text summaries through a managed GGUF LLM runtime.
 - Build native bundles for macOS, Windows, and Linux.
 
 ## Latest Changes
+
+### v0.4.4
+
+- Promoted the existing model chat from development mode to the product navigation on macOS, Windows, and Linux.
+- Added direct Chat access from the desktop tray and production-safe `?tab=chat` navigation.
+- The chat can search local Talkis records with cited sources, summarize recent calls and transcripts, extract tasks, translate text, and use the configured Cloud, API, or local text model.
+- Chat messages remain stored locally, and existing development chat history is preserved during the product upgrade.
 
 ### v0.4.3
 
