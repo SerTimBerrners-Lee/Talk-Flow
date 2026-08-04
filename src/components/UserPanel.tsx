@@ -20,6 +20,7 @@ import {
   subscribeCloudProfile,
   type CloudAuthFlowId,
 } from "../lib/cloudAuth";
+import { formatCloudMilliTokens } from "../lib/cloudTokenFormat";
 import { logError, logInfo } from "../lib/logger";
 import { SETTINGS_UPDATED_EVENT } from "../lib/hotkeyEvents";
 import { useI18n } from "../lib/i18n";
@@ -249,7 +250,7 @@ export function UserPanel() {
   // ── Authenticated + available cloud balance ──────────────────
   if (profile && profile.subscription.active) {
     const balance = profile.wallet
-      ? formatCloudBalance(
+      ? formatCloudMilliTokens(
           profile.wallet.balanceMilliTokens,
           lang === "ru" ? "ru-RU" : "en-US",
         )
@@ -296,14 +297,6 @@ export function UserPanel() {
       <SubscriptionCTA onActivate={handleActivate} />
     </div>
   );
-}
-
-function formatCloudBalance(value: string, locale: string): string {
-  try {
-    return (BigInt(value) / 1_000n).toLocaleString(locale);
-  } catch {
-    return "0";
-  }
 }
 
 function ProfileRow({

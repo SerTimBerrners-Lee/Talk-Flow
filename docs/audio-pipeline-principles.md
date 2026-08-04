@@ -184,6 +184,14 @@ Fallback is required when:
 
 Do not remove the fallback unless selected-microphone parity is proven on macOS, Windows, and Linux.
 
+For Talkis Cloud dictation, realtime transcription drives the live overlay but
+is not the final quality source. After recording stops, reconcile every
+successful realtime result against the complete recorded WAV through the Cloud
+batch transcription path. Prefer the recognized batch result for history and
+paste; if batch reconciliation fails or returns no speech, keep the realtime
+result so a transient second request cannot discard an otherwise usable
+dictation. Local streaming behavior remains unchanged.
+
 ## Local STT Input Format
 
 Managed local Whisper expects:

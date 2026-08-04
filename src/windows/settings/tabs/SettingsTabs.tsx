@@ -48,6 +48,10 @@ import {
   deletePrompt,
 } from "../../../lib/store";
 import {
+  calculateCloudBalanceProgress,
+  formatCloudMilliTokens,
+} from "../../../lib/cloudTokenFormat";
+import {
   beginCloudAuthFlow,
   cancelCloudAuthFlow,
   CloudProfile,
@@ -1075,16 +1079,6 @@ function cloudMilliTokens(value: string | undefined, fallback = 0n): bigint {
   }
 }
 
-function formatCloudTokens(milliTokens: bigint, locale: string): string {
-  const whole = milliTokens / 1_000n;
-  const fraction = milliTokens % 1_000n;
-  if (fraction === 0n) return whole.toLocaleString(locale);
-  return `${whole.toLocaleString(locale)},${fraction
-    .toString()
-    .padStart(3, "0")
-    .replace(/0+$/, "")}`;
-}
-
 /**
  * Three-state cloud block shared by the recognition mode surfaces: available
  * wallet, signed-in empty wallet, or guest sign-in card.
@@ -1115,9 +1109,7 @@ function SubscriptionCards({
       profile.thresholds?.lowBalanceMilliTokens,
       DEFAULT_CLOUD_LOW_THRESHOLD,
     );
-    const boundedBalance = balance > target ? target : balance;
-    const progress =
-      target > 0n ? Number((boundedBalance * 10_000n) / target) / 100 : 0;
+    const progress = calculateCloudBalanceProgress(balance, reserved, target);
     const low = wallet?.low ?? balance < lowThreshold;
 
     return (
@@ -1178,7 +1170,7 @@ function SubscriptionCards({
               >
                 {wallet
                   ? t("models.subscription.balance", {
-                      tokens: formatCloudTokens(balance, locale),
+                      tokens: formatCloudMilliTokens(balance, locale),
                     })
                   : t("models.cloud.proReady")}
               </div>
@@ -1200,11 +1192,11 @@ function SubscriptionCards({
             <div
               role="progressbar"
               aria-label={t("models.subscription.balance", {
-                tokens: formatCloudTokens(balance, locale),
+                tokens: formatCloudMilliTokens(balance, locale),
               })}
               aria-valuemin={0}
               aria-valuemax={100}
-              aria-valuenow={Math.round(progress)}
+              aria-valuenow={progress.wholePercentage}
               style={{
                 height: 8,
                 borderRadius: 999,
@@ -1214,7 +1206,7 @@ function SubscriptionCards({
             >
               <div
                 style={{
-                  width: `${progress}%`,
+                  width: `${progress.percentage}%`,
                   height: "100%",
                   borderRadius: 999,
                   background: "var(--accent)",
@@ -1243,9 +1235,9 @@ function SubscriptionCards({
                   ? t("models.subscription.low")
                   : reserved > 0n
                     ? t("models.subscription.reserved", {
-                        tokens: formatCloudTokens(reserved, locale),
+                        tokens: formatCloudMilliTokens(reserved, locale),
                       })
-                    : `${Math.round(progress)}%`}
+                    : `${progress.wholePercentage}%`}
               </div>
               {low && (
                 <button

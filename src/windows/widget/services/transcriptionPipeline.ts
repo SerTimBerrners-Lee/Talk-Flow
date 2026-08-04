@@ -32,6 +32,7 @@ import {
   shouldApplyDictationStreamUpdate,
 } from "./dictationStreamOverlay";
 import type { LiveTranscriptionResult } from "./dictationStreamOverlay";
+import { resolveLiveTranscriptionReconciliationMode } from "./transcriptionReconciliation";
 
 export interface ProcessRecordingBlobParams {
   blob: Blob;
@@ -594,18 +595,6 @@ async function transcribeAudio({
   });
 }
 
-function shouldReconcileOpenAiRealtime(
-  settings: AppSettings,
-  liveTranscription: LiveTranscriptionResult | null,
-): boolean {
-  if (!liveTranscription || !settings.useOwnKey) return false;
-  if (settings.selectedApiAdapter !== "openai") return false;
-
-  const configuredModel =
-    settings.apiAdapters.openai?.model?.trim() || settings.whisperModel?.trim();
-  return configuredModel === "gpt-realtime-whisper";
-}
-
 async function resolveFinalTranscription({
   liveTranscription,
   audioBase64,
@@ -624,8 +613,12 @@ async function resolveFinalTranscription({
   const liveResult = liveTranscription
     ? { raw: liveTranscription.text, cleaned: liveTranscription.text }
     : null;
+  const reconciliationMode = resolveLiveTranscriptionReconciliationMode(
+    settings,
+    Boolean(liveTranscription),
+  );
 
-  if (!shouldReconcileOpenAiRealtime(settings, liveTranscription)) {
+  if (!reconciliationMode) {
     return (
       liveResult ||
       transcribeAudio({
@@ -639,9 +632,11 @@ async function resolveFinalTranscription({
   }
 
   try {
+    const sourceLabel =
+      reconciliationMode === "talkis-cloud" ? "Talkis Cloud" : "OpenAI";
     logInfo(
       "DICTATION_STREAM",
-      "Reconciling OpenAI realtime text with gpt-4o-transcribe batch result",
+      `Reconciling ${sourceLabel} realtime text with full-audio batch result: realtime_chars=${liveResult!.cleaned.length}`,
     );
     const batchResult = await transcribeAudio({
       audioBase64,
@@ -650,11 +645,22 @@ async function resolveFinalTranscription({
       settings,
       signal,
     });
-    return hasRecognizedSpeech(batchResult) ? batchResult : liveResult!;
+    if (!hasRecognizedSpeech(batchResult)) {
+      logInfo(
+        "DICTATION_STREAM",
+        `Batch reconciliation returned no speech; keeping ${sourceLabel} realtime text`,
+      );
+      return liveResult!;
+    }
+    logInfo(
+      "DICTATION_STREAM",
+      `Batch reconciliation selected final text: source=${reconciliationMode}, batch_chars=${batchResult.cleaned.length}`,
+    );
+    return batchResult;
   } catch (error) {
     logError(
       "DICTATION_STREAM",
-      `Batch reconciliation failed, keeping realtime text: ${formatErrorMessage(error)}`,
+      `Batch reconciliation failed, keeping ${reconciliationMode} realtime text: ${formatErrorMessage(error)}`,
     );
     return liveResult!;
   }
