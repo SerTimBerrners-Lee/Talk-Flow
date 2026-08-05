@@ -51,6 +51,7 @@ import {
   calculateCloudBalanceProgress,
   formatCloudMilliTokens,
 } from "../../../lib/cloudTokenFormat";
+import { talkisCloudModeSettingsPatch } from "../../../lib/modelMode";
 import {
   beginCloudAuthFlow,
   cancelCloudAuthFlow,
@@ -2413,24 +2414,6 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
   }, [settings?.useOwnKey, settings?.whisperEndpoint, type]);
 
   useEffect(() => {
-    if (!settings || type !== "model" || cloudProfile === undefined) return;
-    if (settings.useOwnKey || cloudProfile?.subscription.active === true)
-      return;
-
-    const nextSettings = {
-      ...settings,
-      useOwnKey: true,
-    };
-    setSettings(nextSettings);
-    settingsSaveQueueRef.current = settingsSaveQueueRef.current
-      .catch(() => {})
-      .then(() => saveSettings(nextSettings))
-      .then(() => {
-        emit(SETTINGS_UPDATED_EVENT).catch(() => {});
-      });
-  }, [cloudProfile, settings, type]);
-
-  useEffect(() => {
     const unlistenPromise = listen<LocalModelDownloadProgressEvent>(
       LOCAL_STT_MODEL_DOWNLOAD_PROGRESS_EVENT,
       (event) => {
@@ -3097,7 +3080,7 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
         return;
       }
 
-      update({ ...buildActiveApiAdapterSnapshot(), useOwnKey: false });
+      update(talkisCloudModeSettingsPatch(buildActiveApiAdapterSnapshot()));
       setModelModeView("cloud");
       resetTestState();
       resetInstallState();

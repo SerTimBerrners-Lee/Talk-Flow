@@ -8,6 +8,7 @@
  */
 
 import { getSettings, saveSettings } from "./store";
+import { talkisCloudModeSettingsPatch } from "./modelMode";
 import { logError, logInfo } from "./logger";
 import { emit } from "@tauri-apps/api/event";
 
@@ -185,7 +186,7 @@ export async function handleAuthToken(
   logInfo("CLOUD", "Received auth token from deep link");
   activeAuthFlowId = null;
   authRevision += 1;
-  await saveCloudSettings({ deviceToken: token, useOwnKey: false });
+  await saveCloudSettings(talkisCloudModeSettingsPatch({ deviceToken: token }));
   return fetchCloudProfile({ force: true });
 }
 
