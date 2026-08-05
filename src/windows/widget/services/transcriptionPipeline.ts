@@ -36,6 +36,11 @@ import {
   resolveLiveTranscriptionReconciliationMode,
   shouldAcceptLiveTranscription,
 } from "./transcriptionReconciliation";
+import {
+  guardTranscriptionResult,
+  isClearlySilentAudio,
+  type AudioSignalStats,
+} from "./transcriptionGuard";
 
 export interface ProcessRecordingBlobParams {
   blob: Blob;
@@ -43,6 +48,7 @@ export interface ProcessRecordingBlobParams {
   recordingStartTimestamp: number;
   liveTranscription?: LiveTranscriptionResult | null;
   dictationStream?: DictationStreamOverlaySession | null;
+  audioStats?: AudioSignalStats | null;
 }
 
 export interface ProcessRecordingBlobResult {
@@ -404,46 +410,6 @@ function toUserFacingErrorMessage(
   return tn("widget.error.processingFailed");
 }
 
-function normalizeTranscriptForPlaceholderCheck(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[.!?…\s]+$/g, "")
-    .replace(/\s+/g, " ");
-}
-
-function hasRecognizedSpeech(result: {
-  raw: string;
-  cleaned: string;
-}): boolean {
-  const raw = result.raw.trim();
-  const cleaned = result.cleaned.trim();
-  const normalizedRaw = normalizeTranscriptForPlaceholderCheck(raw);
-  const normalizedCleaned = normalizeTranscriptForPlaceholderCheck(cleaned);
-  const placeholderPhrases = new Set([
-    "продолжение следует",
-    "продолжение следует...",
-    "to be continued",
-  ]);
-
-  if (!raw && !cleaned) {
-    return false;
-  }
-
-  if (
-    placeholderPhrases.has(normalizedRaw) &&
-    (!cleaned || placeholderPhrases.has(normalizedCleaned))
-  ) {
-    return false;
-  }
-
-  if (!raw && placeholderPhrases.has(normalizedCleaned)) {
-    return false;
-  }
-
-  return true;
-}
-
 const PROXY_BASE_URL = "https://proxy.talkis.ru";
 
 async function transcribeViaProxy({
@@ -648,18 +614,28 @@ async function resolveFinalTranscription({
       settings,
       signal,
     });
-    if (!hasRecognizedSpeech(batchResult)) {
+    const guardedBatch = guardTranscriptionResult(
+      batchResult,
+      settings.language,
+    );
+    if (!guardedBatch.transcription) {
       logInfo(
         "DICTATION_STREAM",
-        `Batch reconciliation returned no speech; keeping ${sourceLabel} realtime text`,
+        `Batch reconciliation rejected text: reason=${guardedBatch.rejectionReason}; keeping ${sourceLabel} realtime text`,
       );
       return liveResult!;
     }
+    if (guardedBatch.cleanedFallbackReason) {
+      logInfo(
+        "DICTATION_STREAM",
+        `Batch cleanup rejected, using raw transcription: reason=${guardedBatch.cleanedFallbackReason}`,
+      );
+    }
     logInfo(
       "DICTATION_STREAM",
-      `Batch reconciliation selected final text: source=${reconciliationMode}, batch_chars=${batchResult.cleaned.length}`,
+      `Batch reconciliation selected final text: source=${reconciliationMode}, batch_chars=${guardedBatch.transcription.cleaned.length}`,
     );
-    return batchResult;
+    return guardedBatch.transcription;
   } catch (error) {
     logError(
       "DICTATION_STREAM",
@@ -740,12 +716,23 @@ export async function processRecordingBlob({
   recordingStartTimestamp,
   liveTranscription = null,
   dictationStream = null,
+  audioStats = null,
 }: ProcessRecordingBlobParams): Promise<ProcessRecordingBlobResult> {
-  const buffer = await blob.arrayBuffer();
-  const base64Audio = arrayBufferToBase64(buffer);
   const durationSeconds = Math.floor(
     (Date.now() - recordingStartTimestamp) / 1000,
   );
+  if (isClearlySilentAudio(audioStats)) {
+    logInfo(
+      "API",
+      `Skipping STT for silent recording: peak=${audioStats!.peak.toFixed(6)}, rms=${audioStats!.rms.toFixed(6)}`,
+    );
+    await dictationStream?.hide().catch(() => {});
+    dictationStream?.dispose();
+    return { durationSeconds, hasTranscription: false };
+  }
+
+  const buffer = await blob.arrayBuffer();
+  const base64Audio = arrayBufferToBase64(buffer);
   const audioMimeType = blob.type || "audio/webm";
   const audioFileName = audioMimeType.includes("wav")
     ? "recording.wav"
@@ -785,7 +772,7 @@ export async function processRecordingBlob({
 
   try {
     const apiStart = Date.now();
-    const transcription = await resolveFinalTranscription({
+    const transcriptionCandidate = await resolveFinalTranscription({
       liveTranscription,
       audioBase64: base64Audio,
       audioMimeType,
@@ -802,13 +789,18 @@ export async function processRecordingBlob({
 
     logInfo(
       "API",
-      `Pipeline result received: raw_type=${typeof transcription.raw}, cleaned_type=${typeof transcription.cleaned}`,
+      `Pipeline result received: raw_type=${typeof transcriptionCandidate.raw}, cleaned_type=${typeof transcriptionCandidate.cleaned}`,
     );
 
-    if (!hasRecognizedSpeech(transcription)) {
+    const guardedTranscription = guardTranscriptionResult(
+      transcriptionCandidate,
+      settings.language,
+    );
+    const transcription = guardedTranscription.transcription;
+    if (!transcription) {
       logInfo(
         "API",
-        "Nothing recognized, removing placeholder entry, skipping paste",
+        `Transcription rejected, removing placeholder entry and skipping paste: reason=${guardedTranscription.rejectionReason}`,
       );
       await deleteHistoryEntry(baseEntry.id);
       if (savedAudio.audioPath) {
@@ -822,6 +814,12 @@ export async function processRecordingBlob({
       await emit(HISTORY_DELETED_EVENT, { id: baseEntry.id });
       await dictationStream?.hide().catch(() => {});
       return { durationSeconds, hasTranscription: false };
+    }
+    if (guardedTranscription.cleanedFallbackReason) {
+      logInfo(
+        "API",
+        `Cleanup output rejected, using raw transcription: reason=${guardedTranscription.cleanedFallbackReason}`,
+      );
     }
 
     const result = await applyDictationTranslation(transcription, settings);
@@ -950,7 +948,7 @@ export async function retryHistoryEntry(
   const handle = await beginProcessing(entry, "update");
 
   try {
-    const transcription = await transcribeAudio({
+    const transcriptionCandidate = await transcribeAudio({
       audioBase64: audioSource.audioBase64,
       audioMimeType: audioSource.audioMimeType,
       audioFileName: audioSource.audioFileName,
@@ -964,8 +962,23 @@ export async function retryHistoryEntry(
       return { hasTranscription: false, updatedEntry: interrupted };
     }
 
-    if (!hasRecognizedSpeech(transcription)) {
+    const guardedTranscription = guardTranscriptionResult(
+      transcriptionCandidate,
+      retrySettings.language,
+    );
+    const transcription = guardedTranscription.transcription;
+    if (!transcription) {
+      logInfo(
+        "API",
+        `Retry transcription rejected: reason=${guardedTranscription.rejectionReason}`,
+      );
       throw new Error(tn("widget.error.speechNotRecognized"));
+    }
+    if (guardedTranscription.cleanedFallbackReason) {
+      logInfo(
+        "API",
+        `Retry cleanup output rejected, using raw transcription: reason=${guardedTranscription.cleanedFallbackReason}`,
+      );
     }
 
     const result = await applyDictationTranslation(

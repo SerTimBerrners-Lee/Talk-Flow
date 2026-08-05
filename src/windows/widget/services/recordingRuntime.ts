@@ -5,6 +5,7 @@ import type {
   LiveTranscriptionResult,
   NativeLiveDictationOptions,
 } from "./dictationStreamOverlay";
+import type { AudioSignalStats } from "./transcriptionGuard";
 
 type RecorderCodec = "native-wav" | "webm" | "default" | "wav";
 
@@ -27,6 +28,7 @@ interface RecordingRuntimeState {
   active: boolean;
   nativeActive: boolean;
   nativeResult: NativeVoiceRecordingResult | null;
+  audioStats: AudioSignalStats | null;
   liveTranscription: LiveTranscriptionResult | null;
   recorder: MediaRecorder | null;
   chunks: Blob[];
@@ -75,6 +77,7 @@ export interface RecordingRuntimeController {
   stop(): Promise<void>;
   hasRecorder(): boolean;
   hasAudioChunks(): boolean;
+  getAudioStats(): AudioSignalStats | null;
   getLiveTranscription(): LiveTranscriptionResult | null;
   getAudioBlob(): Promise<Blob>;
   reset(): void;
@@ -391,6 +394,7 @@ export function createRecordingRuntimeController(): RecordingRuntimeController {
     active: false,
     nativeActive: false,
     nativeResult: null,
+    audioStats: null,
     liveTranscription: null,
     recorder: null,
     chunks: [],
@@ -403,6 +407,7 @@ export function createRecordingRuntimeController(): RecordingRuntimeController {
     async startNative(options) {
       state.chunks = [];
       state.nativeResult = null;
+      state.audioStats = null;
       state.liveTranscription = null;
       state.stream = null;
       state.recorder = null;
@@ -432,6 +437,7 @@ export function createRecordingRuntimeController(): RecordingRuntimeController {
       state.chunks = [];
       state.nativeActive = false;
       state.nativeResult = null;
+      state.audioStats = null;
       state.liveTranscription = null;
       state.pcm = startPcmRecorder(stream);
       state.active = true;
@@ -523,6 +529,10 @@ export function createRecordingRuntimeController(): RecordingRuntimeController {
 
       if (state.nativeActive) {
         state.nativeResult = await invoke<NativeVoiceRecordingResult>("stop_native_voice_recording");
+        state.audioStats = {
+          peak: state.nativeResult.peak,
+          rms: state.nativeResult.rms,
+        };
         state.liveTranscription = state.nativeResult.liveTranscription || null;
         state.active = false;
         state.nativeActive = false;
@@ -558,6 +568,9 @@ export function createRecordingRuntimeController(): RecordingRuntimeController {
 
       return state.chunks.length > 0 || pcmSampleCount(state.pcm.chunks) > 0;
     },
+    getAudioStats() {
+      return state.audioStats;
+    },
     getLiveTranscription() {
       return state.liveTranscription;
     },
@@ -577,6 +590,7 @@ export function createRecordingRuntimeController(): RecordingRuntimeController {
       }
 
       const { blob, stats } = await encodeWavInWorker(state.pcm.chunks, state.pcm.sampleRate);
+      state.audioStats = { peak: stats.peak, rms: stats.rms };
       logInfo(
         "RECORDING",
         `PCM audio stats: samples=${stats.sampleCount}, sample_rate=${stats.sampleRate}, duration_ms=${stats.durationMs}, peak=${stats.peak.toFixed(4)}, rms=${stats.rms.toFixed(4)}, gain=${stats.gain.toFixed(2)}`,
@@ -587,6 +601,7 @@ export function createRecordingRuntimeController(): RecordingRuntimeController {
       state.active = false;
       state.nativeActive = false;
       state.nativeResult = null;
+      state.audioStats = null;
       state.liveTranscription = null;
       state.recorder = null;
       state.chunks = [];
@@ -603,6 +618,7 @@ export function createRecordingRuntimeController(): RecordingRuntimeController {
       state.active = false;
       state.nativeActive = false;
       state.nativeResult = null;
+      state.audioStats = null;
       state.liveTranscription = null;
       state.recorder = null;
       state.chunks = [];

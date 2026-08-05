@@ -601,6 +601,7 @@ export function useWidgetRecording({
       }
 
       const blob = await runtimeRef.current.getAudioBlob();
+      const audioStats = runtimeRef.current.getAudioStats();
       logInfo(
         "RECORDING",
         `Recorded audio blob: type=${blob.type || "[unknown]"}, size=${blob.size}`,
@@ -632,6 +633,7 @@ export function useWidgetRecording({
         recordingStartTimestamp: machine.recordingStartTimestamp,
         liveTranscription,
         dictationStream,
+        audioStats,
       });
 
       if (!pipelineResult.hasTranscription) {

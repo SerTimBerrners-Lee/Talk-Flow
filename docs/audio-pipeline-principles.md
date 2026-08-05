@@ -191,6 +191,14 @@ the complete recorded WAV through the Cloud batch transcription path and use
 that result for history and paste. Local and own-key API streaming behavior
 remains unchanged.
 
+Before any ordinary dictation result reaches history, overlay, or paste, apply
+the shared frontend no-speech guard. Clearly silent recordings should skip the
+STT request when recorder signal statistics are available. Batch responses must
+drop known silence hallucinations (including refusal/caption templates) and
+short results written entirely in an unexpected script for the explicitly
+selected recognition language. Automatic language detection must not reject a
+short result solely because of its script.
+
 ## Local STT Input Format
 
 Managed local Whisper expects:
