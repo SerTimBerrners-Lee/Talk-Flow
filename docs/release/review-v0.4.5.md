@@ -37,9 +37,10 @@
 - `TAURI_SIGNING_PRIVATE_KEY_PATH=~/.tauri/talkis-updater.key CARGO_INCREMENTAL=0 bun run build:release:macos`: compiled the optimized application and all release sidecars and produced `Talkis.app` plus the updater archive; final updater signing could not decrypt the local password-protected key because its password is unavailable in this shell.
 - Built `Talkis.app` version: verified as `0.4.5` from `CFBundleShortVersionString`.
 - `codesign --force --deep --sign - --identifier com.trixter.talkis` followed by `codesign --verify --deep --strict`: passed for the locally built application and all four sidecars.
-- GitHub Release Preflight: pending for the exact review commit.
-- Native/GitHub Windows build: pending GitHub Release Preflight.
-- Native/GitHub Linux build: pending GitHub Release Preflight.
+- GitHub Release Preflight for reviewed commit `6c3f658`: passed in [run 30983902551](https://github.com/SerTimBerrners-Lee/talkis/actions/runs/30983902551).
+- Native/GitHub macOS build: passed in `21m32s`; signed bundle post-processing and artifact upload completed.
+- Native/GitHub Windows x64 build: passed in `35m44s`; bundle build, x64 architecture verification, and artifact upload completed.
+- Native/GitHub Linux build: passed in `20m17s`; bundle build and artifact upload completed.
 - Additional manual checks:
   - Full diff from `v0.4.4` reviewed file by file; no unintended binary or generated-file changes are included.
   - Version sync passed for `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, and the Talkis workspace entries in `Cargo.lock`.
@@ -57,7 +58,7 @@
 ## Findings
 
 - Blockers:
-  - Exact-commit GitHub Release Preflight has not run yet.
+  - None identified.
 - Non-blocking issues:
   - The local Talkis updater key cannot be used for the final signature without its password and does not match the public updater key currently embedded in the app. The exact-commit macOS preflight will verify the configured repository signing secrets instead.
   - Vite reports the existing mixed static/dynamic `SummaryModal` import and a main chunk above 500 kB; the production build still passes.
@@ -67,6 +68,6 @@
 
 ## Decision
 
-- Ready for `main` merge: no; wait for exact-commit preflight.
-- Release preflight green on exact tag commit: no; pending.
-- Ready for tag publish: no; pending exact-commit preflight.
+- Ready for `main` merge: yes, after this final review-only commit repeats exact-commit preflight successfully.
+- Release preflight green on reviewed release commit: yes, run `30983902551` for `6c3f658`.
+- Ready for tag publish: yes, after the final review-only commit repeats exact-commit preflight successfully.
