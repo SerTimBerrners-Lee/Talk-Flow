@@ -43,6 +43,14 @@ It is designed for practical daily work: IDEs, chats, notes, CRM fields, email, 
 
 ## Latest Changes
 
+### v0.4.5
+
+- Cloud dictation now waits for the accurate full-audio batch transcript instead of showing a lower-quality realtime text overlay that could differ from the pasted result.
+- Short, silent, or noisy recordings are rejected before paste when the cloud model returns stock refusal text, unrelated foreign-language fragments, or other low-confidence hallucinations.
+- Talkis Cloud remains selected after sign-in and when revisiting Models: stale local STT endpoints and keys are cleared instead of silently switching the app back to another mode.
+- Cloud balances, usage, and reservations are displayed as whole tokens throughout the desktop app.
+- Cloud file transcription with speaker separation now supports long meetings through the upgraded server route, while the desktop distinguishes real timeouts from other diarization failures and records the raw diagnostic error.
+
 ### v0.4.4
 
 - Promoted the existing model chat from development mode to the product navigation on macOS, Windows, and Linux.
@@ -192,7 +200,7 @@ The hotkey, microphone, language, model source, cleanup style, and app appearanc
 | Capability | Cloud | API | Local |
 | --- | --- | --- | --- |
 | Dictation, files, and local history | Yes | Yes | Yes |
-| Streaming dictation | Yes | Verified models | Streaming-capable models |
+| Streaming dictation | No; final batch only | Verified models | Streaming-capable models |
 | Selected-text translation | Yes | Yes | Yes |
 | Speaker diarization | When the capability is available | Local diarization kit | Local diarization kit |
 | Synchronous translation | Yes | Verified OpenAI/Gemini Realtime | No |
@@ -202,7 +210,7 @@ The complete data routing, runtime processes, limitations, and failure boundarie
 
 ### Talkis Cloud
 
-Sign in to [Talkis Cloud](https://talkis.ru) and use transcription without managing API keys. Requests go through `proxy.talkis.ru`. Synchronous translation uses a short-lived Realtime credential issued by the authenticated proxy; the provider key is never stored in the desktop app.
+Sign in to [Talkis Cloud](https://talkis.ru) and use transcription without managing API keys. Requests go through `proxy.talkis.ru`. Cloud dictation shows recording and processing states, then pastes only the final full-audio batch transcript; the realtime text overlay is intentionally unavailable in Cloud mode. Synchronous translation still uses a short-lived Realtime credential issued by the authenticated proxy; the provider key is never stored in the desktop app.
 
 ### Own API Key
 
