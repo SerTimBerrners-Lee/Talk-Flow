@@ -396,6 +396,9 @@ export function SettingsTab() {
       : t("settings.mic.systemDefault");
   const autostartDisabled = !autostartLoaded || autostartPending;
   const widgetScale = normalizeWidgetScale(settings.widgetScale);
+  const isCloudMode = !settings.useOwnKey;
+  const realtimeTranscriptionActive =
+    !isCloudMode && settings.realtimeTranscriptionEnabled;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -1221,12 +1224,30 @@ export function SettingsTab() {
               >
                 {t("settings.realtimeTranscription.title")}
               </div>
+              <div
+                id="realtime-transcription-description"
+                style={{
+                  marginTop: 4,
+                  color: "var(--text-low)",
+                  fontSize: 11,
+                  lineHeight: 1.35,
+                }}
+              >
+                {t(
+                  isCloudMode
+                    ? "settings.realtimeTranscription.cloudDesc"
+                    : "settings.realtimeTranscription.desc",
+                )}
+              </div>
             </div>
             <button
               type="button"
               role="switch"
-              aria-checked={settings.realtimeTranscriptionEnabled}
+              aria-checked={realtimeTranscriptionActive}
+              aria-disabled={isCloudMode}
+              aria-describedby="realtime-transcription-description"
               onClick={() => {
+                if (isCloudMode) return;
                 void update({
                   realtimeTranscriptionEnabled:
                     !settings.realtimeTranscriptionEnabled,
@@ -1242,7 +1263,8 @@ export function SettingsTab() {
                 gridTemplateColumns: "minmax(0, 1fr) 34px",
                 alignItems: "center",
                 gap: 10,
-                cursor: "pointer",
+                opacity: isCloudMode ? 0.64 : 1,
+                cursor: isCloudMode ? "not-allowed" : "pointer",
                 transform: "none",
                 justifySelf: "end",
               }}
@@ -1258,9 +1280,11 @@ export function SettingsTab() {
                   minWidth: 0,
                 }}
               >
-                {settings.realtimeTranscriptionEnabled
-                  ? t("settings.realtimeTranscription.on")
-                  : t("settings.realtimeTranscription.off")}
+                {isCloudMode
+                  ? t("settings.realtimeTranscription.unavailable")
+                  : settings.realtimeTranscriptionEnabled
+                    ? t("settings.realtimeTranscription.on")
+                    : t("settings.realtimeTranscription.off")}
               </span>
               <span
                 aria-hidden="true"
@@ -1268,7 +1292,7 @@ export function SettingsTab() {
                   width: 34,
                   height: 20,
                   borderRadius: 999,
-                  background: settings.realtimeTranscriptionEnabled
+                  background: realtimeTranscriptionActive
                     ? "var(--accent)"
                     : "var(--switch-track)",
                   padding: 3,
@@ -1287,7 +1311,7 @@ export function SettingsTab() {
                     borderRadius: "50%",
                     background: "var(--accent-contrast)",
                     boxShadow: "0 1px 3px rgba(0,0,0,0.18)",
-                    transform: settings.realtimeTranscriptionEnabled
+                    transform: realtimeTranscriptionActive
                       ? "translateX(14px)"
                       : "translateX(0)",
                     transition: "transform 0.18s ease",

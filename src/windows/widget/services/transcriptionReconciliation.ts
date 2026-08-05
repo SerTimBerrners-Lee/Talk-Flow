@@ -1,20 +1,22 @@
 import type { AppSettings } from "../../../lib/store";
 
-import { isCloudSttStreamingEnabled } from "./dictationStreamOverlay";
+export type LiveTranscriptionReconciliationMode = "openai";
 
-export type LiveTranscriptionReconciliationMode = "talkis-cloud" | "openai";
+export function shouldAcceptLiveTranscription(
+  settings: AppSettings,
+  hasLiveTranscription: boolean,
+): boolean {
+  return hasLiveTranscription && settings.useOwnKey;
+}
 
 export function resolveLiveTranscriptionReconciliationMode(
   settings: AppSettings,
   hasLiveTranscription: boolean,
 ): LiveTranscriptionReconciliationMode | null {
-  if (!hasLiveTranscription) return null;
-
-  if (isCloudSttStreamingEnabled(settings)) {
-    return "talkis-cloud";
-  }
-
-  if (!settings.useOwnKey || settings.selectedApiAdapter !== "openai") {
+  if (
+    !shouldAcceptLiveTranscription(settings, hasLiveTranscription) ||
+    settings.selectedApiAdapter !== "openai"
+  ) {
     return null;
   }
 

@@ -32,7 +32,10 @@ import {
   shouldApplyDictationStreamUpdate,
 } from "./dictationStreamOverlay";
 import type { LiveTranscriptionResult } from "./dictationStreamOverlay";
-import { resolveLiveTranscriptionReconciliationMode } from "./transcriptionReconciliation";
+import {
+  resolveLiveTranscriptionReconciliationMode,
+  shouldAcceptLiveTranscription,
+} from "./transcriptionReconciliation";
 
 export interface ProcessRecordingBlobParams {
   blob: Blob;
@@ -610,12 +613,13 @@ async function resolveFinalTranscription({
   settings: AppSettings;
   signal: AbortSignal;
 }): Promise<TranscriptionResult> {
-  const liveResult = liveTranscription
-    ? { raw: liveTranscription.text, cleaned: liveTranscription.text }
-    : null;
+  const liveResult =
+    liveTranscription && shouldAcceptLiveTranscription(settings, true)
+      ? { raw: liveTranscription.text, cleaned: liveTranscription.text }
+      : null;
   const reconciliationMode = resolveLiveTranscriptionReconciliationMode(
     settings,
-    Boolean(liveTranscription),
+    Boolean(liveResult),
   );
 
   if (!reconciliationMode) {
@@ -632,8 +636,7 @@ async function resolveFinalTranscription({
   }
 
   try {
-    const sourceLabel =
-      reconciliationMode === "talkis-cloud" ? "Talkis Cloud" : "OpenAI";
+    const sourceLabel = "OpenAI";
     logInfo(
       "DICTATION_STREAM",
       `Reconciling ${sourceLabel} realtime text with full-audio batch result: realtime_chars=${liveResult!.cleaned.length}`,

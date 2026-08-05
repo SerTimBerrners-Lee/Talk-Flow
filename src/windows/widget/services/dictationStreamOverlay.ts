@@ -6,8 +6,6 @@ import type { AppSettings } from "../../../lib/store";
 import {
   canUseConfiguredRealtimeModel,
   STREAMING_STT_ADAPTERS,
-  TALKIS_CLOUD_REALTIME_ENDPOINT,
-  TALKIS_CLOUD_REALTIME_TRANSCRIPTION_MODEL,
 } from "../../../lib/realtimeModels";
 import type {
   WidgetTextOverlayState,
@@ -194,17 +192,14 @@ export function isApiSttStreamingEnabled(settings: AppSettings): boolean {
   );
 }
 
-export function isCloudSttStreamingEnabled(settings: AppSettings): boolean {
-  return (
-    settings.realtimeTranscriptionEnabled &&
-    !settings.useOwnKey &&
-    Boolean(settings.deviceToken?.trim())
-  );
+export function isCloudSttStreamingEnabled(_settings: AppSettings): boolean {
+  // Talkis Cloud dictation is deliberately batch-only. Its full-audio result is
+  // more accurate than the realtime draft and is the only text shown/pasted.
+  return false;
 }
 
 export function isSttStreamingEnabled(settings: AppSettings): boolean {
   return (
-    isCloudSttStreamingEnabled(settings) ||
     isLocalSttStreamingEnabled(settings) ||
     isApiSttStreamingEnabled(settings)
   );
@@ -216,18 +211,6 @@ export function createNativeLiveDictationOptions(
 ): NativeLiveDictationOptions | null {
   if (!isSttStreamingEnabled(settings)) {
     return null;
-  }
-
-  if (isCloudSttStreamingEnabled(settings)) {
-    return {
-      requestId,
-      provider: "talkis-cloud",
-      apiKey: settings.deviceToken.trim(),
-      model: TALKIS_CLOUD_REALTIME_TRANSCRIPTION_MODEL,
-      language: settings.language || "auto",
-      endpoint: TALKIS_CLOUD_REALTIME_ENDPOINT,
-      streamingEnabled: true,
-    };
   }
 
   const isLocal = isLocalSttSettings(settings);

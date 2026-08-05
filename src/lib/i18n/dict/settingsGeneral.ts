@@ -126,9 +126,17 @@ export const settingsGeneral = {
   },
   "settings.realtimeTranscription.on": { ru: "Включена", en: "On" },
   "settings.realtimeTranscription.off": { ru: "Выключена", en: "Off" },
+  "settings.realtimeTranscription.unavailable": {
+    ru: "Недоступна",
+    en: "Unavailable",
+  },
   "settings.realtimeTranscription.desc": {
     ru: "Использовать streaming автоматически для всех моделей, которые его поддерживают.",
     en: "Automatically use streaming for every model that supports it.",
+  },
+  "settings.realtimeTranscription.cloudDesc": {
+    ru: "В режиме Talkis Cloud используется более точная транскрибация после остановки записи.",
+    en: "Talkis Cloud uses more accurate transcription after recording stops.",
   },
 
   // Recording audio

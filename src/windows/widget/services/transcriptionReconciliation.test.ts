@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 
 import type { AppSettings } from "../../../lib/store";
 
-import { resolveLiveTranscriptionReconciliationMode } from "./transcriptionReconciliation";
+import {
+  resolveLiveTranscriptionReconciliationMode,
+  shouldAcceptLiveTranscription,
+} from "./transcriptionReconciliation";
 
 function settings(overrides: Partial<AppSettings>): AppSettings {
   return {
@@ -17,43 +20,38 @@ function settings(overrides: Partial<AppSettings>): AppSettings {
 }
 
 describe("live transcription reconciliation", () => {
-  test("reconciles a successful Talkis Cloud realtime transcript", () => {
-    expect(resolveLiveTranscriptionReconciliationMode(settings({}), true)).toBe(
-      "talkis-cloud",
-    );
+  test("rejects live transcription in Talkis Cloud mode", () => {
+    expect(shouldAcceptLiveTranscription(settings({}), true)).toBe(false);
+    expect(
+      resolveLiveTranscriptionReconciliationMode(settings({}), true),
+    ).toBeNull();
   });
 
-  test("does not reconcile Cloud when realtime was disabled or produced no result", () => {
-    expect(
-      resolveLiveTranscriptionReconciliationMode(
-        settings({ realtimeTranscriptionEnabled: false }),
-        true,
-      ),
-    ).toBeNull();
+  test("does not reconcile when realtime produced no result", () => {
     expect(
       resolveLiveTranscriptionReconciliationMode(settings({}), false),
     ).toBeNull();
   });
 
   test("preserves reconciliation for the legacy own-key OpenAI realtime model", () => {
+    const ownKeySettings = settings({
+      useOwnKey: true,
+      deviceToken: "",
+      apiAdapters: {
+        openai: {
+          apiKey: "openai-key",
+          endpoint: "https://api.openai.com",
+          model: "gpt-realtime-whisper",
+          connectionStatus: "verified",
+          streamingCapability: "supported",
+          streamingCapabilityFingerprint: "verified-config",
+        },
+      },
+    });
+
+    expect(shouldAcceptLiveTranscription(ownKeySettings, true)).toBe(true);
     expect(
-      resolveLiveTranscriptionReconciliationMode(
-        settings({
-          useOwnKey: true,
-          deviceToken: "",
-          apiAdapters: {
-            openai: {
-              apiKey: "openai-key",
-              endpoint: "https://api.openai.com",
-              model: "gpt-realtime-whisper",
-              connectionStatus: "verified",
-              streamingCapability: "supported",
-              streamingCapabilityFingerprint: "verified-config",
-            },
-          },
-        }),
-        true,
-      ),
+      resolveLiveTranscriptionReconciliationMode(ownKeySettings, true),
     ).toBe("openai");
   });
 

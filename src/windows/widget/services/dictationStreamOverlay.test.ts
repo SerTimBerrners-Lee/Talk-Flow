@@ -233,7 +233,7 @@ describe("dictation stream overlay state", () => {
     );
   });
 
-  test("enables cloud realtime transcription with the device token", () => {
+  test("keeps Talkis Cloud dictation batch-only", () => {
     const settings = {
       useOwnKey: false,
       deviceToken: "device-jwt",
@@ -241,21 +241,13 @@ describe("dictation stream overlay state", () => {
       language: "ru",
     } as AppSettings;
 
-    expect(isCloudSttStreamingEnabled(settings)).toBe(true);
-    expect(createNativeLiveDictationOptions(settings, "req-cloud")).toEqual({
-      requestId: "req-cloud",
-      provider: "talkis-cloud",
-      apiKey: "device-jwt",
-      model: "gpt-realtime-whisper",
-      language: "ru",
-      endpoint: "https://proxy.talkis.ru",
-      streamingEnabled: true,
-    });
+    expect(isCloudSttStreamingEnabled(settings)).toBe(false);
+    expect(createNativeLiveDictationOptions(settings, "req-cloud")).toBeNull();
 
     expect(
       isCloudSttStreamingEnabled({
         ...settings,
-        deviceToken: "",
+        realtimeTranscriptionEnabled: false,
       } as AppSettings),
     ).toBe(false);
   });
