@@ -113,8 +113,12 @@ export const libMessages = {
     en: "The request limit was exceeded or the API quota ran out. Try again later.",
   },
   "fileTranscription.errCloudDiarizationTimeout": {
-    ru: "Облако не успело обработать запись с разделением по говорящим — длинные встречи не укладываются в лимит сервера. Отключите «Разделение по говорящим» (файл разобьётся на части и распознается) или возьмите фрагмент покороче.",
-    en: "The cloud could not process the recording with speaker separation in time — long meetings exceed the server limit. Turn off “Speaker separation” (the file will be split into parts and transcribed) or take a shorter fragment.",
+    ru: "Обработка записи с разделением по говорящим заняла больше 10 минут. Повторите попытку или временно отключите «Разделение по говорящим».",
+    en: "Processing the recording with speaker separation took more than 10 minutes. Try again or temporarily turn off “Speaker separation.”",
+  },
+  "fileTranscription.errCloudDiarizationFailed": {
+    ru: "Облаку не удалось разделить запись по говорящим. Повторите попытку; если ошибка сохранится, временно отключите «Разделение по говорящим».",
+    en: "The cloud could not separate the recording by speaker. Try again; if the error persists, temporarily turn off “Speaker separation.”",
   },
   "fileTranscription.errNetwork": {
     ru: "Не удалось связаться с сервером. Проверьте интернет и попробуйте снова.",

@@ -68,6 +68,40 @@ describe("file transcription error messages", () => {
 
     expect(message).toBe("Не удалось авторизоваться в API. Проверьте ключ доступа.");
   });
+
+  it("shows the diarization timeout message only for a real timeout", () => {
+    const message = toFileTranscriptionErrorMessage(
+      new Error(
+        "Proxy diarized error (502 Bad Gateway): context deadline exceeded (Client.Timeout exceeded while awaiting headers)",
+      ),
+    );
+
+    expect(message).toBe(
+      "Обработка записи с разделением по говорящим заняла больше 10 минут. Повторите попытку или временно отключите «Разделение по говорящим».",
+    );
+  });
+
+  it("does not mislabel other diarization failures as timeouts", () => {
+    const message = toFileTranscriptionErrorMessage(
+      new Error(
+        "Proxy diarized error (502 Bad Gateway): diarized STT failed: transcript status 400: invalid language_code",
+      ),
+    );
+
+    expect(message).toBe(
+      "Облаку не удалось разделить запись по говорящим. Повторите попытку; если ошибка сохранится, временно отключите «Разделение по говорящим».",
+    );
+  });
+
+  it("maps non-diarization gateway failures to a network error", () => {
+    const message = toFileTranscriptionErrorMessage(
+      new Error("Proxy error (502 Bad Gateway): upstream unavailable"),
+    );
+
+    expect(message).toBe(
+      "Не удалось связаться с сервером. Проверьте интернет и попробуйте снова.",
+    );
+  });
 });
 
 describe("file speaker identity", () => {

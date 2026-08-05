@@ -509,14 +509,31 @@ export function toFileTranscriptionErrorMessage(
     return tn("fileTranscription.errRateLimit");
   }
 
-  if (
-    normalized.includes("proxy diarized")
-    || normalized.includes("502")
-    || normalized.includes("503")
-    || normalized.includes("504")
-    || normalized.includes("gateway")
-  ) {
+  const isCloudDiarizationError =
+    normalized.includes("proxy diarized") ||
+    normalized.includes("diarized stt failed");
+  const isTimeoutError =
+    normalized.includes("timed out") ||
+    normalized.includes("timeout") ||
+    normalized.includes("time-out") ||
+    normalized.includes("deadline exceeded") ||
+    normalized.includes("504 gateway");
+
+  if (isCloudDiarizationError && isTimeoutError) {
     return tn("fileTranscription.errCloudDiarizationTimeout");
+  }
+
+  if (isCloudDiarizationError) {
+    return tn("fileTranscription.errCloudDiarizationFailed");
+  }
+
+  if (
+    normalized.includes("502") ||
+    normalized.includes("503") ||
+    normalized.includes("504") ||
+    normalized.includes("gateway")
+  ) {
+    return tn("fileTranscription.errNetwork");
   }
 
   if (normalized.includes("network") || normalized.includes("fetch") || normalized.includes("timed out")) {
@@ -772,6 +789,12 @@ export async function transcribeFilePathOnly({
     return identifyFirstSpeakerAsUser
       ? identifyFirstFileSpeakerAsUser(transcription)
       : transcription;
+  } catch (error) {
+    void logError(
+      "FILE_TRANSCRIPTION",
+      `Native file transcription failed: ${formatErrorMessage(error)}`,
+    );
+    throw error;
   } finally {
     unlisten();
   }
