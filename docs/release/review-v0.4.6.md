@@ -38,7 +38,10 @@
 - Native/GitHub macOS build: passed in `15m46s`; signed updater post-processing, app archive, and artifact upload completed.
 - Native/GitHub Windows x64 build: passed in `28m1s`; release checks, NSIS bundle, x64 architecture verification, updater signature, and artifact upload completed.
 - Native/GitHub Linux build: passed in `18m33s`; AppImage/deb bundle creation, updater signature, and artifact upload completed.
-- GitHub Release Preflight for the exact review commit: pending.
+- GitHub Release Preflight for reviewed commit `d4c4545`: passed in [run 31969845170](https://github.com/SerTimBerrners-Lee/talkis/actions/runs/31969845170).
+- Exact-review macOS build: passed in `6m36s`.
+- Exact-review Windows x64 build: passed in `9m25s`, including architecture verification.
+- Exact-review Linux build: passed in `6m26s`.
 - Additional review checks:
   - Full diff from `v0.4.5` reviewed file by file; no unintended binary or generated-file changes are included.
   - Version sync passed for `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, and both Talkis workspace entries in `Cargo.lock`.
@@ -56,7 +59,7 @@
 ## Findings
 
 - Blockers:
-  - Exact-commit GitHub Release Preflight has not run yet.
+  - None identified.
 - Non-blocking issues:
   - The local updater key is password-protected and its password is unavailable in this shell, so repository secrets in exact-commit preflight remain the authoritative updater-signing check.
   - A real Windows 10 repeated start/stop plus 30-minute idle or sleep/resume smoke is still required to close `talkis-pc-9p9`; preflight verifies native compilation, packaging, signing, and Windows x64 architecture but cannot reproduce physical audio-device suspend/resume behavior.
@@ -69,6 +72,6 @@
 
 ## Decision
 
-- Ready for `main` merge: no; wait for exact-review-commit preflight.
-- Release preflight green on exact tag commit: no; pending.
-- Ready for tag publish: no; pending exact-commit preflight.
+- Ready for `main` merge: yes, after this final review-only commit repeats exact-commit preflight successfully.
+- Release preflight green on reviewed release commit: yes, run `31969845170` for `d4c4545`.
+- Ready for tag publish: yes, after the final review-only commit repeats exact-commit preflight successfully.
