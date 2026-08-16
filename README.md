@@ -43,6 +43,12 @@ It is designed for practical daily work: IDEs, chats, notes, CRM fields, email, 
 
 ## Latest Changes
 
+### v0.4.6
+
+- Fixed a Windows crash that could close Talkis without an error on the first dictation after a long idle period or system sleep.
+- Native microphone capture now keeps one process-long `cpal`/WASAPI owner thread across recording sessions, preventing reuse of a COM audio-device enumerator after its owning thread has ended.
+- Native recorder lifecycle failures are logged and returned to the existing WebView microphone fallback instead of leaving the dictation flow without a recoverable error path.
+
 ### v0.4.5
 
 - Cloud dictation now waits for the accurate full-audio batch transcript instead of showing a lower-quality realtime text overlay that could differ from the pasted result.
