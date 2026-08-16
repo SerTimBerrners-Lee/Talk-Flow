@@ -147,7 +147,19 @@ The primary voice path is native Rust capture:
 
 The recorder uses `cpal`, stores microphone samples in memory, converts to mono, resamples to `16 kHz`, writes PCM16 WAV, and logs stats on stop.
 
-Important implementation detail: on macOS, `cpal::Stream` is not safe to keep in a global static. Keep the stream alive on its own recorder thread and store only thread-safe control handles in global state.
+Important implementation details:
+
+- `cpal::Stream` is not safe to keep in a global static on macOS. Keep the
+  stream alive on its recorder owner thread and store only thread-safe control
+  handles in global state.
+- The native recorder owner thread is process-long and reused across recording
+  sessions. Do not replace it with one short-lived OS thread per recording.
+- On Windows that owner thread performs the first WASAPI device lookup during
+  application startup and must stay alive. `cpal` caches an
+  `IMMDeviceEnumerator` created in a thread-local COM apartment; ending the
+  owning thread can leave later device lookups with an invalid COM pointer and
+  terminate the process with `STATUS_ACCESS_VIOLATION` instead of returning an
+  error.
 
 ## Dictation Translation
 

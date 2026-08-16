@@ -7,6 +7,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -21,6 +22,7 @@ const PCM_MAX_GAIN: f32 = 8.0;
 const MAX_NATIVE_RECORDING_SECONDS: usize = 5 * 60;
 
 static RECORDER: OnceLock<Mutex<Option<NativeVoiceRecorder>>> = OnceLock::new();
+static RECORDER_RUNTIME: OnceLock<Result<NativeRecorderRuntime, String>> = OnceLock::new();
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -45,12 +47,34 @@ pub struct NativeVoiceRecordingResult {
 
 struct NativeVoiceRecorder {
     state: Arc<Mutex<NativeRecorderState>>,
-    stop_tx: mpsc::Sender<()>,
-    stopped_rx: mpsc::Receiver<Result<(), String>>,
     source_sample_rate: u32,
     source_channels: u16,
     device_name: String,
     live_session: Option<LiveDictationSession>,
+}
+
+struct NativeRecorderRuntime {
+    command_tx: mpsc::Sender<NativeRecorderCommand>,
+}
+
+struct NativeRecorderStartCommand {
+    app: AppHandle,
+    req: StartNativeVoiceRecordingRequest,
+    state: Arc<Mutex<NativeRecorderState>>,
+    response_tx: mpsc::Sender<Result<NativeRecorderThreadInfo, String>>,
+}
+
+enum NativeRecorderCommand {
+    Start(Box<NativeRecorderStartCommand>),
+    Stop {
+        response_tx: mpsc::Sender<Result<(), String>>,
+    },
+    #[cfg(test)]
+    Probe {
+        response_tx: mpsc::Sender<std::thread::ThreadId>,
+    },
+    #[cfg(test)]
+    Shutdown,
 }
 
 struct NativeRecorderThreadInfo {
@@ -59,6 +83,12 @@ struct NativeRecorderThreadInfo {
     device_name: String,
     live_session: Option<LiveDictationSession>,
 }
+
+type NativeRecorderOwnerParts = (
+    mpsc::Sender<NativeRecorderCommand>,
+    mpsc::Receiver<()>,
+    std::thread::JoinHandle<()>,
+);
 
 #[derive(Default)]
 struct NativeRecorderState {
@@ -75,6 +105,17 @@ struct PcmStats {
 
 fn recorder_slot() -> &'static Mutex<Option<NativeVoiceRecorder>> {
     RECORDER.get_or_init(|| Mutex::new(None))
+}
+
+fn recorder_runtime() -> Result<&'static NativeRecorderRuntime, String> {
+    match RECORDER_RUNTIME.get_or_init(NativeRecorderRuntime::spawn) {
+        Ok(runtime) => Ok(runtime),
+        Err(err) => Err(err.clone()),
+    }
+}
+
+pub fn init() -> Result<(), String> {
+    recorder_runtime().map(|_| ())
 }
 
 pub fn is_active() -> bool {
@@ -504,95 +545,278 @@ fn write_wav_bytes(samples: &[i16]) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-fn run_recorder_thread(
+fn open_native_input_stream(
     app: AppHandle,
     req: StartNativeVoiceRecordingRequest,
     state: Arc<Mutex<NativeRecorderState>>,
-    started_tx: mpsc::Sender<Result<NativeRecorderThreadInfo, String>>,
-    stop_rx: mpsc::Receiver<()>,
-    stopped_tx: mpsc::Sender<Result<(), String>>,
-) {
-    let start_result = (|| -> Result<(cpal::Stream, NativeRecorderThreadInfo), String> {
-        let host = cpal::default_host();
-        let device = select_input_device(&host, req.device_label.as_deref())?;
-        let device_name = device
-            .name()
-            .unwrap_or_else(|_| "default input".to_string());
-        let supported_config = device
-            .default_input_config()
-            .map_err(|err| format!("Не удалось получить формат микрофона: {}", err))?;
-        let sample_format = supported_config.sample_format();
-        let config: cpal::StreamConfig = supported_config.into();
-        let source_sample_rate = config.sample_rate.0;
-        let source_channels = config.channels;
-        {
-            let mut guard = state
-                .lock()
-                .map_err(|_| "Не удалось настроить лимит нативной записи.".to_string())?;
-            guard.max_samples = Some(source_sample_rate as usize * MAX_NATIVE_RECORDING_SECONDS);
-            guard.limit_reached = false;
-        }
-        let live_session = live_dictation::start_live_dictation_session(
-            app,
-            req.live_dictation.clone(),
-            source_sample_rate,
-        );
-        let live_feeder = live_session.as_ref().map(LiveDictationSession::feeder);
-        let stream = match build_input_stream(
-            &device,
-            &config,
-            sample_format,
-            Arc::clone(&state),
-            live_feeder,
-        ) {
-            Ok(stream) => stream,
-            Err(err) => {
-                if let Some(session) = live_session {
-                    live_dictation::cancel_live_dictation_session(session);
-                }
-                return Err(err);
-            }
-        };
-
-        stream
-            .play()
-            .map_err(|err| format!("Не удалось запустить нативную запись: {}", err))?;
-
-        logger::log_info(
-            "NATIVE_RECORDER",
-            &format!(
-                "Native voice recorder started: device={}, source_sample_rate={}, channels={}, sample_format={:?}",
-                device_name, source_sample_rate, source_channels, sample_format
-            ),
-        );
-
-        Ok((
-            stream,
-            NativeRecorderThreadInfo {
-                source_sample_rate,
-                source_channels,
-                device_name,
-                live_session,
-            },
-        ))
-    })();
-
-    let (stream, info) = match start_result {
-        Ok(value) => value,
+) -> Result<(cpal::Stream, NativeRecorderThreadInfo), String> {
+    logger::log_info(
+        "NATIVE_RECORDER",
+        &format!(
+            "Opening native input on persistent owner thread: requested_device={}",
+            req.device_label.as_deref().unwrap_or("[system-default]")
+        ),
+    );
+    let host = cpal::default_host();
+    let device = select_input_device(&host, req.device_label.as_deref())?;
+    let device_name = device
+        .name()
+        .unwrap_or_else(|_| "default input".to_string());
+    let supported_config = device
+        .default_input_config()
+        .map_err(|err| format!("Не удалось получить формат микрофона: {}", err))?;
+    let sample_format = supported_config.sample_format();
+    let config: cpal::StreamConfig = supported_config.into();
+    let source_sample_rate = config.sample_rate.0;
+    let source_channels = config.channels;
+    {
+        let mut guard = state
+            .lock()
+            .map_err(|_| "Не удалось настроить лимит нативной записи.".to_string())?;
+        guard.max_samples = Some(source_sample_rate as usize * MAX_NATIVE_RECORDING_SECONDS);
+        guard.limit_reached = false;
+    }
+    let live_session = live_dictation::start_live_dictation_session(
+        app,
+        req.live_dictation.clone(),
+        source_sample_rate,
+    );
+    let live_feeder = live_session.as_ref().map(LiveDictationSession::feeder);
+    let stream = match build_input_stream(
+        &device,
+        &config,
+        sample_format,
+        Arc::clone(&state),
+        live_feeder,
+    ) {
+        Ok(stream) => stream,
         Err(err) => {
-            let _ = started_tx.send(Err(err));
-            return;
+            if let Some(session) = live_session {
+                live_dictation::cancel_live_dictation_session(session);
+            }
+            return Err(err);
         }
     };
 
-    if started_tx.send(Ok(info)).is_err() {
-        drop(stream);
-        return;
+    if let Err(err) = stream.play() {
+        if let Some(session) = live_session {
+            live_dictation::cancel_live_dictation_session(session);
+        }
+        return Err(format!("Не удалось запустить нативную запись: {}", err));
     }
 
-    let _ = stop_rx.recv();
-    drop(stream);
-    let _ = stopped_tx.send(Ok(()));
+    logger::log_info(
+        "NATIVE_RECORDER",
+        &format!(
+            "Native voice recorder started: device={}, source_sample_rate={}, channels={}, sample_format={:?}",
+            device_name, source_sample_rate, source_channels, sample_format
+        ),
+    );
+
+    Ok((
+        stream,
+        NativeRecorderThreadInfo {
+            source_sample_rate,
+            source_channels,
+            device_name,
+            live_session,
+        },
+    ))
+}
+
+fn drop_native_input_stream(stream: cpal::Stream) -> Result<(), String> {
+    catch_unwind(AssertUnwindSafe(|| drop(stream)))
+        .map_err(|_| "Нативный аудиодрайвер аварийно завершил остановку записи.".to_string())
+}
+
+#[cfg(windows)]
+fn warm_up_windows_wasapi_owner() {
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let host = cpal::default_host();
+        host.default_input_device().is_some()
+    }));
+
+    match result {
+        Ok(has_default_input) => logger::log_info(
+            "NATIVE_RECORDER",
+            &format!(
+                "Persistent WASAPI owner initialized: default_input_present={}",
+                has_default_input
+            ),
+        ),
+        Err(_) => logger::log_error(
+            "NATIVE_RECORDER",
+            "WASAPI owner warm-up panicked; keeping the owner thread alive for safe fallback",
+        ),
+    }
+}
+
+fn run_native_recorder_owner(
+    command_rx: mpsc::Receiver<NativeRecorderCommand>,
+    ready_tx: mpsc::Sender<()>,
+    warm_up_audio_owner: bool,
+) {
+    logger::log_info(
+        "NATIVE_RECORDER",
+        "Persistent native recorder owner started",
+    );
+    #[cfg(windows)]
+    if warm_up_audio_owner {
+        warm_up_windows_wasapi_owner();
+    }
+    #[cfg(not(windows))]
+    let _ = warm_up_audio_owner;
+    let _ = ready_tx.send(());
+
+    let mut active_stream: Option<cpal::Stream> = None;
+    while let Ok(command) = command_rx.recv() {
+        match command {
+            NativeRecorderCommand::Start(command) => {
+                let NativeRecorderStartCommand {
+                    app,
+                    req,
+                    state,
+                    response_tx,
+                } = *command;
+                if active_stream.is_some() {
+                    let _ = response_tx.send(Err("Запись уже идёт.".to_string()));
+                    continue;
+                }
+
+                let start_result = catch_unwind(AssertUnwindSafe(|| {
+                    open_native_input_stream(app, req, state)
+                }))
+                .unwrap_or_else(|_| {
+                    Err("Нативный аудиодрайвер аварийно завершил запуск записи.".to_string())
+                });
+
+                match start_result {
+                    Ok((stream, info)) => match response_tx.send(Ok(info)) {
+                        Ok(()) => active_stream = Some(stream),
+                        Err(send_error) => {
+                            if let Ok(info) = send_error.0 {
+                                if let Some(session) = info.live_session {
+                                    live_dictation::cancel_live_dictation_session(session);
+                                }
+                            }
+                            if let Err(err) = drop_native_input_stream(stream) {
+                                logger::log_error("NATIVE_RECORDER", &err);
+                            }
+                        }
+                    },
+                    Err(err) => {
+                        logger::log_error(
+                            "NATIVE_RECORDER",
+                            &format!("Native recorder owner failed to start stream: {}", err),
+                        );
+                        let _ = response_tx.send(Err(err));
+                    }
+                }
+            }
+            NativeRecorderCommand::Stop { response_tx } => {
+                let result = active_stream
+                    .take()
+                    .ok_or_else(|| "Активная нативная запись не найдена.".to_string())
+                    .and_then(drop_native_input_stream);
+                if let Err(err) = &result {
+                    logger::log_error(
+                        "NATIVE_RECORDER",
+                        &format!("Native recorder owner failed to stop stream: {}", err),
+                    );
+                }
+                let _ = response_tx.send(result);
+            }
+            #[cfg(test)]
+            NativeRecorderCommand::Probe { response_tx } => {
+                let _ = response_tx.send(std::thread::current().id());
+            }
+            #[cfg(test)]
+            NativeRecorderCommand::Shutdown => break,
+        }
+    }
+
+    if let Some(stream) = active_stream.take() {
+        if let Err(err) = drop_native_input_stream(stream) {
+            logger::log_error("NATIVE_RECORDER", &err);
+        }
+    }
+    logger::log_info(
+        "NATIVE_RECORDER",
+        "Persistent native recorder owner stopped",
+    );
+}
+
+fn spawn_native_recorder_owner(
+    warm_up_audio_owner: bool,
+) -> Result<NativeRecorderOwnerParts, String> {
+    let (command_tx, command_rx) = mpsc::channel();
+    let (ready_tx, ready_rx) = mpsc::channel();
+    let thread_handle = std::thread::Builder::new()
+        .name("talkis-native-voice-owner".to_string())
+        .spawn(move || run_native_recorder_owner(command_rx, ready_tx, warm_up_audio_owner))
+        .map_err(|err| format!("Не удалось создать поток нативной записи: {}", err))?;
+    Ok((command_tx, ready_rx, thread_handle))
+}
+
+impl NativeRecorderRuntime {
+    fn spawn() -> Result<Self, String> {
+        let (command_tx, ready_rx, thread_handle) = spawn_native_recorder_owner(true)?;
+        match ready_rx.recv_timeout(Duration::from_secs(3)) {
+            Ok(()) => {}
+            Err(mpsc::RecvTimeoutError::Timeout) => logger::log_error(
+                "NATIVE_RECORDER",
+                "Persistent native recorder owner warm-up exceeded 3 seconds",
+            ),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                let _ = thread_handle.join();
+                return Err("Поток нативной записи завершился при запуске.".to_string());
+            }
+        }
+        drop(thread_handle);
+        Ok(Self { command_tx })
+    }
+
+    fn start(
+        &self,
+        app: AppHandle,
+        req: StartNativeVoiceRecordingRequest,
+        state: Arc<Mutex<NativeRecorderState>>,
+    ) -> Result<NativeRecorderThreadInfo, String> {
+        let (response_tx, response_rx) = mpsc::channel();
+        self.command_tx
+            .send(NativeRecorderCommand::Start(Box::new(
+                NativeRecorderStartCommand {
+                    app,
+                    req,
+                    state,
+                    response_tx,
+                },
+            )))
+            .map_err(|_| "Поток нативной записи недоступен.".to_string())?;
+        response_rx
+            .recv()
+            .map_err(|_| "Нативная запись завершилась до запуска.".to_string())?
+    }
+
+    fn stop(&self) -> Result<(), String> {
+        let (response_tx, response_rx) = mpsc::channel();
+        self.command_tx
+            .send(NativeRecorderCommand::Stop { response_tx })
+            .map_err(|_| "Не удалось остановить поток нативной записи.".to_string())?;
+        match response_rx.recv_timeout(Duration::from_secs(3)) {
+            Ok(result) => result,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                Err("Нативная запись не остановилась вовремя.".to_string())
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                logger::log_error(
+                    "NATIVE_RECORDER",
+                    "Native recorder owner ended before stop acknowledgement",
+                );
+                Ok(())
+            }
+        }
+    }
 }
 
 #[tauri::command]
@@ -611,23 +835,10 @@ pub fn start_native_voice_recording(
     }
 
     let state = Arc::new(Mutex::new(NativeRecorderState::default()));
-    let (started_tx, started_rx) = mpsc::channel();
-    let (stop_tx, stop_rx) = mpsc::channel();
-    let (stopped_tx, stopped_rx) = mpsc::channel();
-    let thread_state = Arc::clone(&state);
-    std::thread::Builder::new()
-        .name("talkis-native-voice-recorder".to_string())
-        .spawn(move || run_recorder_thread(app, req, thread_state, started_tx, stop_rx, stopped_tx))
-        .map_err(|err| format!("Не удалось создать поток нативной записи: {}", err))?;
-
-    let info = started_rx
-        .recv()
-        .map_err(|_| "Нативная запись завершилась до запуска.".to_string())??;
+    let info = recorder_runtime()?.start(app, req, Arc::clone(&state))?;
 
     *guard = Some(NativeVoiceRecorder {
         state,
-        stop_tx,
-        stopped_rx,
         source_sample_rate: info.source_sample_rate,
         source_channels: info.source_channels,
         device_name: info.device_name,
@@ -684,23 +895,7 @@ pub fn stop_native_voice_recording() -> Result<NativeVoiceRecordingResult, Strin
     let device_name = recorder.device_name.clone();
     let live_session = recorder.live_session;
     let state = Arc::clone(&recorder.state);
-    recorder
-        .stop_tx
-        .send(())
-        .map_err(|_| "Не удалось остановить поток нативной записи.".to_string())?;
-    match recorder.stopped_rx.recv_timeout(Duration::from_secs(3)) {
-        Ok(Ok(())) => {}
-        Ok(Err(err)) => return Err(err),
-        Err(mpsc::RecvTimeoutError::Timeout) => {
-            return Err("Нативная запись не остановилась вовремя.".to_string());
-        }
-        Err(mpsc::RecvTimeoutError::Disconnected) => {
-            logger::log_error(
-                "NATIVE_RECORDER",
-                "Native recorder thread ended before stop acknowledgement",
-            );
-        }
-    }
+    recorder_runtime()?.stop()?;
 
     let (source_samples, limit_reached) = {
         let mut guard = state
@@ -767,4 +962,35 @@ pub fn stop_native_voice_recording() -> Result<NativeVoiceRecordingResult, Strin
         rms: stats.rms,
         live_transcription,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn probe_owner_thread(
+        command_tx: &mpsc::Sender<NativeRecorderCommand>,
+    ) -> std::thread::ThreadId {
+        let (response_tx, response_rx) = mpsc::channel();
+        command_tx
+            .send(NativeRecorderCommand::Probe { response_tx })
+            .expect("owner command channel");
+        response_rx.recv().expect("owner probe response")
+    }
+
+    #[test]
+    fn sequential_commands_reuse_one_long_lived_owner_thread() {
+        let (command_tx, ready_rx, thread_handle) =
+            spawn_native_recorder_owner(false).expect("native recorder owner");
+        ready_rx.recv().expect("native recorder owner ready");
+
+        let first_thread = probe_owner_thread(&command_tx);
+        let second_thread = probe_owner_thread(&command_tx);
+
+        assert_eq!(first_thread, second_thread);
+        command_tx
+            .send(NativeRecorderCommand::Shutdown)
+            .expect("owner shutdown command");
+        thread_handle.join().expect("owner thread shutdown");
+    }
 }

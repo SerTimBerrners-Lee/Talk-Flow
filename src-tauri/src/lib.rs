@@ -74,6 +74,15 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             logger::log_info("INIT", "Application starting...");
+            if let Err(err) = native_voice_recorder::init() {
+                logger::log_error(
+                    "NATIVE_RECORDER",
+                    &format!(
+                        "Failed to initialize persistent native recorder; WebView fallback will be used: {}",
+                        err
+                    ),
+                );
+            }
             hotkey_manager::init(app);
             tray::setup(app)?;
 
