@@ -14,6 +14,12 @@ fn show_and_focus_window(win: &tauri::WebviewWindow) {
             &format!("Failed to show settings window: {}", err),
         );
     }
+    if let Err(err) = win.unminimize() {
+        logger::log_error(
+            "WINDOW",
+            &format!("Failed to restore settings window: {}", err),
+        );
+    }
     if let Err(err) = win.set_focus() {
         logger::log_error(
             "WINDOW",

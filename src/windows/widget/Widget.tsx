@@ -116,6 +116,18 @@ import {
 const WIDGET_RECORD_BUTTON_LEFT = 10;
 const FILE_DROP_LEAVE_GRACE_MS = 260;
 const FILE_DROP_CLOSE_ANIMATION_MS = 160;
+
+function isWindowsPlatform(): boolean {
+  if (typeof navigator === "undefined") {
+    return false;
+  }
+
+  return (
+    navigator.platform.toLowerCase().startsWith("win") ||
+    navigator.userAgent.toLowerCase().includes("windows")
+  );
+}
+
 type WidgetFileDropState =
   "idle" | "drag-over" | "processing" | "success" | "error" | "closing";
 type WidgetCallState =
@@ -2390,7 +2402,9 @@ function IdlePill({
   const [isHovered, setIsHovered] = useState(false);
   const [copySucceeded, setCopySucceeded] = useState(false);
   const canCopy = Boolean(latestCopyText);
-  const controlsVisible = isHovered;
+  const canStartRecordingFromWidget = !isWindowsPlatform();
+  const controlsVisible =
+    isHovered && (canStartRecordingFromWidget || canCopy);
 
   useEffect(() => {
     let disposed = false;
@@ -2480,51 +2494,53 @@ function IdlePill({
           pointerEvents: "none",
         }}
       >
-        <button
-          type="button"
-          aria-label={t("widget.idle.startRecording")}
-          title={t("widget.idle.startRecording")}
-          onPointerDown={(event) => {
-            event.stopPropagation();
-          }}
-          onClick={(event) => {
-            event.stopPropagation();
-            onToggleRecording();
-          }}
-          style={{
-            position: "absolute",
-            left: WIDGET_RECORD_BUTTON_LEFT,
-            top: "50%",
-            width: 12,
-            height: 12,
-            border: "none",
-            borderRadius: 999,
-            padding: 0,
-            background: "transparent",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            opacity: controlsVisible ? 1 : 0,
-            transform: controlsVisible
-              ? "translateY(-50%) scale(1)"
-              : "translateY(-50%) scale(0.84)",
-            transition: "opacity 0.14s ease, transform 0.14s ease",
-            pointerEvents: controlsVisible ? "auto" : "none",
-            cursor: "pointer",
-            WebkitFontSmoothing: "antialiased",
-          }}
-        >
-          <span
-            aria-hidden="true"
-            style={{
-              width: 7,
-              height: 7,
-              borderRadius: 999,
-              background: "#ff4d4d",
-              boxShadow: "none",
+        {canStartRecordingFromWidget && (
+          <button
+            type="button"
+            aria-label={t("widget.idle.startRecording")}
+            title={t("widget.idle.startRecording")}
+            onPointerDown={(event) => {
+              event.stopPropagation();
             }}
-          />
-        </button>
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleRecording();
+            }}
+            style={{
+              position: "absolute",
+              left: WIDGET_RECORD_BUTTON_LEFT,
+              top: "50%",
+              width: 12,
+              height: 12,
+              border: "none",
+              borderRadius: 999,
+              padding: 0,
+              background: "transparent",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              opacity: controlsVisible ? 1 : 0,
+              transform: controlsVisible
+                ? "translateY(-50%) scale(1)"
+                : "translateY(-50%) scale(0.84)",
+              transition: "opacity 0.14s ease, transform 0.14s ease",
+              pointerEvents: controlsVisible ? "auto" : "none",
+              cursor: "pointer",
+              WebkitFontSmoothing: "antialiased",
+            }}
+          >
+            <span
+              aria-hidden="true"
+              style={{
+                width: 7,
+                height: 7,
+                borderRadius: 999,
+                background: "#ff4d4d",
+                boxShadow: "none",
+              }}
+            />
+          </button>
+        )}
         {canCopy && (
           <button
             type="button"
