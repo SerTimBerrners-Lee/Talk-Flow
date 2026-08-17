@@ -28,6 +28,7 @@ dist-ssr
 *.sw?
 target/*
 src-tauri/binaries/ffmpeg-*
+src-tauri/binaries/*-pc-windows-msvc.exe
 
 # Local-only Cargo config (contains absolute target-dir for external drive)
 .cargo/config.toml

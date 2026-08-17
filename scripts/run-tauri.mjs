@@ -14,6 +14,42 @@ const args = process.argv.slice(2);
 const isDev = args[0] === "dev";
 const isMacDev = process.platform === "darwin" && args[0] === "dev";
 const hasCustomRunner = args.includes("--runner") || args.includes("-r");
+const staticMsvcRuntimeArg =
+  "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded";
+const dynamicMsvcRuntimeArg =
+  "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL";
+
+function appendUniqueArgument(value, argument) {
+  const current = value?.trim() || "";
+  if (current.split(/\s+/).includes(argument)) return current;
+  return [current, argument].filter(Boolean).join(" ");
+}
+
+function windowsBuildEnvironment(sourceEnv = process.env) {
+  const env = { ...sourceEnv };
+  if (process.platform !== "win32") return env;
+
+  env.RUSTFLAGS = appendUniqueArgument(
+    (env.RUSTFLAGS || "")
+      .replaceAll("-C target-feature=-crt-static", " ")
+      .replaceAll("-Ctarget-feature=-crt-static", " ")
+      .trim(),
+    "-C target-feature=+crt-static",
+  );
+  env.TRANSCRIBE_CMAKE_ARGS = appendUniqueArgument(
+    (env.TRANSCRIBE_CMAKE_ARGS || "")
+      .split(/\s+/)
+      .filter(
+        (argument) => argument && argument !== dynamicMsvcRuntimeArg,
+      )
+      .join(" "),
+    staticMsvcRuntimeArg,
+  );
+
+  return env;
+}
+
+const childEnv = windowsBuildEnvironment();
 
 if (isMacDev && !hasCustomRunner) {
   args.splice(
@@ -28,7 +64,7 @@ function run(command, commandArgs) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, commandArgs, {
       cwd: rootDir,
-      env: process.env,
+      env: childEnv,
       stdio: "inherit",
     });
 
@@ -61,7 +97,7 @@ if (isDev) {
 
 const child = spawn(process.execPath, [tauriScript, ...args], {
   cwd: rootDir,
-  env: process.env,
+  env: childEnv,
   stdio: "inherit",
 });
 
