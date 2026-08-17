@@ -51,7 +51,13 @@ import {
   calculateCloudBalanceProgress,
   formatCloudMilliTokens,
 } from "../../../lib/cloudTokenFormat";
-import { talkisCloudModeSettingsPatch } from "../../../lib/modelMode";
+import {
+  apiModelModeSettingsPatch,
+  DEFAULT_LOCAL_STT_ENDPOINT,
+  DEFAULT_LOCAL_STT_MODEL,
+  localModelModeSettingsPatch,
+  talkisCloudModeSettingsPatch,
+} from "../../../lib/modelMode";
 import {
   beginCloudAuthFlow,
   cancelCloudAuthFlow,
@@ -110,11 +116,11 @@ function detectDesktopPlatform(): DesktopPlatform {
 }
 
 const LOCAL_RUNTIME_ENDPOINTS: Record<LocalRuntimeKind, string> = {
-  whisper: "http://127.0.0.1:8000",
+  whisper: DEFAULT_LOCAL_STT_ENDPOINT,
   diarization: "http://127.0.0.1:8003",
 };
 const LOCAL_STT_PRESET_ENDPOINT = LOCAL_RUNTIME_ENDPOINTS.whisper;
-const LOCAL_STT_PRESET_MODEL = "whisper-large-v3-turbo";
+const LOCAL_STT_PRESET_MODEL = DEFAULT_LOCAL_STT_MODEL;
 const LOCAL_STT_MODEL_DOWNLOAD_PROGRESS_EVENT =
   "local-stt-model-download-progress";
 
@@ -3090,14 +3096,49 @@ export function SettingsTabs({ type }: SettingsTabsProps) {
     // and text model share the same backend flag, so committing the mode here is the
     // single source of truth; the specific adapter / model is still picked below.
     const handleSelectApiMode = () => {
-      update({ useOwnKey: true, provider: "openai" });
+      const adapter =
+        API_ADAPTERS.find((candidate) => candidate.id === selectedApiAdapterId) ||
+        API_ADAPTERS[0];
+      const values = getApiAdapterValues(adapter);
+      update(
+        apiModelModeSettingsPatch({
+          adapterId: adapter.id,
+          apiKey: values.apiKey,
+          endpoint: values.endpoint,
+          model: values.model,
+        }),
+      );
       setModelModeView("api");
       resetTestState();
       resetInstallState();
     };
 
     const handleSelectLocalMode = () => {
-      update({ useOwnKey: true, provider: "custom" });
+      const preferredModel =
+        LOCAL_MODEL_OPTIONS.find(
+          (model) =>
+            model.purpose !== "diarization" &&
+            localInstalledModelSet.has(model.model),
+        ) ||
+        LOCAL_MODEL_OPTIONS.find(
+          (model) =>
+            model.purpose !== "diarization" &&
+            settings.localModels?.[model.id]?.status === "downloaded",
+        ) ||
+        LOCAL_MODEL_OPTIONS.find(
+          (model) => model.model === LOCAL_STT_PRESET_MODEL,
+        ) ||
+        LOCAL_MODEL_OPTIONS[0];
+
+      update(
+        localModelModeSettingsPatch(
+          {
+            endpoint: getLocalModelEndpoint(preferredModel),
+            model: preferredModel.model,
+          },
+          buildActiveApiAdapterSnapshot(),
+        ),
+      );
       setModelModeView("local");
       resetTestState();
       resetInstallState();
