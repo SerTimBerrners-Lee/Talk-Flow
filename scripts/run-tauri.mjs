@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { withWindowsToolchainPaths } from "./windows-toolchain-env.mjs";
+
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const tauriScript = join(
   rootDir,
@@ -25,7 +27,9 @@ function appendUniqueArgument(value, argument) {
   return [current, argument].filter(Boolean).join(" ");
 }
 
-function windowsBuildEnvironment(sourceEnv = process.env) {
+function windowsBuildEnvironment(
+  sourceEnv = withWindowsToolchainPaths(process.env),
+) {
   const env = { ...sourceEnv };
   if (process.platform !== "win32") return env;
 

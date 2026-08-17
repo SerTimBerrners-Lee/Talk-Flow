@@ -14,10 +14,13 @@ import {
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { withWindowsToolchainPaths } from "./windows-toolchain-env.mjs";
+
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const tauriDir = join(rootDir, "src-tauri");
 const llmManifest = join(tauriDir, "sidecars", "talkis-llm", "Cargo.toml");
 const binariesDir = join(tauriDir, "binaries");
+const toolchainEnv = withWindowsToolchainPaths(process.env);
 const placeholderContents = "#!/usr/bin/env sh\nexit 1\n";
 const staticMsvcRuntimeArg = "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded";
 const dynamicMsvcRuntimeArg = "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL";
@@ -153,16 +156,20 @@ function ensureLinuxBuildDependencies(targetTriple) {
 }
 
 function readTargetTriple() {
-  if (process.env.TAURI_STT_TARGET_TRIPLE) {
-    return process.env.TAURI_STT_TARGET_TRIPLE.trim();
+  if (toolchainEnv.TAURI_STT_TARGET_TRIPLE) {
+    return toolchainEnv.TAURI_STT_TARGET_TRIPLE.trim();
   }
 
   try {
     return execFileSync("rustc", ["--print", "host-tuple"], {
       encoding: "utf8",
+      env: toolchainEnv,
     }).trim();
   } catch {
-    const versionOutput = execFileSync("rustc", ["-Vv"], { encoding: "utf8" });
+    const versionOutput = execFileSync("rustc", ["-Vv"], {
+      encoding: "utf8",
+      env: toolchainEnv,
+    });
     const hostLine = versionOutput
       .split("\n")
       .find((line) => line.startsWith("host:"));
@@ -322,8 +329,16 @@ if (process.argv.includes("--self-test")) {
 
 const targetTriple = readTargetTriple();
 ensureLinuxBuildDependencies(targetTriple);
-const sttCargoEnv = cargoBuildEnvironment(targetTriple, "static");
-const llmCargoEnv = cargoBuildEnvironment(targetTriple, "dynamic");
+const sttCargoEnv = cargoBuildEnvironment(
+  targetTriple,
+  "static",
+  toolchainEnv,
+);
+const llmCargoEnv = cargoBuildEnvironment(
+  targetTriple,
+  "dynamic",
+  toolchainEnv,
+);
 
 const extension = targetTriple.includes("windows") ? ".exe" : "";
 const profile = process.env.TALKIS_STT_RELEASE === "1" ? "release" : "debug";

@@ -5,19 +5,28 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { withWindowsToolchainPaths } from "./windows-toolchain-env.mjs";
+
 const require = createRequire(import.meta.url);
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const binariesDir = join(rootDir, "src-tauri", "binaries");
+const toolchainEnv = withWindowsToolchainPaths(process.env);
 
 function readTargetTriple() {
-  if (process.env.TAURI_FFMPEG_TARGET_TRIPLE) {
-    return process.env.TAURI_FFMPEG_TARGET_TRIPLE.trim();
+  if (toolchainEnv.TAURI_FFMPEG_TARGET_TRIPLE) {
+    return toolchainEnv.TAURI_FFMPEG_TARGET_TRIPLE.trim();
   }
 
   try {
-    return execFileSync("rustc", ["--print", "host-tuple"], { encoding: "utf8" }).trim();
+    return execFileSync("rustc", ["--print", "host-tuple"], {
+      encoding: "utf8",
+      env: toolchainEnv,
+    }).trim();
   } catch {
-    const versionOutput = execFileSync("rustc", ["-Vv"], { encoding: "utf8" });
+    const versionOutput = execFileSync("rustc", ["-Vv"], {
+      encoding: "utf8",
+      env: toolchainEnv,
+    });
     const hostLine = versionOutput.split("\n").find((line) => line.startsWith("host:"));
 
     if (!hostLine) {
