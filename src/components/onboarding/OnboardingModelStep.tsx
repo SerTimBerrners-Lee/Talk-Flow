@@ -147,9 +147,11 @@ export function OnboardingModelStep({
               payload.status === "downloaded" ? "activating" : "downloading",
             message:
               payload.message ||
-              (payload.status === "preparing"
-                ? t("onboarding.model.preparing")
-                : t("onboarding.model.downloading")),
+              (payload.status === "downloaded"
+                ? t("onboarding.model.activating")
+                : payload.status === "preparing"
+                  ? t("onboarding.model.preparing")
+                  : t("onboarding.model.downloading")),
             progress:
               typeof payload.percent === "number"
                 ? Math.max(0, Math.min(100, payload.percent))

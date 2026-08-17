@@ -450,7 +450,7 @@ export function PermissionScreen({
     <div
       style={{
         position: "fixed",
-        top: 48,
+        top: platform === "macos" ? 48 : 0,
         right: 0,
         bottom: 0,
         left: 0,

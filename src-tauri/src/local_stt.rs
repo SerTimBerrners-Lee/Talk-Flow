@@ -14,12 +14,14 @@ use tokio::process::Command as TokioCommand;
 
 const WHISPER_RUNTIME_NAME: &str = "talkis-stt";
 const DIARIZATION_RUNTIME_NAME: &str = "talkis-diarize";
-const WHISPER_RUNTIME_API_VERSION: u32 = 2;
+const WHISPER_RUNTIME_API_VERSION: u32 = 3;
 const DEFAULT_RUNTIME_MANIFEST_URL: &str = "https://talkis.ru/downloads/talkis-stt/manifest.json";
 pub const MODEL_DOWNLOAD_PROGRESS_EVENT: &str = "local-stt-model-download-progress";
 pub const LOCAL_DIARIZATION_MODEL_ID: &str = "sherpa-diarization-pyannote-titanet-int8";
 const MODEL_DOWNLOAD_MAX_ATTEMPTS: usize = 3;
 const MODEL_DOWNLOAD_RETRY_DELAYS_MS: [u64; MODEL_DOWNLOAD_MAX_ATTEMPTS - 1] = [750, 1_500];
+const RUNTIME_START_TIMEOUT_SECS: u64 = 15;
+const RUNTIME_READINESS_POLL_INTERVAL_MS: u64 = 250;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LocalRuntimeKind {
@@ -233,7 +235,7 @@ const LOCAL_WHISPER_MODELS: &[LocalModelInfo] = &[
 ];
 
 const LOCAL_QWEN_MODEL_ID: &str = "Qwen/Qwen3-ASR-0.6B";
-fn resolve_stt_base_url_from_models_url(models_url: &str) -> String {
+pub(crate) fn resolve_stt_base_url_from_models_url(models_url: &str) -> String {
     models_url
         .trim_end_matches('/')
         .strip_suffix("/v1/models")
@@ -928,11 +930,11 @@ async fn whisper_runtime_supports_streaming_endpoints(
     ] {
         let url = format!("{}{}", base_url.trim_end_matches('/'), path);
         let available = client
-            .post(&url)
+            .request(reqwest::Method::OPTIONS, &url)
             .timeout(Duration::from_secs(3))
             .send()
             .await
-            .map(|response| response.status().as_u16() != 404)
+            .map(|response| response.status().is_success())
             .unwrap_or(false);
         if !available {
             return false;
@@ -1146,10 +1148,31 @@ async fn wait_for_local_stt(
     let started = std::time::Instant::now();
     while started.elapsed() < timeout {
         if local_stt_is_ready(client, kind, base_url, models_url).await {
+            logger::log_info(
+                "LOCAL_STT",
+                &format!(
+                    "Managed local {} STT runtime ready at {} in {}ms",
+                    kind.label(),
+                    base_url,
+                    started.elapsed().as_millis()
+                ),
+            );
             return true;
         }
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        tokio::time::sleep(Duration::from_millis(
+            RUNTIME_READINESS_POLL_INTERVAL_MS,
+        ))
+        .await;
     }
+    logger::log_error(
+        "LOCAL_STT",
+        &format!(
+            "Managed local {} STT runtime readiness timed out at {} after {}ms",
+            kind.label(),
+            base_url,
+            started.elapsed().as_millis()
+        ),
+    );
     false
 }
 
@@ -1329,7 +1352,7 @@ pub async fn ensure_runtime(
         kind,
         &runtime_base_url,
         &runtime_models_url,
-        Duration::from_secs(90),
+        Duration::from_secs(RUNTIME_START_TIMEOUT_SECS),
     )
     .await
     {
@@ -1374,9 +1397,19 @@ mod tests {
             engine: Some("transcribe.cpp".to_string()),
             api_version: Some(WHISPER_RUNTIME_API_VERSION),
         };
+        let previous = HealthResponse {
+            status: Some("ok".to_string()),
+            runtime: Some("talkis-stt".to_string()),
+            engine: Some("transcribe.cpp".to_string()),
+            api_version: Some(WHISPER_RUNTIME_API_VERSION - 1),
+        };
 
         assert!(!is_expected_runtime_health(
             &stale,
+            LocalRuntimeKind::Whisper,
+        ));
+        assert!(!is_expected_runtime_health(
+            &previous,
             LocalRuntimeKind::Whisper,
         ));
         assert!(is_expected_runtime_health(

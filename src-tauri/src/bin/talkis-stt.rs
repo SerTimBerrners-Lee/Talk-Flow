@@ -15,7 +15,7 @@ use transcribe_cpp::{
 };
 
 const SERVER_NAME: &str = "talkis-stt";
-const RUNTIME_API_VERSION: u32 = 2;
+const RUNTIME_API_VERSION: u32 = 3;
 const MAX_REQUEST_BYTES: usize = 128 * 1024 * 1024;
 const WHISPER_RUN_EXT_KIND: u32 = 0x4E524857;
 const PARAKEET_STREAM_EXT_KIND: u32 = 0x54534B50;
@@ -443,6 +443,19 @@ fn route_request(request: &HttpRequest, config: &RuntimeConfig) -> (u16, String)
     let path = request.path.split('?').next().unwrap_or(&request.path);
 
     match (request.method.as_str(), path) {
+        (
+            "OPTIONS",
+            "/v1/audio/transcriptions/stream" | "/v1/audio/transcriptions/live",
+        ) => (
+            200,
+            json!({
+                "status": "ok",
+                "runtime": SERVER_NAME,
+                "api_version": RUNTIME_API_VERSION,
+                "route": path
+            })
+            .to_string(),
+        ),
         ("GET", "/health") => (
             200,
             json!({
@@ -1614,6 +1627,33 @@ mod tests {
             Some("nvidia/nemotron-3.5-asr-streaming-0.6b"),
         );
         assert_eq!(fields.get("language").map(String::as_str), Some("ru-RU"));
+    }
+
+    #[test]
+    fn streaming_routes_support_fast_capability_probes() {
+        let root = env::temp_dir().join("talkis-stt-route-probe-test");
+        let config = RuntimeConfig {
+            host: "127.0.0.1".to_string(),
+            port: 0,
+            data_dir: root.clone(),
+            models_dir: root.join("models"),
+        };
+
+        for path in [
+            "/v1/audio/transcriptions/stream",
+            "/v1/audio/transcriptions/live",
+        ] {
+            let request = HttpRequest {
+                method: "OPTIONS".to_string(),
+                path: path.to_string(),
+                headers: HashMap::new(),
+                body: Vec::new(),
+            };
+            let (status, body) = route_request(&request, &config);
+
+            assert_eq!(status, 200);
+            assert!(body.contains(path));
+        }
     }
 
     #[test]

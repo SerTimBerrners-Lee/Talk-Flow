@@ -2273,9 +2273,22 @@ pub async fn list_stt_models(
     req: ListSttModelsRequest,
 ) -> Result<ListSttModelsResult, String> {
     let whisper_url = resolve_whisper_url(req.whisper_endpoint.as_deref());
-    let mut models_url = resolve_whisper_models_url(&whisper_url);
+    let models_url = resolve_whisper_models_url(&whisper_url);
     let managed_runtime_kind = local_stt::managed_runtime_kind(&models_url);
-    let mut effective_whisper_endpoint = None;
+    let effective_whisper_endpoint = managed_runtime_kind
+        .map(|_| local_stt::resolve_stt_base_url_from_models_url(&models_url));
+    if managed_runtime_kind.is_some() {
+        let mut models =
+            local_stt::installed_model_ids(&app, req.local_models_dir.as_deref())?;
+        models.sort();
+        return Ok(ListSttModelsResult {
+            success: true,
+            models,
+            message: "Список локальных моделей прочитан с диска.".to_string(),
+            whisper_endpoint: effective_whisper_endpoint,
+        });
+    }
+
     let whisper_key = if is_likely_local_url(&models_url) {
         None
     } else {
@@ -2286,16 +2299,6 @@ pub async fn list_stt_models(
     };
 
     let client = http_client();
-    if managed_runtime_kind.is_some() {
-        if let Ok(runtime_base_url) =
-            local_stt::ensure_runtime(&app, client, &models_url, req.local_models_dir.as_deref())
-                .await
-        {
-            effective_whisper_endpoint = Some(runtime_base_url.clone());
-            models_url = resolve_managed_models_url(&runtime_base_url);
-        }
-    }
-
     let mut request = client.get(&models_url);
     if let Some(whisper_key) = whisper_key {
         request = request.bearer_auth(whisper_key);
@@ -2303,24 +2306,6 @@ pub async fn list_stt_models(
 
     let response = match request.send().await {
         Ok(response) => Ok(response),
-        Err(err) if managed_runtime_kind.is_some() => {
-            let models = local_stt::installed_model_ids(&app, req.local_models_dir.as_deref())
-                .unwrap_or_default();
-            return Ok(ListSttModelsResult {
-                success: !models.is_empty(),
-                models,
-                message: if err.is_connect() {
-                    "Локальный STT runtime пока недоступен, список восстановлен по файлам на диске."
-                        .to_string()
-                } else {
-                    format!(
-                        "Не удалось опросить локальный STT runtime, список восстановлен по файлам на диске: {}",
-                        err
-                    )
-                },
-                whisper_endpoint: effective_whisper_endpoint,
-            });
-        }
         Err(err) => Err(if err.is_connect() {
             if is_likely_local_url(&models_url) {
                 "Локальный STT runtime пока недоступен. Нажмите «Скачать» для нужной Whisper-модели, Talkis запустит runtime автоматически."
@@ -2338,22 +2323,6 @@ pub async fn list_stt_models(
     let status = response.status();
     if !status.is_success() {
         let error_text = response.text().await.unwrap_or_default();
-        if managed_runtime_kind.is_some() {
-            let models = local_stt::installed_model_ids(&app, req.local_models_dir.as_deref())
-                .unwrap_or_default();
-            if !models.is_empty() {
-                return Ok(ListSttModelsResult {
-                    success: true,
-                    models,
-                    message: format!(
-                        "Локальный STT endpoint вернул {}, список восстановлен по файлам на диске.",
-                        status.as_u16()
-                    ),
-                    whisper_endpoint: effective_whisper_endpoint,
-                });
-            }
-        }
-
         return Ok(ListSttModelsResult {
             success: false,
             models: Vec::new(),
@@ -2379,18 +2348,6 @@ pub async fn list_stt_models(
                 .collect::<Vec<_>>()
         })
         .map_err(|err| format!("STT endpoint вернул некорректный список моделей: {}", err))?;
-
-    if managed_runtime_kind.is_some() {
-        if let Ok(local_models) =
-            local_stt::installed_model_ids(&app, req.local_models_dir.as_deref())
-        {
-            for model in local_models {
-                if !models.contains(&model) {
-                    models.push(model);
-                }
-            }
-        }
-    }
 
     models.sort();
 
@@ -2436,13 +2393,6 @@ pub async fn install_stt_model(
 
     let client = http_client();
     if local_stt::is_managed_whisper_runtime_url(&models_url) {
-        let runtime_base_url =
-            local_stt::ensure_runtime(&app, client, &models_url, req.local_models_dir.as_deref())
-                .await
-                .inspect_err(|message| {
-                    logger::log_error("STT_INSTALL", message);
-                })?;
-        effective_whisper_endpoint = Some(runtime_base_url.clone());
         let installed_model = local_stt::download_model_with_progress(
             &app,
             client,
@@ -2453,6 +2403,13 @@ pub async fn install_stt_model(
         .inspect_err(|message| {
             logger::log_error("STT_INSTALL", message);
         })?;
+        let runtime_base_url =
+            local_stt::ensure_runtime(&app, client, &models_url, req.local_models_dir.as_deref())
+                .await
+                .inspect_err(|message| {
+                    logger::log_error("STT_INSTALL", message);
+                })?;
+        effective_whisper_endpoint = Some(runtime_base_url);
 
         logger::log_info(
             "STT_INSTALL",
