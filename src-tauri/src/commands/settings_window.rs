@@ -53,8 +53,36 @@ fn create_settings_window(app: &AppHandle, url: &str) -> Result<tauri::WebviewWi
     let win = builder.build().map_err(|e| e.to_string())?;
     media_permissions::allow_microphone_requests(&win);
 
+    #[cfg(windows)]
+    {
+        let initial_theme = match win.theme() {
+            Ok(tauri::Theme::Dark) => crate::windows_titlebar::TitlebarTheme::Dark,
+            _ => crate::windows_titlebar::TitlebarTheme::Light,
+        };
+        if let Err(error) = crate::windows_titlebar::apply(&win, initial_theme) {
+            logger::log_error("WINDOW_TITLEBAR", &error);
+        }
+    }
+
     show_and_focus_window(&win);
     Ok(win)
+}
+
+#[tauri::command]
+pub async fn set_settings_titlebar_theme(app: AppHandle, theme: String) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let window = app
+            .get_webview_window("settings")
+            .ok_or_else(|| "Settings window is not available".to_string())?;
+        let theme = crate::windows_titlebar::TitlebarTheme::parse(&theme)?;
+        crate::windows_titlebar::apply(&window, theme)?;
+    }
+
+    #[cfg(not(windows))]
+    let _ = (app, theme);
+
+    Ok(())
 }
 
 #[tauri::command]

@@ -46,6 +46,7 @@ import { checkAllPermissions } from "../../lib/permissions";
 import { logError } from "../../lib/logger";
 import { UserPanel } from "../../components/UserPanel";
 import { watchThemePreference } from "../../lib/theme";
+import { syncWindowsTitlebarTheme } from "../../lib/windowsTitlebar";
 import {
   isSettingsTab,
   resolveInitialSettingsTab,
@@ -417,7 +418,16 @@ export function SettingsApp() {
   }, []);
 
   useEffect(() => {
-    return watchThemePreference(themePreference);
+    return watchThemePreference(themePreference, (theme) => {
+      void syncWindowsTitlebarTheme(theme).catch((error) => {
+        void logError(
+          "WINDOW_TITLEBAR",
+          `Failed to sync Windows title bar theme: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
+    });
   }, [themePreference]);
 
   useEffect(() => {

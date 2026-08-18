@@ -19,6 +19,8 @@ mod prompt_config;
 pub mod realtime;
 mod shutdown;
 mod tray;
+#[cfg(windows)]
+mod windows_titlebar;
 
 use commands::{
     accessibility, runtime_info, settings_window,
@@ -152,6 +154,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             settings_window::open_settings,
             settings_window::open_settings_tab,
+            settings_window::set_settings_titlebar_theme,
             widget::widget_resize,
             widget::activate_widget_for_hotkey,
             widget::show_widget_notice,

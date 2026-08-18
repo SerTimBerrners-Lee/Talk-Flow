@@ -74,7 +74,11 @@ tauri-plugin-autostart = "2.5.1"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.61.2", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Dwm",
+  "Win32_Storage_FileSystem",
+] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 pipewire = "0.10.0"
