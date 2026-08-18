@@ -23,6 +23,8 @@ use tauri::{AppHandle, Emitter};
 
 static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 static LONG_HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+static LOCAL_HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+static LOCAL_LONG_HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 const DICTATION_STREAM_UPDATE_EVENT: &str = "dictation-stream:update";
 
 fn http_client() -> &'static reqwest::Client {
@@ -41,6 +43,31 @@ fn http_client() -> &'static reqwest::Client {
 fn long_http_client() -> &'static reqwest::Client {
     LONG_HTTP_CLIENT.get_or_init(|| {
         reqwest::Client::builder()
+            .pool_max_idle_per_host(0)
+            .connect_timeout(Duration::from_secs(15))
+            .timeout(Duration::from_secs(1800))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
+}
+
+fn local_http_client() -> &'static reqwest::Client {
+    LOCAL_HTTP_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            // Loopback endpoints must bypass Windows/VPN system proxies.
+            .no_proxy()
+            .pool_max_idle_per_host(0)
+            .connect_timeout(Duration::from_secs(15))
+            .timeout(Duration::from_secs(120))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
+}
+
+fn local_long_http_client() -> &'static reqwest::Client {
+    LOCAL_LONG_HTTP_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .no_proxy()
             .pool_max_idle_per_host(0)
             .connect_timeout(Duration::from_secs(15))
             .timeout(Duration::from_secs(1800))
@@ -835,12 +862,7 @@ async fn transcribe_audio_bytes_internal(
     };
 
     let stt_client = if is_local_endpoint {
-        reqwest::Client::builder()
-            .pool_max_idle_per_host(0)
-            .connect_timeout(Duration::from_secs(15))
-            .timeout(Duration::from_secs(1800))
-            .build()
-            .unwrap_or_else(|_| (*client).clone())
+        (*local_long_http_client()).clone()
     } else {
         (*client).clone()
     };
@@ -1288,10 +1310,15 @@ async fn diarize_audio_file(
     req: &FilePathTranscriptionRequest,
     wav_path: &std::path::Path,
 ) -> Result<Vec<DiarizationSegment>, String> {
-    let client = long_http_client();
+    let runtime_client = long_http_client();
     let models_url = "http://127.0.0.1:8003/v1/models";
-    let runtime_base_url =
-        local_stt::ensure_runtime(app, client, models_url, req.local_models_dir.as_deref()).await?;
+    let runtime_base_url = local_stt::ensure_runtime(
+        app,
+        runtime_client,
+        models_url,
+        req.local_models_dir.as_deref(),
+    )
+    .await?;
     let diarization_url = format!(
         "{}/v1/audio/diarization",
         runtime_base_url.trim_end_matches('/')
@@ -1309,7 +1336,7 @@ async fn diarize_audio_file(
         "DIARIZATION",
         &format!("Sending request to {}", diarization_url),
     );
-    let response = client
+    let response = local_long_http_client()
         .post(&diarization_url)
         .multipart(form)
         .send()
@@ -1928,7 +1955,7 @@ pub async fn process_text(req: ProcessTextRequest) -> Result<ProcessTextResponse
     }
 
     let client = if is_local {
-        long_http_client()
+        local_long_http_client()
     } else {
         http_client()
     };
@@ -2040,7 +2067,7 @@ pub async fn embed_text(req: EmbedTextRequest) -> Result<EmbedTextResponse, Stri
     }
 
     let client = if is_local {
-        long_http_client()
+        local_long_http_client()
     } else {
         http_client()
     };
@@ -2127,7 +2154,12 @@ async fn test_stt_connection(
         models_url = resolve_managed_models_url(&runtime_base_url);
     }
 
-    let mut request = client.get(&models_url);
+    let request_client = if is_likely_local_url(&models_url) {
+        local_http_client()
+    } else {
+        client
+    };
+    let mut request = request_client.get(&models_url);
     if let Some(whisper_key) = whisper_key {
         request = request.bearer_auth(whisper_key);
     }
@@ -2298,7 +2330,11 @@ pub async fn list_stt_models(
             .or_else(|| Some(req.api_key.as_str()).filter(|s| !s.trim().is_empty()))
     };
 
-    let client = http_client();
+    let client = if is_likely_local_url(&models_url) {
+        local_http_client()
+    } else {
+        http_client()
+    };
     let mut request = client.get(&models_url);
     if let Some(whisper_key) = whisper_key {
         request = request.bearer_auth(whisper_key);
@@ -2356,6 +2392,34 @@ pub async fn list_stt_models(
         models,
         message: "Список локальных моделей обновлен.".to_string(),
         whisper_endpoint: effective_whisper_endpoint,
+    })
+}
+
+#[tauri::command]
+pub async fn warm_up_local_stt_runtime(
+    app: AppHandle,
+    req: ListSttModelsRequest,
+) -> Result<ListSttModelsResult, String> {
+    let whisper_url = resolve_whisper_url(req.whisper_endpoint.as_deref());
+    let models_url = resolve_whisper_models_url(&whisper_url);
+    if local_stt::managed_runtime_kind(&models_url) != Some(local_stt::LocalRuntimeKind::Whisper) {
+        return Err(
+            "Автоматический прогрев доступен только для локального STT runtime Talkis.".to_string(),
+        );
+    }
+
+    let client = http_client();
+    let runtime_base_url =
+        local_stt::ensure_runtime(&app, client, &models_url, req.local_models_dir.as_deref())
+            .await?;
+    let mut models = local_stt::installed_model_ids(&app, req.local_models_dir.as_deref())?;
+    models.sort();
+
+    Ok(ListSttModelsResult {
+        success: true,
+        models,
+        message: "Локальный STT runtime готов к распознаванию.".to_string(),
+        whisper_endpoint: Some(runtime_base_url),
     })
 }
 
@@ -2453,7 +2517,11 @@ pub async fn install_stt_model(
         download_url = resolve_whisper_model_download_url(&models_url, requested_model);
     }
 
-    let install_client = (*client).clone();
+    let install_client = if is_likely_local_url(&download_url) {
+        (*local_http_client()).clone()
+    } else {
+        (*client).clone()
+    };
     let local_progress_stop: Option<Arc<AtomicBool>> = None;
 
     let mut request = install_client.post(&download_url);
@@ -2723,7 +2791,12 @@ pub async fn delete_stt_model(
         delete_url = resolve_whisper_model_download_url(&models_url, requested_model);
     }
 
-    let mut request = client.delete(&delete_url);
+    let request_client = if is_likely_local_url(&delete_url) {
+        local_http_client()
+    } else {
+        client
+    };
+    let mut request = request_client.delete(&delete_url);
     if let Some(whisper_key) = whisper_key {
         request = request.bearer_auth(whisper_key);
     }

@@ -539,6 +539,29 @@ export function Widget() {
   }, [state]);
 
   useEffect(() => {
+    const startedAt = Date.now();
+
+    void getSettings({ reload: true })
+      .then(async (settings) => {
+        const runtimeEndpoint = await warmUpLiveDictationRuntime(settings);
+        if (!runtimeEndpoint) return;
+
+        await logInfo(
+          "LOCAL_STT",
+          `Startup warm-up ready at ${runtimeEndpoint} after ${Date.now() - startedAt}ms`,
+        );
+      })
+      .catch(async (error) => {
+        await logError(
+          "LOCAL_STT",
+          `Startup warm-up failed; recording fallback remains available: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
+  }, []);
+
+  useEffect(() => {
     liveTranslationStateRef.current = liveTranslationState;
   }, [liveTranslationState]);
 

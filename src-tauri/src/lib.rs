@@ -203,6 +203,7 @@ pub fn run() {
             ai::test_api_connection,
             realtime::test_realtime_connection,
             ai::list_stt_models,
+            ai::warm_up_local_stt_runtime,
             ai::install_stt_model,
             ai::delete_stt_model,
             local_translator::list_local_translators,

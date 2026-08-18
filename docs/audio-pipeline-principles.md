@@ -238,6 +238,10 @@ When editing conversion code, preserve the logs:
 The managed local STT runtime may move from its configured port to a dynamic
 port when the preferred port is occupied. Live transcription must use the
 effective endpoint returned by runtime warm-up, not the stale configured URL.
+All HTTP requests to managed loopback runtimes must bypass operating-system
+proxy settings. Keep proxy support for remote and cloud endpoints, but never
+route `127.0.0.1` or `localhost` runtime health checks and inference requests
+through a system proxy.
 Reuse that effective runtime for subsequent chunks instead of starting a new
 sidecar for every request. Runtime readiness must probe both the buffered
 `/stream` route and the continuous `/live` route so an older sidecar cannot be

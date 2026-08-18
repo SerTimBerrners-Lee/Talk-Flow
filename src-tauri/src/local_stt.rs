@@ -4,10 +4,13 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
-use std::process::{Command as StdCommand, Stdio};
+#[cfg(unix)]
+use std::process::Command as StdCommand;
+use std::process::Stdio;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command as TokioCommand;
@@ -67,6 +70,7 @@ struct ManagedRuntimeEndpoints {
 
 static MANAGED_RUNTIME_ENDPOINTS: OnceLock<Mutex<ManagedRuntimeEndpoints>> = OnceLock::new();
 static MANAGED_RUNTIME_START_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+static LOCAL_RUNTIME_HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 
 fn managed_runtime_endpoints() -> &'static Mutex<ManagedRuntimeEndpoints> {
     MANAGED_RUNTIME_ENDPOINTS.get_or_init(|| Mutex::new(ManagedRuntimeEndpoints::default()))
@@ -74,6 +78,20 @@ fn managed_runtime_endpoints() -> &'static Mutex<ManagedRuntimeEndpoints> {
 
 fn managed_runtime_start_lock() -> &'static tokio::sync::Mutex<()> {
     MANAGED_RUNTIME_START_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+fn local_runtime_http_client() -> &'static reqwest::Client {
+    LOCAL_RUNTIME_HTTP_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            // The managed runtime is always loopback-only. It must never inherit
+            // a Windows/VPN system proxy, even when localhost is not in its bypass list.
+            .no_proxy()
+            .pool_max_idle_per_host(0)
+            .connect_timeout(Duration::from_secs(3))
+            .timeout(Duration::from_secs(10))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
 }
 
 fn remembered_runtime_endpoint(kind: LocalRuntimeKind) -> Option<String> {
@@ -1188,7 +1206,7 @@ async fn start_bundled_runtime(
         .sidecar(kind.runtime_name())
         .map_err(|err| format!("Встроенный локальный STT runtime недоступен: {}", err))?;
 
-    command
+    let (events, child) = command
         .args([
             "--host",
             "127.0.0.1",
@@ -1200,13 +1218,89 @@ async fn start_bundled_runtime(
             &models_dir.to_string_lossy(),
         ])
         .spawn()
-        .map(|_| ())
         .map_err(|err| {
             format!(
                 "Не удалось запустить встроенный локальный STT runtime: {}",
                 err
             )
-        })
+        })?;
+    let pid = child.pid();
+    logger::log_info(
+        "LOCAL_STT",
+        &format!(
+            "Spawned bundled {} runtime: pid={}, port={}",
+            kind.label(),
+            pid,
+            port
+        ),
+    );
+    drain_bundled_runtime_events(events, kind, pid);
+    Ok(())
+}
+
+fn drain_bundled_runtime_events(
+    mut events: tauri::async_runtime::Receiver<CommandEvent>,
+    kind: LocalRuntimeKind,
+    pid: u32,
+) {
+    tauri::async_runtime::spawn(async move {
+        while let Some(event) = events.recv().await {
+            match event {
+                CommandEvent::Stderr(bytes) => {
+                    let output = String::from_utf8_lossy(&bytes);
+                    for line in output
+                        .lines()
+                        .map(str::trim)
+                        .filter(|line| !line.is_empty())
+                    {
+                        let message = format!("{} runtime stderr: {}", kind.label(), line);
+                        let normalized = line.to_ascii_lowercase();
+                        if normalized.contains("error")
+                            || normalized.contains("failed")
+                            || normalized.contains("panic")
+                        {
+                            logger::log_error("LOCAL_STT", &message);
+                        } else {
+                            logger::log_info("LOCAL_STT", &message);
+                        }
+                    }
+                }
+                CommandEvent::Stdout(bytes) => {
+                    let output = String::from_utf8_lossy(&bytes);
+                    for line in output
+                        .lines()
+                        .map(str::trim)
+                        .filter(|line| !line.is_empty())
+                    {
+                        logger::log_info(
+                            "LOCAL_STT",
+                            &format!("{} runtime stdout: {}", kind.label(), line),
+                        );
+                    }
+                }
+                CommandEvent::Error(error) => {
+                    logger::log_error(
+                        "LOCAL_STT",
+                        &format!("{} runtime event error: {}", kind.label(), error),
+                    );
+                }
+                CommandEvent::Terminated(payload) => {
+                    logger::log_error(
+                        "LOCAL_STT",
+                        &format!(
+                            "{} runtime terminated: pid={} code={:?} signal={:?}",
+                            kind.label(),
+                            pid,
+                            payload.code,
+                            payload.signal
+                        ),
+                    );
+                    break;
+                }
+                _ => {}
+            }
+        }
+    });
 }
 
 async fn start_downloaded_runtime(
@@ -1257,6 +1351,7 @@ pub async fn ensure_runtime(
         "Автоматический запуск локального runtime поддержан только для портов Talkis 8000/8003."
             .to_string()
     })?;
+    let runtime_client = local_runtime_http_client();
 
     let base_url = resolve_stt_base_url_from_models_url(models_url);
     let preferred_port = requested_port(&base_url, kind);
@@ -1264,8 +1359,20 @@ pub async fn ensure_runtime(
 
     if let Some(runtime_base_url) = remembered_runtime_endpoint(kind) {
         let runtime_models_url = managed_models_url(&runtime_base_url);
-        if local_stt_is_ready(client, kind, &runtime_base_url, &runtime_models_url).await
-            && runtime_models_match_disk(client, kind, &runtime_models_url, &models_dir).await
+        if local_stt_is_ready(
+            runtime_client,
+            kind,
+            &runtime_base_url,
+            &runtime_models_url,
+        )
+        .await
+            && runtime_models_match_disk(
+                runtime_client,
+                kind,
+                &runtime_models_url,
+                &models_dir,
+            )
+            .await
         {
             logger::log_info(
                 "LOCAL_STT",
@@ -1290,9 +1397,9 @@ pub async fn ensure_runtime(
         }
     }
 
-    match probe_local_stt(client, kind, &base_url, models_url).await {
+    match probe_local_stt(runtime_client, kind, &base_url, models_url).await {
         LocalSttProbe::Ready => {
-            if runtime_models_match_disk(client, kind, models_url, &models_dir).await {
+            if runtime_models_match_disk(runtime_client, kind, models_url, &models_dir).await {
                 remember_runtime_endpoint(kind, base_url.clone());
                 return Ok(base_url);
             }
@@ -1348,7 +1455,7 @@ pub async fn ensure_runtime(
     }
 
     if wait_for_local_stt(
-        client,
+        runtime_client,
         kind,
         &runtime_base_url,
         &runtime_models_url,

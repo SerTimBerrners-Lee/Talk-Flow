@@ -1119,7 +1119,19 @@ fn run_options_from_fields(
     max_timestamp_kind: TimestampKind,
     supports_whisper_options: bool,
 ) -> RunOptions {
-    run_options_from_fields_with_auto(fields, max_timestamp_kind, supports_whisper_options, false)
+    let mut options = run_options_from_fields_with_auto(
+        fields,
+        max_timestamp_kind,
+        supports_whisper_options,
+        false,
+    );
+    if !supports_whisper_options {
+        // Nemotron, Parakeet, Moonshine, Qwen and GigaAM choose their language
+        // internally for buffered runs. Passing a Whisper-style language hint
+        // makes these model families reject an otherwise valid request.
+        options.language = None;
+    }
+    options
 }
 
 fn run_options_from_fields_with_auto(
@@ -1602,6 +1614,16 @@ mod tests {
         let options = run_options_from_fields(&fields, TimestampKind::Segment, true);
 
         assert_eq!(options.language.as_deref(), Some("ru"));
+    }
+
+    #[test]
+    fn buffered_non_whisper_models_omit_language_hint() {
+        let mut fields = HashMap::new();
+        fields.insert("language".to_string(), "ru".to_string());
+
+        let options = run_options_from_fields(&fields, TimestampKind::Segment, false);
+
+        assert_eq!(options.language, None);
     }
 
     #[test]

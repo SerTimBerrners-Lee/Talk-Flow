@@ -102,7 +102,7 @@ export async function warmUpLiveDictationRuntime(
     models: string[];
     message: string;
     whisper_endpoint?: string | null;
-  }>("list_stt_models", {
+  }>("warm_up_local_stt_runtime", {
     req: {
       api_key: settings.apiKey,
       whisper_api_key: settings.whisperApiKey || null,
