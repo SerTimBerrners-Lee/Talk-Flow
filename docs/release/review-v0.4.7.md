@@ -40,9 +40,11 @@
 - `cargo test --release --manifest-path src-tauri/Cargo.toml --lib` with the static Windows CRT settings: compiled successfully, but the generated test harness could not start because a native model DLL reported `STATUS_ENTRYPOINT_NOT_FOUND`; no Rust test cases ran in that harness.
 - Standalone widget visibility tests: passed, `3/3` (disconnected monitor, inaccessible sliver, and already-visible position).
 - Local macOS build: not available from this Windows workstation; GitHub preflight is required.
-- GitHub Release Preflight: pending for the exact release commit.
-- Native/GitHub Windows build: local compile, NSIS bundle, and architecture checks passed; updater signing pending GitHub repository secrets.
-- Native/GitHub Linux build: pending GitHub preflight.
+- Initial GitHub Release Preflight for preparation commit `63553ef`: passed in [run 32120887234](https://github.com/SerTimBerrners-Lee/talkis/actions/runs/32120887234).
+- Native/GitHub macOS build: passed in `24m26s`; release checks, ad-hoc post-processing, signed updater archive, and artifact upload completed.
+- Native/GitHub Windows x64 build: passed in `52m23s`; release checks, NSIS bundle, x64 architecture verification, updater signature, and artifact upload completed.
+- Native/GitHub Linux build: passed in `38m35s`; release checks, AppImage/deb bundle creation, updater signature, and artifact upload completed.
+- Exact-review GitHub Release Preflight: required on the final review-only commit before merge or tag.
 - Additional manual checks:
   - Reviewed every commit and the full file list from `v0.4.6` through the release branch; no generated binaries are included in Git.
   - Confirmed `package.json`, both Cargo workspace versions, both Talkis entries in `Cargo.lock`, and `tauri.conf.json` are `0.4.7`.
@@ -60,7 +62,7 @@
 ## Findings
 
 - Blockers:
-  - GitHub Release Preflight must pass on macOS, Windows, and Linux for the exact reviewed commit before `main` or `v0.4.7` can be published.
+  - The final review-only commit must repeat GitHub Release Preflight successfully on macOS, Windows, and Linux before `main` or `v0.4.7` can be published.
 - Non-blocking issues:
   - This Windows workstation has no updater private key, so the local NSIS build completes but updater signing exits with the expected missing-key error. Repository secrets remain authoritative.
   - The optimized Windows Rust test harness compiles but cannot start because of a native model DLL entry-point mismatch. Production application/sidecar PE architecture checks pass, and clean GitHub runners remain the release gate.
@@ -74,6 +76,6 @@
 
 ## Decision
 
-- Ready for `main` merge: no, pending exact-commit release preflight.
-- Release preflight green on exact tag commit: no, pending.
-- Ready for tag publish: no, pending release preflight and final review update.
+- Ready for `main` merge: yes, after the final review-only commit repeats exact-commit release preflight successfully.
+- Release preflight green on exact tag commit: initial preparation commit passed; final review-only commit pending.
+- Ready for tag publish: yes, after the final review-only commit repeats exact-commit release preflight successfully.
