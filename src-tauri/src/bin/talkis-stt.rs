@@ -443,10 +443,7 @@ fn route_request(request: &HttpRequest, config: &RuntimeConfig) -> (u16, String)
     let path = request.path.split('?').next().unwrap_or(&request.path);
 
     match (request.method.as_str(), path) {
-        (
-            "OPTIONS",
-            "/v1/audio/transcriptions/stream" | "/v1/audio/transcriptions/live",
-        ) => (
+        ("OPTIONS", "/v1/audio/transcriptions/stream" | "/v1/audio/transcriptions/live") => (
             200,
             json!({
                 "status": "ok",

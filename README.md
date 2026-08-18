@@ -43,6 +43,16 @@ It is designed for practical daily work: IDEs, chats, notes, CRM fields, email, 
 
 ## Latest Changes
 
+### v0.4.7
+
+- Local STT setup on Windows now starts the model download before launching the runtime, reads installed models directly from disk, warms the runtime in the background, bypasses system proxies for loopback requests, and records sidecar output for diagnostics.
+- Windows development commands now discover Rust and the Visual Studio C++ toolchain automatically and keep the application and local-model sidecars on the same static runtime, avoiding missing `rustc` and linker failures during `bun run tauri dev`.
+- Clicking the floating widget on Windows opens Talkis, recognition/translation mode changes persist correctly, and the Settings window uses a native Windows caption with Talkis styling and reliable system buttons.
+- Widget errors now appear in one expandable status bar below the controls, with copy and expand actions; Windows clipboard shortcuts use physical keys so automatic paste also works with non-Latin keyboard layouts.
+- The floating widget is now persistent: Talkis prevents accidental closure and automatically restores a hidden, minimized, destroyed, or off-screen widget without stealing focus from the active application.
+- macOS call recording no longer adds the output device to the capture aggregate or opens a competing WebView microphone when native capture is available, preventing call volume and microphone routing changes.
+- Fixed the Windows onboarding offset that exposed content from the main screen above the setup flow, and clarified model activation progress after a download finishes.
+
 ### v0.4.6
 
 - Fixed a Windows crash that could close Talkis without an error on the first dictation after a long idle period or system sleep.
@@ -356,7 +366,7 @@ bun run tauri dev
 Useful commands:
 
 ```bash
-bunx tsc --noEmit
+bun x tsc --noEmit
 cargo check --manifest-path src-tauri/Cargo.toml
 bun run check:release
 bun run tauri build

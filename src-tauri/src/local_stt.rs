@@ -1177,10 +1177,7 @@ async fn wait_for_local_stt(
             );
             return true;
         }
-        tokio::time::sleep(Duration::from_millis(
-            RUNTIME_READINESS_POLL_INTERVAL_MS,
-        ))
-        .await;
+        tokio::time::sleep(Duration::from_millis(RUNTIME_READINESS_POLL_INTERVAL_MS)).await;
     }
     logger::log_error(
         "LOCAL_STT",
@@ -1359,20 +1356,9 @@ pub async fn ensure_runtime(
 
     if let Some(runtime_base_url) = remembered_runtime_endpoint(kind) {
         let runtime_models_url = managed_models_url(&runtime_base_url);
-        if local_stt_is_ready(
-            runtime_client,
-            kind,
-            &runtime_base_url,
-            &runtime_models_url,
-        )
-        .await
-            && runtime_models_match_disk(
-                runtime_client,
-                kind,
-                &runtime_models_url,
-                &models_dir,
-            )
-            .await
+        if local_stt_is_ready(runtime_client, kind, &runtime_base_url, &runtime_models_url).await
+            && runtime_models_match_disk(runtime_client, kind, &runtime_models_url, &models_dir)
+                .await
         {
             logger::log_info(
                 "LOCAL_STT",

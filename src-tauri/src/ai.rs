@@ -2307,11 +2307,10 @@ pub async fn list_stt_models(
     let whisper_url = resolve_whisper_url(req.whisper_endpoint.as_deref());
     let models_url = resolve_whisper_models_url(&whisper_url);
     let managed_runtime_kind = local_stt::managed_runtime_kind(&models_url);
-    let effective_whisper_endpoint = managed_runtime_kind
-        .map(|_| local_stt::resolve_stt_base_url_from_models_url(&models_url));
+    let effective_whisper_endpoint =
+        managed_runtime_kind.map(|_| local_stt::resolve_stt_base_url_from_models_url(&models_url));
     if managed_runtime_kind.is_some() {
-        let mut models =
-            local_stt::installed_model_ids(&app, req.local_models_dir.as_deref())?;
+        let mut models = local_stt::installed_model_ids(&app, req.local_models_dir.as_deref())?;
         models.sort();
         return Ok(ListSttModelsResult {
             success: true,
