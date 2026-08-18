@@ -1,5 +1,27 @@
 interface CallMediaDevices {
   getUserMedia(constraints: MediaStreamConstraints): Promise<MediaStream>;
+  enumerateDevices(): Promise<MediaDeviceInfo[]>;
+}
+
+export async function resolveCallMicrophoneLabel(
+  micId: string,
+  mediaDevices: CallMediaDevices = navigator.mediaDevices,
+): Promise<string | null> {
+  if (!micId) {
+    return null;
+  }
+
+  const devices = await mediaDevices.enumerateDevices();
+  const selected = devices.find(
+    (device) => device.kind === "audioinput" && device.deviceId === micId,
+  );
+  const label = selected?.label.trim();
+
+  if (!label) {
+    throw new Error("Selected microphone is unavailable");
+  }
+
+  return label;
 }
 
 export async function requestCallMicrophoneStream(

@@ -30,15 +30,13 @@ use objc2::AnyThread;
 #[cfg(target_os = "macos")]
 use objc2_core_audio::{
     kAudioAggregateDeviceIsPrivateKey, kAudioAggregateDeviceIsStackedKey,
-    kAudioAggregateDeviceMainSubDeviceKey, kAudioAggregateDeviceNameKey,
-    kAudioAggregateDeviceSubDeviceListKey, kAudioAggregateDeviceTapAutoStartKey,
-    kAudioAggregateDeviceTapListKey, kAudioAggregateDeviceUIDKey, kAudioDevicePropertyDeviceUID,
-    kAudioHardwarePropertyDefaultOutputDevice, kAudioHardwarePropertyTranslatePIDToProcessObject,
-    kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject,
-    kAudioSubDeviceUIDKey, kAudioSubTapDriftCompensationKey, kAudioSubTapUIDKey,
-    kAudioTapPropertyFormat, AudioDeviceCreateIOProcID, AudioDeviceDestroyIOProcID,
-    AudioDeviceIOProc, AudioDeviceIOProcID, AudioDeviceStart, AudioDeviceStop,
-    AudioHardwareCreateAggregateDevice, AudioHardwareCreateProcessTap,
+    kAudioAggregateDeviceNameKey, kAudioAggregateDeviceTapAutoStartKey,
+    kAudioAggregateDeviceTapListKey, kAudioAggregateDeviceUIDKey,
+    kAudioHardwarePropertyTranslatePIDToProcessObject, kAudioObjectPropertyElementMain,
+    kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject, kAudioSubTapDriftCompensationKey,
+    kAudioSubTapUIDKey, kAudioTapPropertyFormat, AudioDeviceCreateIOProcID,
+    AudioDeviceDestroyIOProcID, AudioDeviceIOProc, AudioDeviceIOProcID, AudioDeviceStart,
+    AudioDeviceStop, AudioHardwareCreateAggregateDevice, AudioHardwareCreateProcessTap,
     AudioHardwareDestroyAggregateDevice, AudioHardwareDestroyProcessTap,
     AudioObjectGetPropertyData, AudioObjectID, AudioObjectPropertyAddress,
     AudioObjectPropertySelector, CATapDescription, CATapMuteBehavior,
@@ -786,6 +784,13 @@ pub async fn start_call_capture(
     if crate::live_translation::is_active() {
         return Err("Сначала остановите синхронный перевод.".to_string());
     }
+    // Ordinary call recording must never alter what the user hears. Live
+    // translation temporarily changes these process-wide Core Audio policies
+    // when voice playback is enabled, so reset them explicitly before creating
+    // the call tap even if a previous translation session ended unexpectedly.
+    set_require_self_audio_exclusion(false);
+    set_mute_captured_system_audio(false);
+
     let mut session = build_session(&app, &req)?;
     logger::log_info(
         "CALL_CAPTURE",
@@ -1795,48 +1800,6 @@ fn read_audio_property<T: Copy>(
 }
 
 #[cfg(target_os = "macos")]
-fn read_audio_cf_string(
-    object_id: AudioObjectID,
-    selector: AudioObjectPropertySelector,
-) -> Result<String, String> {
-    let mut address = audio_property_address(selector);
-    let mut size = std::mem::size_of::<*const CFString>() as u32;
-    let mut value: *const CFString = std::ptr::null();
-    let status = unsafe {
-        AudioObjectGetPropertyData(
-            object_id,
-            NonNull::from(&mut address),
-            0,
-            std::ptr::null(),
-            NonNull::from(&mut size),
-            NonNull::new((&mut value as *mut *const CFString).cast())
-                .ok_or_else(|| "CoreAudio CFString output pointer is null.".to_string())?,
-        )
-    };
-    status_result(status, "AudioObjectGetPropertyData CFString")?;
-
-    let value = NonNull::new(value as *mut CFString)
-        .ok_or_else(|| "CoreAudio вернул пустой CFString.".to_string())?;
-    let retained = unsafe { value.as_ref() }.retain();
-    Ok(retained.to_string())
-}
-
-#[cfg(target_os = "macos")]
-fn read_default_output_device() -> Result<AudioObjectID, String> {
-    let value = read_audio_property(
-        kAudioObjectSystemObject as AudioObjectID,
-        kAudioHardwarePropertyDefaultOutputDevice,
-        0 as AudioObjectID,
-    )?;
-
-    if value == 0 {
-        Err("CoreAudio не вернул output-устройство.".to_string())
-    } else {
-        Ok(value)
-    }
-}
-
-#[cfg(target_os = "macos")]
 fn current_audio_process_object() -> Result<AudioObjectID, String> {
     let mut address = audio_property_address(kAudioHardwarePropertyTranslatePIDToProcessObject);
     let pid = std::process::id() as i32;
@@ -1910,34 +1873,22 @@ where
 #[cfg(target_os = "macos")]
 fn build_macos_aggregate_description(
     session_id: &str,
-    output_uid: &str,
     tap_uuid: &str,
 ) -> Result<CFRetained<CFDictionary<CFString, CFType>>, String> {
     let name_key = cf_key(kAudioAggregateDeviceNameKey)?;
     let uid_key = cf_key(kAudioAggregateDeviceUIDKey)?;
-    let main_key = cf_key(kAudioAggregateDeviceMainSubDeviceKey)?;
     let private_key = cf_key(kAudioAggregateDeviceIsPrivateKey)?;
     let stacked_key = cf_key(kAudioAggregateDeviceIsStackedKey)?;
     let auto_start_key = cf_key(kAudioAggregateDeviceTapAutoStartKey)?;
-    let sub_device_list_key = cf_key(kAudioAggregateDeviceSubDeviceListKey)?;
     let tap_list_key = cf_key(kAudioAggregateDeviceTapListKey)?;
-    let sub_device_uid_key = cf_key(kAudioSubDeviceUIDKey)?;
     let sub_tap_drift_key = cf_key(kAudioSubTapDriftCompensationKey)?;
     let sub_tap_uid_key = cf_key(kAudioSubTapUIDKey)?;
 
     let name = CFString::from_str(&format!("Talkis Call Capture {}", session_id));
     let aggregate_uid = CFString::from_str(&format!("com.trixter.talkis.call.{}", session_id));
-    let output_uid = CFString::from_str(output_uid);
     let tap_uuid = CFString::from_str(tap_uuid);
     let true_value = CFBoolean::new(true);
     let false_value = CFBoolean::new(false);
-
-    let sub_device = CFDictionary::<CFString, CFType>::from_slices(
-        &[sub_device_uid_key.as_ref()],
-        &[cf_type::<CFString>(&output_uid)],
-    );
-    let sub_devices =
-        CFArray::<CFDictionary<CFString, CFType>>::from_objects(&[sub_device.as_ref()]);
 
     let sub_tap = CFDictionary::<CFString, CFType>::from_slices(
         &[sub_tap_drift_key.as_ref(), sub_tap_uid_key.as_ref()],
@@ -1952,21 +1903,17 @@ fn build_macos_aggregate_description(
         &[
             name_key.as_ref(),
             uid_key.as_ref(),
-            main_key.as_ref(),
             private_key.as_ref(),
             stacked_key.as_ref(),
             auto_start_key.as_ref(),
-            sub_device_list_key.as_ref(),
             tap_list_key.as_ref(),
         ],
         &[
             cf_type::<CFString>(&name),
             cf_type::<CFString>(&aggregate_uid),
-            cf_type::<CFString>(&output_uid),
             cf_type::<CFBoolean>(true_value),
             cf_type::<CFBoolean>(false_value),
             cf_type::<CFBoolean>(true_value),
-            cf_type::<CFArray<CFDictionary<CFString, CFType>>>(&sub_devices),
             cf_type::<CFArray<CFDictionary<CFString, CFType>>>(&sub_taps),
         ],
     ))
@@ -2713,8 +2660,6 @@ fn start_macos_system_audio_capture(
     session: &CallCaptureSession,
     save_audio: bool,
 ) -> Result<Option<MacosCallCaptureState>, String> {
-    let output_device = read_default_output_device()?;
-    let output_uid = read_audio_cf_string(output_device, kAudioDevicePropertyDeviceUID)?;
     let talkis_process = current_audio_process_object_for_tap();
     let excluded_processes = match &talkis_process {
         Ok(process_object) => {
@@ -2789,8 +2734,7 @@ fn start_macos_system_audio_capture(
     };
 
     let tap_uuid_string = tap_uuid.UUIDString().to_string();
-    let aggregate_description =
-        build_macos_aggregate_description(&session.id, &output_uid, &tap_uuid_string)?;
+    let aggregate_description = build_macos_aggregate_description(&session.id, &tap_uuid_string)?;
     let mut aggregate_device_id: AudioObjectID = 0;
     if let Err(err) = status_result(
         unsafe {

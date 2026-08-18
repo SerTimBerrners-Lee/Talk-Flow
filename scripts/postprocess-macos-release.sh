@@ -19,8 +19,23 @@ if [[ ! -d "${APP_PATH}" ]]; then
   exit 1
 fi
 
-echo "Ad-hoc signing ${APP_PATH} with stable identifier ${APP_IDENTIFIER}"
-codesign --force --deep --sign - --identifier "${APP_IDENTIFIER}" "${APP_PATH}"
+echo "Verifying Developer ID signature for ${APP_PATH}"
+codesign --verify --deep --strict --verbose=2 "${APP_PATH}"
+
+SIGNATURE_INFO="$(codesign -dv --verbose=4 "${APP_PATH}" 2>&1)"
+if ! grep -Fq "Identifier=${APP_IDENTIFIER}" <<<"${SIGNATURE_INFO}"; then
+  echo "macOS app has an unexpected bundle signature identifier; expected ${APP_IDENTIFIER}" >&2
+  exit 1
+fi
+if grep -Fq "Signature=adhoc" <<<"${SIGNATURE_INFO}" || \
+  ! grep -Fq "Authority=Developer ID Application:" <<<"${SIGNATURE_INFO}"; then
+  echo "A Developer ID Application signature is required for stable macOS Accessibility permissions across updates" >&2
+  exit 1
+fi
+if grep -Fq "TeamIdentifier=not set" <<<"${SIGNATURE_INFO}"; then
+  echo "The macOS app signature has no stable Apple team identifier" >&2
+  exit 1
+fi
 
 if [[ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" && -n "${TAURI_SIGNING_PRIVATE_KEY_PATH:-}" ]]; then
   if [[ ! -f "${TAURI_SIGNING_PRIVATE_KEY_PATH}" ]]; then
@@ -61,4 +76,4 @@ hdiutil create \
   "${DMG_PATH}"
 
 echo "Post-processing complete"
-codesign -dv --verbose=4 "${APP_PATH}" 2>&1 | sed 's/^/codesign: /'
+printf '%s\n' "${SIGNATURE_INFO}" | sed 's/^/codesign: /'

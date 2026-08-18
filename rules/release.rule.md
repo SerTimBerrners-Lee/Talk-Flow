@@ -52,6 +52,8 @@ This file defines the mandatory release workflow for Talkis. Follow it for every
 - Version numbers and release tag match.
 - The GitHub Actions release workflow still matches the documented process.
 - GitHub repository secrets include `TAURI_SIGNING_PRIVATE_KEY` and, if the key is password-protected, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+- GitHub repository secrets include the macOS Developer ID values `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, and `APPLE_SIGNING_IDENTITY`; macOS release and preflight builds must fail rather than publish an ad-hoc-signed update.
+- The macOS app passes `codesign --verify --deep --strict` and reports both `Authority=Developer ID Application:` and a real `TeamIdentifier`, so Accessibility permission remains tied to the same application identity across updates.
 - GitHub Release includes `latest.json`, macOS `.app.tar.gz`, Windows `.exe`, Linux `.AppImage`, and matching `.sig` files.
 
 ## GitHub Actions release source of truth

@@ -40,8 +40,8 @@ Call transcription:
 ```text
 Widget call mode
 -> src/lib/callCapture.ts
--> call_capture.rs for system track
--> recordingRuntime.ts for mic track
+-> call_capture.rs for system track and preferred native mic track
+-> recordingRuntime.ts only for the WebView mic fallback
 -> transcribeCallCaptureSession()
 -> file transcription pipeline
 ```
@@ -301,6 +301,13 @@ Call capture has two different tracks:
   with WebView `MediaRecorder` only as a compatibility fallback;
 - system track: platform-specific system audio capture.
 
+Resolve a selected call microphone label through `enumerateDevices()` before
+starting capture, but do not pre-open it with WebView `getUserMedia()`. Start the
+native mic first and open a WebView stream only after the backend explicitly
+reports that native capture is unavailable. Opening the same input through both
+paths during startup can make macOS call apps rebuild their audio route and can
+leave other audio ducked.
+
 Both native tracks are written while the call is active. Their PCM WAV headers
 must be flushed at least every five seconds so a process crash cannot invalidate
 the whole conversation. The session manifest is written atomically and the
@@ -321,8 +328,10 @@ durable file tail, and the latest saved transcript draft is restored to history.
 Current system-audio support:
 
 - macOS: implemented via a stereo global Core Audio tap / aggregate device in
-  `call_capture.rs`, so output is captured even when an app routes audio through
-  a non-default device stream;
+  `call_capture.rs`. The aggregate is private and tap-only: do not add the
+  physical output device as a subdevice, because recording must observe output
+  without joining or changing its playback route. Ordinary call capture must
+  always use the unmuted tap policy;
 - Windows: implemented via `cpal` WASAPI loopback on the default output device in `call_capture.rs`;
 - Linux: implemented via PipeWire default output monitor capture in `call_capture.rs`.
 
@@ -344,6 +353,11 @@ Run the macOS dev binary from `Talkis Dev.app` with a stable Apple Development
 code-signing identity. An ad-hoc signature uses a designated requirement tied
 to the binary's changing CDHash, so rebuilding makes TCC treat the next process
 as a different application even when the old checkbox remains visible.
+
+Distributed macOS updates need the same stability. Release and preflight builds
+must use one `Developer ID Application` identity and reject ad-hoc signatures;
+otherwise Accessibility permission is tied to changing code and users have to
+remove and re-add Talkis after every update.
 
 Microphone status should be read from AVFoundation without starting an audio
 session. System-audio access must first be confirmed with the existing short

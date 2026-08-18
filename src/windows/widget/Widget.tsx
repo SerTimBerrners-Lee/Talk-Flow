@@ -90,7 +90,10 @@ import {
   createCallLiveDictationOptions,
   warmUpLiveDictationRuntime,
 } from "./services/dictationStreamOverlay";
-import { requestCallMicrophoneStream } from "./services/callMicrophone";
+import {
+  requestCallMicrophoneStream,
+  resolveCallMicrophoneLabel,
+} from "./services/callMicrophone";
 import { showWidgetErrorOverlay } from "./services/widgetErrorOverlay";
 import {
   createLiveTranslationOverlayRenderer,
@@ -963,16 +966,15 @@ export function Widget() {
       const settings = await getSettings({ reload: true });
       setCallSettings(settings);
 
+      let micDeviceLabel: string | null = null;
       try {
-        if (settings.micId) {
-          logInfo(
-            "CALL_CAPTURE",
-            `Requesting selected call mic: ${settings.micId}`,
-          );
-        } else {
-          logInfo("CALL_CAPTURE", "Requesting system default call mic");
-        }
-        micStream = await requestCallMicrophoneStream(settings.micId);
+        micDeviceLabel = await resolveCallMicrophoneLabel(settings.micId);
+        logInfo(
+          "CALL_CAPTURE",
+          micDeviceLabel
+            ? `Resolved selected call mic without opening WebView audio: ${micDeviceLabel}`
+            : "Using native system default call mic",
+        );
       } catch (error) {
         logError(
           "CALL_CAPTURE",
@@ -1074,8 +1076,6 @@ export function Widget() {
         lastCheckpointAt: { mic: 0, system: 0 },
         lastUiEmitAt: 0,
       };
-      const micDeviceLabel =
-        micStream.getAudioTracks()[0]?.label?.trim() || null;
       const session = await startCallCapture({
         targetId: "system-output",
         includeMic: true,
@@ -1091,8 +1091,16 @@ export function Widget() {
       startedSession = session;
 
       if (session.nativeMicActive) {
-        stopMediaStream(micStream);
+        logInfo(
+          "CALL_CAPTURE",
+          "Native call mic started without a competing WebView audio session",
+        );
       } else {
+        logInfo(
+          "CALL_CAPTURE",
+          "Native call mic unavailable; requesting WebView fallback",
+        );
+        micStream = await requestCallMicrophoneStream(settings.micId);
         callMicRuntimeRef.current.start(micStream);
       }
       micStream = null;
