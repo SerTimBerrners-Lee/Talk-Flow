@@ -1,8 +1,15 @@
 use serde::{Deserialize, Serialize};
 use std::sync::{Mutex, OnceLock};
-use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, Emitter, Manager, PhysicalPosition, Position, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder,
+};
 
-use crate::media_permissions;
+use crate::{logger, media_permissions};
+
+#[path = "widget_visibility.rs"]
+mod widget_visibility;
+use widget_visibility::{recover_offscreen_position, PhysicalRect};
 
 const NOTICE_WINDOW_LABEL: &str = "widget-notice";
 const TEXT_WINDOW_LABEL: &str = "widget-text";
@@ -30,6 +37,161 @@ fn centered_resize_offset(current: f64, target: f64, expanded_offset_ratio: f64)
     } else {
         centered
     }
+}
+
+pub fn configure_main_widget_window(win: &WebviewWindow) -> Result<(), String> {
+    win.set_resizable(false).map_err(|e| e.to_string())?;
+    win.set_size(tauri::Size::Logical(tauri::LogicalSize {
+        width: WIDGET_WIDTH,
+        height: WIDGET_HEIGHT,
+    }))
+    .map_err(|e| e.to_string())?;
+
+    #[cfg(target_os = "macos")]
+    {
+        let main_thread_window = win.clone();
+        win.run_on_main_thread(move || unsafe {
+            match main_thread_window.ns_window() {
+                Ok(pointer) => {
+                    let ns_win: &objc2_app_kit::NSWindow = &*pointer.cast();
+                    ns_win.setAcceptsMouseMovedEvents(true);
+                }
+                Err(err) => logger::log_error(
+                    "WINDOW",
+                    &format!("Failed to configure widget mouse events: {err}"),
+                ),
+            }
+        })
+        .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+fn get_or_create_main_widget_window(app: &AppHandle) -> Result<(WebviewWindow, bool), String> {
+    if let Some(win) = app.get_webview_window("widget") {
+        return Ok((win, false));
+    }
+
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|config| config.label == "widget")
+        .cloned()
+        .ok_or_else(|| "Widget window configuration not found".to_string())?;
+    let win = WebviewWindowBuilder::from_config(app, &config)
+        .map_err(|e| e.to_string())?
+        .build()
+        .map_err(|e| e.to_string())?;
+    media_permissions::allow_microphone_requests(&win);
+    configure_main_widget_window(&win)?;
+
+    Ok((win, true))
+}
+
+fn keep_widget_on_available_monitor(win: &WebviewWindow) -> Result<bool, String> {
+    let position = win.outer_position().map_err(|e| e.to_string())?;
+    let size = win.outer_size().map_err(|e| e.to_string())?;
+    let monitor_work_areas = win
+        .available_monitors()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|monitor| {
+            let work_area = monitor.work_area();
+            PhysicalRect {
+                x: i64::from(work_area.position.x),
+                y: i64::from(work_area.position.y),
+                width: i64::from(work_area.size.width),
+                height: i64::from(work_area.size.height),
+            }
+        })
+        .collect::<Vec<_>>();
+    let window_rect = PhysicalRect {
+        x: i64::from(position.x),
+        y: i64::from(position.y),
+        width: i64::from(size.width),
+        height: i64::from(size.height),
+    };
+
+    let Some((x, y)) = recover_offscreen_position(window_rect, &monitor_work_areas) else {
+        return Ok(false);
+    };
+
+    win.set_position(Position::Physical(PhysicalPosition { x, y }))
+        .map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
+/// Restores the persistent widget without taking keyboard focus away from the
+/// application in which the user is typing.
+pub fn restore_widget_window(
+    app: &AppHandle,
+    reason: &str,
+    bring_to_front: bool,
+) -> Result<bool, String> {
+    let (win, recreated) = get_or_create_main_widget_window(app)?;
+    let was_minimized = win.is_minimized().map_err(|e| e.to_string())?;
+    let was_visible = win.is_visible().map_err(|e| e.to_string())?;
+
+    if was_minimized {
+        win.unminimize().map_err(|e| e.to_string())?;
+    }
+    if !was_visible {
+        win.show().map_err(|e| e.to_string())?;
+    }
+
+    let repositioned = keep_widget_on_available_monitor(&win)?;
+    let restored = recreated || was_minimized || !was_visible || repositioned;
+    if restored || bring_to_front {
+        win.set_always_on_top(true).map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "macos")]
+    if bring_to_front {
+        order_widget_window_front(app)?;
+    }
+
+    if restored {
+        logger::log_info(
+            "WIDGET",
+            &format!(
+                "Widget restored: reason={reason}, recreated={recreated}, was_visible={was_visible}, was_minimized={was_minimized}, repositioned={repositioned}"
+            ),
+        );
+    }
+
+    Ok(restored)
+}
+
+pub fn start_widget_watchdog(app: &AppHandle) {
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        let mut previous_error: Option<String> = None;
+
+        loop {
+            match restore_widget_window(&handle, "watchdog", false) {
+                Ok(_) => {
+                    if previous_error.take().is_some() {
+                        logger::log_info("WIDGET", "Widget watchdog recovered after an error");
+                    }
+                }
+                Err(err) => {
+                    if previous_error.as_deref() != Some(err.as_str()) {
+                        logger::log_error(
+                            "WIDGET",
+                            &format!("Widget watchdog could not restore the window: {err}"),
+                        );
+                        previous_error = Some(err);
+                    }
+                }
+            }
+
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        }
+    });
 }
 
 #[derive(Clone, Serialize)]
@@ -617,17 +779,7 @@ pub async fn activate_widget_for_hotkey(app: AppHandle) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     crate::paste::remember_linux_paste_target_window();
 
-    let win = app
-        .get_webview_window("widget")
-        .ok_or_else(|| "Widget window not found".to_string())?;
-
-    let _ = win.unminimize();
-    win.show().map_err(|e| e.to_string())?;
-    let _ = win.set_always_on_top(true);
-
-    #[cfg(target_os = "macos")]
-    order_widget_window_front(&app)?;
-
+    restore_widget_window(&app, "hotkey", true)?;
     Ok(())
 }
 

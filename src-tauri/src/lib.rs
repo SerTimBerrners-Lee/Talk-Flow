@@ -22,10 +22,7 @@ mod tray;
 #[cfg(windows)]
 mod windows_titlebar;
 
-use commands::{
-    accessibility, runtime_info, settings_window,
-    widget::{self, WIDGET_HEIGHT, WIDGET_WIDTH},
-};
+use commands::{accessibility, runtime_info, settings_window, widget};
 use tauri::{Emitter, Manager};
 use tauri_plugin_deep_link::DeepLinkExt;
 
@@ -35,14 +32,14 @@ use tauri_plugin_deep_link::DeepLinkExt;
 fn focus_existing_instance(app: &tauri::AppHandle) {
     use tauri::Manager;
 
-    if let Some(win) = app.get_webview_window("settings") {
-        let _ = win.unminimize();
-        let _ = win.show();
-        let _ = win.set_focus();
-        return;
+    if let Err(err) = widget::restore_widget_window(app, "second-launch", false) {
+        logger::log_error(
+            "WIDGET",
+            &format!("Failed to restore widget after a second launch: {err}"),
+        );
     }
 
-    if let Some(win) = app.get_webview_window("widget") {
+    if let Some(win) = app.get_webview_window("settings") {
         let _ = win.unminimize();
         let _ = win.show();
         let _ = win.set_focus();
@@ -66,6 +63,24 @@ pub fn run() {
     }
 
     builder
+        .on_window_event(|window, event| {
+            if window.label() != "widget" {
+                return;
+            }
+
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                logger::log_info("WIDGET", "Prevented the persistent widget from closing");
+                if let Err(err) =
+                    widget::restore_widget_window(window.app_handle(), "close-request", false)
+                {
+                    logger::log_error(
+                        "WIDGET",
+                        &format!("Failed to restore widget after close request: {err}"),
+                    );
+                }
+            }
+        })
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -99,27 +114,14 @@ pub fn run() {
 
             if let Some(win) = app.get_webview_window("widget") {
                 media_permissions::allow_microphone_requests(&win);
-                let _ = win.set_resizable(false);
-
-                #[cfg(target_os = "macos")]
-                {
-                    unsafe {
-                        let ns_win: &objc2_app_kit::NSWindow =
-                            &*win.ns_window().map_err(|e| e.to_string())?.cast();
-                        ns_win.setAcceptsMouseMovedEvents(true);
-                    }
-                }
-
-                if let Err(err) = win.set_size(tauri::Size::Logical(tauri::LogicalSize {
-                    width: WIDGET_WIDTH,
-                    height: WIDGET_HEIGHT,
-                })) {
+                if let Err(err) = widget::configure_main_widget_window(&win) {
                     logger::log_error(
                         "WINDOW",
-                        &format!("Failed to size widget window during setup: {}", err),
+                        &format!("Failed to configure widget window during setup: {err}"),
                     );
                 }
             }
+            widget::start_widget_watchdog(app.handle());
 
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {

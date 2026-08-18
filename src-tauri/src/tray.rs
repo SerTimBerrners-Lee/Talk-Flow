@@ -1,4 +1,7 @@
-use crate::{commands::settings_window, logger, shutdown};
+use crate::{
+    commands::{settings_window, widget},
+    logger, shutdown,
+};
 use std::future::Future;
 use tauri::{
     menu::{AboutMetadataBuilder, Menu, MenuItem, PredefinedMenuItem},
@@ -88,6 +91,16 @@ where
 
 fn open_settings(app: &AppHandle) {
     run_settings_action("open settings", settings_window::open_settings(app.clone()));
+}
+
+fn open_talkis(app: &AppHandle) {
+    if let Err(err) = widget::restore_widget_window(app, "tray-open", false) {
+        logger::log_error(
+            "TRAY",
+            &format!("Failed to restore widget from tray: {err}"),
+        );
+    }
+    open_settings(app);
 }
 
 fn open_settings_tab(app: &AppHandle, tab: &'static str) {
@@ -204,7 +217,7 @@ pub fn setup(app: &App) -> tauri::Result<()> {
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match tray_action(event.id().as_ref()) {
-            Some(TrayAction::Open) => open_settings(app),
+            Some(TrayAction::Open) => open_talkis(app),
             Some(TrayAction::History) => open_settings_tab(app, "main"),
             Some(TrayAction::FileTranscription) => open_settings_tab(app, "file"),
             Some(TrayAction::Chat) => open_settings_tab(app, "chat"),
