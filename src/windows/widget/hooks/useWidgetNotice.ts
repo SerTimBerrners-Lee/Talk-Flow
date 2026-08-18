@@ -2,7 +2,12 @@ import { useCallback, useEffect, useRef } from "react";
 import type { MutableRefObject } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
-import { NOTICE_TIMEOUT_MS, WidgetNoticeTone, WidgetState } from "../widgetConstants";
+import {
+  NOTICE_TIMEOUT_MS,
+  WidgetNoticeTone,
+  WidgetState,
+} from "../widgetConstants";
+import { showWidgetErrorOverlay } from "../services/widgetErrorOverlay";
 
 interface UseWidgetNoticeParams {
   stateRef: MutableRefObject<WidgetState>;
@@ -30,6 +35,11 @@ export function useWidgetNotice({ stateRef }: UseWidgetNoticeParams): UseWidgetN
       if (noticeTimerRef.current) {
         clearTimeout(noticeTimerRef.current);
         noticeTimerRef.current = null;
+      }
+
+      if (tone === "error") {
+        showWidgetErrorOverlay(message);
+        return;
       }
 
       void invoke("show_widget_notice", {

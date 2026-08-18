@@ -91,6 +91,7 @@ import {
   warmUpLiveDictationRuntime,
 } from "./services/dictationStreamOverlay";
 import { requestCallMicrophoneStream } from "./services/callMicrophone";
+import { showWidgetErrorOverlay } from "./services/widgetErrorOverlay";
 import {
   createLiveTranslationOverlayRenderer,
   type LiveTranslationOverlayRenderer,
@@ -104,7 +105,6 @@ import {
   IDLE_HOVER_WIDGET_HEIGHT,
   IDLE_HOVER_WIDGET_WIDTH,
   IDLE_HOVER_SCALE,
-  NOTICE_TIMEOUT_MS,
   WIDGET_CONTROL_GAP,
   WIDGET_PRIMARY_INLINE_INSET,
   WIDGET_SHELL_HEIGHT,
@@ -362,7 +362,6 @@ export function Widget() {
   const fileProcessingIdRef = useRef<string | null>(null);
   const callMicPausedForVoiceRef = useRef(false);
   const callSystemAudioPermissionReadyRef = useRef(false);
-  const callNoticeTimerRef = useRef<number | null>(null);
   const callStateRef = useRef<WidgetCallState>("idle");
   const liveTranslationStateRef = useRef<WidgetLiveTranslationState>("idle");
   const liveOverlayRef = useRef<LiveTranslationOverlayState | null>(null);
@@ -841,31 +840,8 @@ export function Widget() {
     });
   }, []);
 
-  useEffect(() => {
-    return () => {
-      if (callNoticeTimerRef.current) {
-        window.clearTimeout(callNoticeTimerRef.current);
-        callNoticeTimerRef.current = null;
-      }
-    };
-  }, []);
-
   const showCallNotice = useCallback((message: string): void => {
-    if (callNoticeTimerRef.current) {
-      window.clearTimeout(callNoticeTimerRef.current);
-      callNoticeTimerRef.current = null;
-    }
-
-    void invoke("show_widget_notice", {
-      message,
-      tone: "error",
-      anchorState: stateRef.current,
-    });
-
-    callNoticeTimerRef.current = window.setTimeout(() => {
-      callNoticeTimerRef.current = null;
-      void invoke("hide_widget_notice");
-    }, NOTICE_TIMEOUT_MS);
+    showWidgetErrorOverlay(message);
   }, []);
 
   const clearFileResetTimer = () => {

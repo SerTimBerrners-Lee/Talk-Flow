@@ -513,7 +513,9 @@ fn simulate_cmd_v() -> Result<(), String> {
         .key(Key::Control, enigo::Direction::Press)
         .map_err(|e| format!("Ctrl press failed: {}", e))?;
     enigo
-        .key(Key::Unicode('v'), enigo::Direction::Click)
+        // Use the physical Windows V key. Key::Unicode('v') depends on the
+        // active keyboard layout and fails when, for example, Russian is active.
+        .key(Key::V, enigo::Direction::Click)
         .map_err(|e| format!("V click failed: {}", e))?;
     enigo
         .key(Key::Control, enigo::Direction::Release)
@@ -531,7 +533,8 @@ fn simulate_cmd_c() -> Result<(), String> {
         .key(Key::Control, enigo::Direction::Press)
         .map_err(|e| format!("Ctrl press failed: {}", e))?;
     enigo
-        .key(Key::Unicode('c'), enigo::Direction::Click)
+        // Clipboard shortcuts must stay layout-independent on Windows.
+        .key(Key::C, enigo::Direction::Click)
         .map_err(|e| format!("C click failed: {}", e))?;
     enigo
         .key(Key::Control, enigo::Direction::Release)

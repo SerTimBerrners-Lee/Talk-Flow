@@ -86,7 +86,12 @@ export type WidgetTextOverlayStatus =
 
 export function shouldAutoDismissTextOverlay(
   status: WidgetTextOverlayStatus,
+  interactionActive = false,
 ): boolean {
+  if (interactionActive) {
+    return false;
+  }
+
   return status === "done" || status === "error";
 }
 
@@ -98,4 +103,18 @@ export interface WidgetTextOverlayState {
   requestId?: string;
   message?: string;
   liveSegments?: LiveTranslationSegment[];
+}
+
+export function createWidgetErrorOverlayState(
+  message: string,
+  requestId: string,
+): WidgetTextOverlayState {
+  return {
+    status: "error",
+    sourceText: "",
+    translatedText: "",
+    targetLanguage: "",
+    requestId,
+    message: message.trim(),
+  };
 }

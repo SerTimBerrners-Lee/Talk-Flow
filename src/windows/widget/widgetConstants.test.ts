@@ -4,6 +4,7 @@ import {
   CALL_BUBBLE_SIZE,
   CALL_STACK_WIDGET_HEIGHT,
   CALL_STACK_WIDGET_WIDTH,
+  createWidgetErrorOverlayState,
   FILE_DROP_STACK_WIDGET_HEIGHT,
   FILE_DROP_STACK_WIDGET_WIDTH,
   IDLE_WIDGET_WIDTH,
@@ -83,5 +84,22 @@ describe("widget text overlay", () => {
     expect(shouldAutoDismissTextOverlay("translating")).toBe(false);
     expect(shouldAutoDismissTextOverlay("dictating")).toBe(false);
     expect(shouldAutoDismissTextOverlay("liveTranslation")).toBe(false);
+  });
+
+  test("stays visible while the user reads an expanded error", () => {
+    expect(shouldAutoDismissTextOverlay("error", true)).toBe(false);
+  });
+
+  test("builds a dedicated bottom status payload for widget errors", () => {
+    expect(
+      createWidgetErrorOverlayState("  Ошибка вставки  ", "error-1"),
+    ).toEqual({
+      status: "error",
+      sourceText: "",
+      translatedText: "",
+      targetLanguage: "",
+      requestId: "error-1",
+      message: "Ошибка вставки",
+    });
   });
 });

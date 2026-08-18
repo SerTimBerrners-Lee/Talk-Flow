@@ -15,6 +15,7 @@ import {
 } from "../../lib/icons";
 import { SETTINGS_UPDATED_EVENT } from "../../lib/hotkeyEvents";
 import { applySavedTheme } from "../../lib/theme";
+import { WidgetErrorStatusBar } from "./WidgetErrorStatusBar";
 import {
   shouldAutoDismissTextOverlay,
   TEXT_OVERLAY_AUTO_DISMISS_MS,
@@ -32,7 +33,10 @@ const EMPTY_STATE: WidgetTextOverlayState = {
 export function WidgetTextOverlay(): ReactElement | null {
   const overlayWindow = getCurrentWindow();
   const [state, setState] = useState<WidgetTextOverlayState | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copiedTarget, setCopiedTarget] = useState<
+    "content" | "error" | null
+  >(null);
+  const [errorExpanded, setErrorExpanded] = useState(false);
   const [followingLatest, setFollowingLatest] = useState(true);
   const copiedResetTimerRef = useRef<number | null>(null);
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -59,14 +63,16 @@ export function WidgetTextOverlay(): ReactElement | null {
       if (!payload) {
         setState(null);
         setFollowingLatest(true);
+        setErrorExpanded(false);
         clearCopiedResetTimer();
-        setCopied(false);
+        setCopiedTarget(null);
         return;
       }
 
       setState({ ...EMPTY_STATE, ...payload });
+      setErrorExpanded(false);
       clearCopiedResetTimer();
-      setCopied(false);
+      setCopiedTarget(null);
     };
 
     const loadCachedPayload = (): void => {
@@ -136,12 +142,11 @@ export function WidgetTextOverlay(): ReactElement | null {
     (state?.status === "translating" && !translatedText) ||
     (state?.status === "dictating" && !translatedText) ||
     (state?.status === "liveTranslation" && !liveCopyText && !messageText);
-  const visibleText =
+  const primaryText =
     liveCopyText ||
     translatedText ||
-    (state?.status === "error" || state?.status === "liveTranslation"
-      ? messageText
-      : "");
+    (state?.status === "liveTranslation" ? messageText : "");
+  const errorMessage = state?.status === "error" ? messageText : "";
   const LoadingIcon =
     state?.status === "dictating"
       ? IconMicrophone
@@ -156,7 +161,7 @@ export function WidgetTextOverlay(): ReactElement | null {
         : "Копируем";
 
   useEffect(() => {
-    if (!visibleText) {
+    if (!primaryText) {
       return;
     }
 
@@ -171,7 +176,7 @@ export function WidgetTextOverlay(): ReactElement | null {
       }
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [followingLatest, visibleText]);
+  }, [followingLatest, primaryText]);
 
   useEffect(() => {
     setFollowingLatest(true);
@@ -194,9 +199,9 @@ export function WidgetTextOverlay(): ReactElement | null {
 
   useEffect(() => {
     if (
-      !visibleText ||
+      (!primaryText && !errorMessage) ||
       !state?.status ||
-      !shouldAutoDismissTextOverlay(state.status)
+      !shouldAutoDismissTextOverlay(state.status, errorExpanded)
     ) {
       return;
     }
@@ -212,7 +217,7 @@ export function WidgetTextOverlay(): ReactElement | null {
     }, TEXT_OVERLAY_AUTO_DISMISS_MS);
 
     return () => window.clearTimeout(timeout);
-  }, [state?.requestId, state?.status, visibleText]);
+  }, [errorExpanded, errorMessage, primaryText, state?.requestId, state?.status]);
 
   const handleDragPointerDown = (
     event: ReactPointerEvent<HTMLDivElement>,
@@ -265,8 +270,10 @@ export function WidgetTextOverlay(): ReactElement | null {
     );
   };
 
-  const copy = async (): Promise<void> => {
-    const textToCopy = liveCopyText || translatedText;
+  const copy = async (
+    textToCopy: string,
+    target: "content" | "error",
+  ): Promise<void> => {
     if (!textToCopy) {
       return;
     }
@@ -274,17 +281,17 @@ export function WidgetTextOverlay(): ReactElement | null {
     try {
       await writeText(textToCopy);
       clearCopiedResetTimer();
-      setCopied(true);
+      setCopiedTarget(target);
       copiedResetTimerRef.current = window.setTimeout(() => {
-        setCopied(false);
+        setCopiedTarget(null);
         copiedResetTimerRef.current = null;
       }, 1200);
     } catch {
-      setCopied(false);
+      setCopiedTarget(null);
     }
   };
 
-  if (!state || (!isLoading && !visibleText)) {
+  if (!state || (!isLoading && !primaryText && !errorMessage)) {
     return null;
   }
 
@@ -306,8 +313,8 @@ export function WidgetTextOverlay(): ReactElement | null {
       }}
     >
       <div
-        role="status"
-        aria-live="polite"
+        role={errorMessage ? undefined : "status"}
+        aria-live={errorMessage ? undefined : "polite"}
         onPointerDown={handleDragPointerDown}
         onPointerMove={(event) => {
           void handleDragPointerMove(event);
@@ -339,40 +346,40 @@ export function WidgetTextOverlay(): ReactElement | null {
             position: "absolute",
             top: 8,
             right: 8,
-            display: "flex",
+            display: errorExpanded ? "none" : "flex",
             gap: 4,
             zIndex: 2,
           }}
         >
-          <button
-            type="button"
-            aria-label="Скопировать текст"
-            title="Скопировать текст"
-            disabled={!visibleText}
-            onClick={() => {
-              void copy();
-            }}
-            onPointerDown={(event) => event.stopPropagation()}
-            style={{
-              width: 22,
-              height: 22,
-              border: "1px solid var(--border-subtle)",
-              borderRadius: 8,
-              background: "var(--control-bg)",
-              color: "var(--text-mid)",
-              display: "grid",
-              placeItems: "center",
-              padding: 0,
-              cursor: visibleText ? "pointer" : "default",
-              opacity: visibleText ? 1 : 0.45,
-            }}
-          >
-            {copied ? (
-              <IconCheck size={12} stroke={2.4} />
-            ) : (
-              <IconCopy size={12} stroke={2} />
-            )}
-          </button>
+          {primaryText ? (
+            <button
+              type="button"
+              aria-label="Скопировать текст"
+              title="Скопировать текст"
+              onClick={() => {
+                void copy(primaryText, "content");
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+              style={{
+                width: 22,
+                height: 22,
+                border: "1px solid var(--border-subtle)",
+                borderRadius: 8,
+                background: "var(--control-bg)",
+                color: "var(--text-mid)",
+                display: "grid",
+                placeItems: "center",
+                padding: 0,
+                cursor: "pointer",
+              }}
+            >
+              {copiedTarget === "content" ? (
+                <IconCheck size={12} stroke={2.4} />
+              ) : (
+                <IconCopy size={12} stroke={2} />
+              )}
+            </button>
+          ) : null}
           <button
             type="button"
             aria-label="Закрыть плашку"
@@ -428,6 +435,7 @@ export function WidgetTextOverlay(): ReactElement | null {
               style={{
                 flex: "1 1 auto",
                 minHeight: 0,
+                display: errorExpanded ? "none" : "block",
                 overflowY: "auto",
                 overflowX: "hidden",
                 overscrollBehavior: "contain",
@@ -523,7 +531,7 @@ export function WidgetTextOverlay(): ReactElement | null {
                   ))}
                 </div>
               ) : (
-                visibleText
+                primaryText
               )}
             </div>
             {!followingLatest && state.status === "liveTranslation" ? (
@@ -554,25 +562,18 @@ export function WidgetTextOverlay(): ReactElement | null {
                 <IconChevronDown size={11} stroke={2.2} />К последнему
               </button>
             ) : null}
-            {state?.status === "error" && translatedText && messageText ? (
-              <div
-                style={{
-                  flex: "0 0 auto",
-                  marginTop: 6,
-                  paddingTop: 6,
-                  borderTop: "1px solid var(--border-subtle)",
-                  color: "var(--text-low)",
-                  fontSize: 10,
-                  lineHeight: 1.35,
-                  fontWeight: 600,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
+            {errorMessage ? (
+              <WidgetErrorStatusBar
+                message={errorMessage}
+                copied={copiedTarget === "error"}
+                expanded={errorExpanded}
+                onCopy={() => {
+                  void copy(errorMessage, "error");
                 }}
-                title={messageText}
-              >
-                {messageText}
-              </div>
+                onToggleExpanded={() => {
+                  setErrorExpanded((value) => !value);
+                }}
+              />
             ) : null}
           </>
         )}
