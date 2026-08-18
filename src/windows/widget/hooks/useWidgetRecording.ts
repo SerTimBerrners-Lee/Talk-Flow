@@ -30,6 +30,7 @@ import {
   isSttStreamingEnabled,
   warmUpLiveDictationRuntime,
 } from "../services/dictationStreamOverlay";
+import { waitForRuntimeWarmUpWithinBudget } from "../services/runtimeWarmup";
 import type {
   WidgetAction,
   WidgetMachineState,
@@ -39,6 +40,7 @@ const LOW_MIC_GRACE_MS = 1800;
 const LOW_MIC_SUSTAINED_MS = 2600;
 const LOW_MIC_RMS_THRESHOLD = 0.012;
 const LOW_MIC_SAMPLE_INTERVAL_MS = 250;
+const LOCAL_RUNTIME_RECORDING_START_BUDGET_MS = 750;
 
 interface UseWidgetRecordingParams {
   settings: AppSettings | null;
@@ -404,18 +406,30 @@ export function useWidgetRecording({
 
       try {
         if (dictationStream && liveDictation) {
-          const runtimeEndpoint = liveWarmUpPromise
-            ? await liveWarmUpPromise
-            : null;
-          if (runtimeEndpoint === false) {
+          const warmUpResult = liveWarmUpPromise
+            ? await waitForRuntimeWarmUpWithinBudget(
+                liveWarmUpPromise,
+                LOCAL_RUNTIME_RECORDING_START_BUDGET_MS,
+              )
+            : { value: null, timedOut: false };
+          if (warmUpResult.timedOut) {
+            logInfo(
+              "DICTATION_STREAM",
+              `Local STT warm-up exceeded ${LOCAL_RUNTIME_RECORDING_START_BUDGET_MS}ms; recording will start with post-stop transcription fallback`,
+            );
+          }
+          if (warmUpResult.value === false || warmUpResult.timedOut) {
             await dictationStream.hide().catch(() => {});
             dictationStream.dispose();
             dictationStream = null;
             liveDictation = null;
-          } else if (runtimeEndpoint && liveDictation.provider === "local") {
+          } else if (
+            warmUpResult.value &&
+            liveDictation.provider === "local"
+          ) {
             liveDictation = {
               ...liveDictation,
-              endpoint: runtimeEndpoint,
+              endpoint: warmUpResult.value,
             };
           }
         }

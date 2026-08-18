@@ -248,6 +248,17 @@ sidecar for every request. Runtime readiness must probe both the buffered
 mistaken for a live-capable runtime. The Whisper runtime `/health` response also
 has a versioned live API contract; bump and validate it whenever that protocol
 changes.
+For managed local endpoints, the batch request model must come from the active
+local STT selection, never from the currently selected remote API adapter. The
+Rust request boundary must still fall back to any installed managed model when
+it receives a stale or unsupported remote model id.
+Recording startup must not wait for a cold local runtime indefinitely. Give the
+live warm-up only a short budget; when it is exceeded, begin microphone capture
+and use the normal post-stop batch path while warm-up continues in the
+background. A managed runtime that fails readiness must be terminated instead
+of being left to occupy another port. On Windows, app startup and the NSIS
+installer also clean up orphaned Talkis sidecars so an older `talkis-stt.exe`
+cannot block an update or be reused by a newer runtime protocol.
 
 ## Local Whisper Hallucination Guardrails
 

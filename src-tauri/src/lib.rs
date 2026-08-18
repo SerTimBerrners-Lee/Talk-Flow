@@ -91,6 +91,8 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             logger::log_info("INIT", "Application starting...");
+            #[cfg(windows)]
+            shutdown::cleanup_orphaned_sidecars();
             if let Err(err) = native_voice_recorder::init() {
                 logger::log_error(
                     "NATIVE_RECORDER",

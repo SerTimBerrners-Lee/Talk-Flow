@@ -43,6 +43,14 @@ It is designed for practical daily work: IDEs, chats, notes, CRM fields, email, 
 
 ## Latest Changes
 
+### v0.4.8
+
+- Windows upgrades now stop Talkis and every bundled local-model process before replacing files, preventing `Error opening file for writing ... talkis-stt.exe` and partially installed application/runtime combinations.
+- Talkis cleans up orphaned Windows sidecars on startup and terminates incompatible or timed-out managed STT runtimes, preventing stale processes from accumulating across ports and blocking future updates.
+- Local transcription now always sends the active local model to the managed runtime, even when a previously selected API adapter still stores a remote model such as `gpt-4o-transcribe`; the backend also falls back to an actually installed local model for migrated settings.
+- Voice capture no longer waits up to 15 seconds for a cold local streaming runtime: after a short warm-up budget it starts recording immediately and keeps the normal post-stop transcription fallback available.
+- The Windows release verifier now requires the NSIS install/uninstall cleanup hook and every bundled process name, so this upgrade protection is checked in release builds.
+
 ### v0.4.7
 
 - Local STT setup on Windows now starts the model download before launching the runtime, reads installed models directly from disk, warms the runtime in the background, bypasses system proxies for loopback requests, and records sidecar output for diagnostics.

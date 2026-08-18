@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use std::process::Command as StdCommand;
 use std::process::Stdio;
 use std::sync::{Mutex, OnceLock};
@@ -755,30 +755,9 @@ pub fn resolve_installed_model_for_runtime(
     let models_dir = resolve_models_dir(app, custom_dir)?;
 
     match kind {
-        LocalRuntimeKind::Whisper => {
-            if let Some(model) = local_model_info(requested) {
-                if models_dir.join(model.file_name).is_file() {
-                    return Ok(Some(model.id.to_string()));
-                }
-            }
-
-            for model_id in [
-                "whisper-medium",
-                "whisper-base",
-                "whisper-small",
-                "whisper-large-v3-turbo",
-                "whisper-large-v3",
-                "whisper-tiny",
-            ] {
-                if let Some(model) = local_model_info(model_id) {
-                    if models_dir.join(model.file_name).is_file() {
-                        return Ok(Some(model.id.to_string()));
-                    }
-                }
-            }
-
-            Ok(None)
-        }
+        LocalRuntimeKind::Whisper => Ok(resolve_installed_whisper_model(requested, |model| {
+            models_dir.join(model.file_name).is_file()
+        })),
         LocalRuntimeKind::Diarization => {
             if requested.eq_ignore_ascii_case(LOCAL_DIARIZATION_MODEL_ID)
                 && diarization_model_is_installed_in_dir(&models_dir)
@@ -789,6 +768,37 @@ pub fn resolve_installed_model_for_runtime(
             }
         }
     }
+}
+
+fn resolve_installed_whisper_model(
+    requested: &str,
+    mut is_installed: impl FnMut(&LocalModelInfo) -> bool,
+) -> Option<String> {
+    if let Some(model) = local_model_info(requested) {
+        if is_installed(model) {
+            return Some(model.id.to_string());
+        }
+    }
+
+    for model_id in [
+        "whisper-medium",
+        "whisper-base",
+        "whisper-small",
+        "whisper-large-v3-turbo",
+        "whisper-large-v3",
+        "whisper-tiny",
+    ] {
+        if let Some(model) = local_model_info(model_id) {
+            if is_installed(model) {
+                return Some(model.id.to_string());
+            }
+        }
+    }
+
+    LOCAL_WHISPER_MODELS
+        .iter()
+        .find(|model| is_installed(model))
+        .map(|model| model.id.to_string())
 }
 
 fn runtime_executable_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -1143,7 +1153,34 @@ fn stop_stale_managed_runtime(kind: LocalRuntimeKind, port: u16) -> Result<(), S
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn stop_stale_managed_runtime(kind: LocalRuntimeKind, _port: u16) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let image_name = format!("{}.exe", kind.runtime_name());
+    let output = StdCommand::new("taskkill")
+        .args(["/F", "/T", "/IM", &image_name])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|err| {
+            format!("Не удалось проверить старый локальный runtime {image_name}: {err}")
+        })?;
+
+    if output.status.success() {
+        logger::log_info(
+            "LOCAL_STT",
+            &format!("Stopped stale Windows managed runtime: {image_name}"),
+        );
+        Ok(())
+    } else {
+        Err(format!(
+            "Не найден процесс старого локального runtime {image_name} для остановки."
+        ))
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
 fn stop_stale_managed_runtime(_kind: LocalRuntimeKind, _port: u16) -> Result<(), String> {
     Err(
         "Автоматическая остановка старого локального runtime недоступна на этой платформе."
@@ -1452,6 +1489,13 @@ pub async fn ensure_runtime(
         remember_runtime_endpoint(kind, runtime_base_url.clone());
         Ok(runtime_base_url)
     } else {
+        forget_runtime_endpoint(kind);
+        if let Err(err) = stop_stale_managed_runtime(kind, runtime_port) {
+            logger::log_error(
+                "LOCAL_STT",
+                &format!("Failed to stop runtime after readiness timeout: {err}"),
+            );
+        }
         Err("Локальный STT runtime запущен, но не успел стать доступным. Повторите установку модели через минуту.".to_string())
     }
 }
@@ -1553,6 +1597,18 @@ mod tests {
                 models_dir.join(expected_marker)
             );
         }
+    }
+
+    #[test]
+    fn stale_api_model_falls_back_to_an_installed_streaming_model() {
+        let selected = resolve_installed_whisper_model("gpt-4o-transcribe", |model| {
+            model.id == "nvidia/nemotron-3.5-asr-streaming-0.6b"
+        });
+
+        assert_eq!(
+            selected.as_deref(),
+            Some("nvidia/nemotron-3.5-asr-streaming-0.6b")
+        );
     }
 
     #[test]

@@ -3,6 +3,7 @@ import {
   closeSync,
   existsSync,
   openSync,
+  readFileSync,
   readSync,
   readdirSync,
 } from "node:fs";
@@ -15,6 +16,43 @@ const expectedTargetTriple =
   process.env.TALKIS_WINDOWS_TARGET_TRIPLE || "x86_64-pc-windows-msvc";
 const IMAGE_FILE_MACHINE_I386 = 0x014c;
 const IMAGE_FILE_MACHINE_AMD64 = 0x8664;
+const REQUIRED_INSTALLER_PROCESS_NAMES = [
+  "Talkis.exe",
+  "talkis-stt.exe",
+  "talkis-diarize.exe",
+  "talkis-llm.exe",
+  "talkis-ffmpeg.exe",
+];
+
+function verifyInstallerHooks() {
+  const configPath = join(tauriDir, "tauri.conf.json");
+  const config = JSON.parse(readFileSync(configPath, "utf8"));
+  const relativeHookPath = config.bundle?.windows?.nsis?.installerHooks;
+  if (typeof relativeHookPath !== "string" || relativeHookPath.length === 0) {
+    throw new Error("Windows NSIS installerHooks is not configured");
+  }
+
+  const hookPath = join(tauriDir, relativeHookPath);
+  if (!existsSync(hookPath)) {
+    throw new Error(`Windows NSIS installer hook is missing: ${hookPath}`);
+  }
+
+  const source = readFileSync(hookPath, "utf8");
+  for (const macro of ["NSIS_HOOK_PREINSTALL", "NSIS_HOOK_PREUNINSTALL"]) {
+    if (!source.includes(`!macro ${macro}`)) {
+      throw new Error(`Windows NSIS installer hook is missing ${macro}`);
+    }
+  }
+  for (const imageName of REQUIRED_INSTALLER_PROCESS_NAMES) {
+    if (!source.includes(`\"${imageName}\"`)) {
+      throw new Error(
+        `Windows NSIS installer hook does not stop ${imageName}`,
+      );
+    }
+  }
+
+  console.log(`Verified Windows NSIS process cleanup hook: ${hookPath}`);
+}
 
 function parsePeMachine(header, label) {
   if (header.length < 64 || header.toString("ascii", 0, 2) !== "MZ") {
@@ -94,6 +132,7 @@ function runSelfTest() {
 
 if (process.argv.includes("--self-test")) {
   runSelfTest();
+  verifyInstallerHooks();
   process.exit(0);
 }
 
@@ -114,6 +153,8 @@ if (rustHost !== expectedTargetTriple) {
     `Windows release host is ${rustHost || "(unknown)"}; expected ${expectedTargetTriple}`,
   );
 }
+
+verifyInstallerHooks();
 
 const releaseDir = join(tauriDir, "target", "release");
 const binariesDir = join(tauriDir, "binaries");

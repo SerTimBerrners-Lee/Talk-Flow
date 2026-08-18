@@ -9,7 +9,6 @@ import {
   readHistoryAudio,
   saveHistoryAudio,
 } from "../../../lib/store";
-import { batchFallbackModel } from "../../../lib/realtimeModels";
 import { logError, logInfo } from "../../../lib/logger";
 import { tn } from "../../../lib/i18n";
 import { formatErrorMessage } from "../../../lib/utils";
@@ -41,6 +40,7 @@ import {
   isClearlySilentAudio,
   type AudioSignalStats,
 } from "./transcriptionGuard";
+import { resolveBatchTranscriptionModel } from "./transcriptionModel";
 
 export interface ProcessRecordingBlobParams {
   blob: Blob;
@@ -490,12 +490,7 @@ async function transcribeViaBackend({
   settings: AppSettings;
   streamingRequestId?: string | null;
 }): Promise<TranscriptionResult> {
-  const configuredAdapterModel =
-    settings.apiAdapters[settings.selectedApiAdapter]?.model?.trim();
-  const whisperModel = batchFallbackModel(
-    settings.selectedApiAdapter,
-    configuredAdapterModel || settings.whisperModel || "",
-  );
+  const whisperModel = resolveBatchTranscriptionModel(settings);
   logInfo("API", `Sending to backend, audio_size: ${audioBase64.length} chars`);
 
   const result = await invoke<{ raw: string; cleaned: string }>(

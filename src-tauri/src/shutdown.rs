@@ -16,6 +16,15 @@ pub fn quit(app: &AppHandle) {
 }
 
 #[cfg(windows)]
+pub fn cleanup_orphaned_sidecars() {
+    logger::log_info(
+        "SHUTDOWN",
+        "Cleaning up orphaned Windows sidecars from a previous app session",
+    );
+    terminate_sidecar_processes();
+}
+
+#[cfg(windows)]
 fn terminate_sidecar_processes() {
     use std::os::windows::process::CommandExt;
     use std::process::Command;

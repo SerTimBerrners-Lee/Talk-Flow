@@ -654,7 +654,7 @@ const BUILTIN_PROMPT_ID_SET = new Set(
   BUILTIN_PROMPTS.map((preset) => preset.id),
 );
 
-function isLocalSttEndpoint(endpoint?: string): boolean {
+export function isLocalSttEndpoint(endpoint?: string): boolean {
   return /127\.0\.0\.1|localhost/i.test(endpoint || "");
 }
 
