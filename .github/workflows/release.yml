@@ -99,13 +99,6 @@ jobs:
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Import macOS Developer ID certificate
-        if: matrix.platform == 'macos'
-        uses: apple-actions/import-codesign-certs@v3
-        with:
-          p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
-          p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-
       - name: Install Linux Tauri dependencies
         if: matrix.platform == 'linux'
         run: |
@@ -152,7 +145,6 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ matrix.platform == 'macos' && secrets.APPLE_SIGNING_IDENTITY || '' }}
 
       - name: Verify Windows x64 release architecture
         if: matrix.platform == 'windows'
@@ -249,13 +241,14 @@ jobs:
           body: |
             Automated release for ${{ env.RELEASE_TAG }}.
 
-            This release publishes native Tauri bundles built on macOS, Windows, and Linux runners. The macOS bundle is signed with a stable Developer ID identity so system permissions survive application updates.
+            This release publishes native Tauri bundles built on macOS, Windows, and Linux runners.
 
             ### Первый запуск / First launch
 
-            Windows-сборка пока без платной подписи кода — это **не вирус** (исходники открыты, AGPL-3.0). Если ОС блокирует запуск:
-            The Windows build is not code-signed yet — this is **not malware** (open source, AGPL-3.0). If your OS blocks it:
+            Сборки пока без платной подписи кода — это **не вирус** (исходники открыты, AGPL-3.0). Если ОС блокирует запуск:
+            The builds are not code-signed yet — this is **not malware** (open source, AGPL-3.0). If your OS blocks it:
 
+            - **macOS** — «не удалось проверить» / "could not verify": нажмите **Готово/Done**, затем **Системные настройки → Конфиденциальность и безопасность → Всё равно открыть** (System Settings → Privacy & Security → Open Anyway). Или: `xattr -dr com.apple.quarantine /Applications/Talkis.app`
             - **Windows** — SmartScreen «защитил ПК» / "protected your PC": **Подробнее → Выполнить в любом случае** (More info → Run anyway).
           draft: false
           prerelease: ${{ contains(env.RELEASE_TAG, '-') }}

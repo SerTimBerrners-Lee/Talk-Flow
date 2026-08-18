@@ -354,11 +354,6 @@ code-signing identity. An ad-hoc signature uses a designated requirement tied
 to the binary's changing CDHash, so rebuilding makes TCC treat the next process
 as a different application even when the old checkbox remains visible.
 
-Distributed macOS updates need the same stability. Release and preflight builds
-must use one `Developer ID Application` identity and reject ad-hoc signatures;
-otherwise Accessibility permission is tied to changing code and users have to
-remove and re-add Talkis after every update.
-
 Microphone status should be read from AVFoundation without starting an audio
 session. System-audio access must first be confirmed with the existing short
 Core Audio capture probe. Only a successful probe may write the versioned

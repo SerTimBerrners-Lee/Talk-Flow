@@ -252,7 +252,7 @@ Download the latest build from GitHub Releases:
 
 ### If your OS blocks the first launch
 
-The macOS release workflow now requires a stable Developer ID identity so system permissions remain attached to the application across future updates. Older macOS downloads were ad-hoc signed, so the first Developer ID update can require one final permission grant; later signed updates keep the same identity. Gatekeeper can still show a first-launch warning until notarization is enabled. The Windows installer is currently distributed **without paid code signing**, so SmartScreen can show an "unverified app" warning. This is **not malware**: the source is open (AGPL-3.0) and the builds are produced by the public GitHub Actions workflow in this repo.
+Talkis is currently distributed **without paid code signing**, so Gatekeeper (macOS) and SmartScreen (Windows) show an "unverified app" warning. This is **not malware**: the source is open (AGPL-3.0) and the builds are produced by the public GitHub Actions workflow in this repo. How to open it:
 
 **macOS** — "Apple could not verify Talkis is free of malware":
 
