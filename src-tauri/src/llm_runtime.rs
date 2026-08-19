@@ -13,7 +13,11 @@ use tokio::io::AsyncWriteExt;
 /// Name of the bundled `llama-server` sidecar (prepared by prepare-llm-sidecar.mjs).
 const LLM_RUNTIME_NAME: &str = "talkis-llm";
 const LLM_DEFAULT_PORT: u16 = 8011;
-const LLM_CONTEXT_SIZE: u32 = 8192;
+// Keep the managed runtime usable alongside local STT on 8–16 GB Windows
+// machines. An 8192-token context can exhaust memory while llama.cpp creates
+// its first context: the process exits before the selected model is persisted,
+// so chat continues to report that no text model is configured.
+const LLM_CONTEXT_SIZE: u32 = 4096;
 pub const LLM_DOWNLOAD_PROGRESS_EVENT: &str = "local-llm-model-download-progress";
 
 #[derive(Clone, Copy)]
@@ -720,6 +724,11 @@ mod tests {
         assert!(ids.contains(&"qwen3-4b-instruct-q4"));
         assert!(ids.contains(&"qwen3-8b-instruct-q4"));
         assert!(LLM_CATALOG[0].recommended);
+    }
+
+    #[test]
+    fn managed_runtime_uses_memory_safe_context_size() {
+        assert_eq!(LLM_CONTEXT_SIZE, 4096);
     }
 
     #[test]

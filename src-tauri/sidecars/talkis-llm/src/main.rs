@@ -21,7 +21,10 @@ use llama_cpp_2::TokenToStringError;
 const SERVER_NAME: &str = "talkis-llm";
 const ENGINE_NAME: &str = "llama.cpp";
 const MAX_REQUEST_BYTES: usize = 8 * 1024 * 1024;
-const DEFAULT_CTX: u32 = 8192;
+// The sidecar often runs together with local STT. Keep its default aligned
+// with the desktop launcher so creating the first inference context does not
+// exhaust memory on supported 8–16 GB Windows machines.
+const DEFAULT_CTX: u32 = 4096;
 const DEFAULT_MAX_TOKENS: i32 = 1024;
 
 struct Config {
